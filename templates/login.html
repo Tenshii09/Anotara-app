@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Sign In — TravelAI{% endblock %}
+
+{% block content %}
+<div class="container-fluid d-flex align-items-center justify-content-center" style="min-height: 100vh; padding-top: 120px; padding-bottom: 40px;">
+  <div class="col-11 col-md-6 col-lg-4">
+    
+    <div class="text-center mb-5 fade-in-up">
+      <h1 class="display-4 serif fw-bold mb-3">Welcome back.</h1>
+      <p class="text-muted fs-5">Enter your details to access your itineraries.</p>
+    </div>
+
+    <form method="POST" action="{{ url_for('login') }}">
+      
+      <div class="mb-4 fade-in-up delay-1">
+        <input type="text" class="form-control form-control-lg border-0 border-bottom border-dark rounded-0 px-2 py-3 shadow-none bg-transparent" style="font-size: 1.1rem; font-weight: 500;" name="identifier" placeholder="Username or Email" required>
+      </div>
+      
+      <div class="mb-5 fade-in-up delay-2">
+        <input type="password" class="form-control form-control-lg border-0 border-bottom border-dark rounded-0 px-2 py-3 shadow-none bg-transparent" style="font-size: 1.1rem; font-weight: 500;" name="password" placeholder="Password" required>
+      </div>
+
+      <div class="fade-in-up delay-3 text-center">
+        <button type="submit" class="btn-luxury w-100 mb-4 py-3">Sign In</button>
+        <p class="text-muted fw-medium">
+          New to TravelAI? 
+          <a href="{{ url_for('register') }}" class="text-dark fw-bold text-decoration-none border-bottom border-dark pb-1">Create an account</a>
+        </p>
+      </div>
+
+    </form>
+    
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% block title %}Your Journey — TravelAI{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="padding-top: 100px; max-width: 1400px;">
+  
+  <div class="row g-0 g-xl-5">
+    
+    <!-- Left Column: The Details -->
+    <div class="col-lg-6 col-xl-5 pe-lg-4 mb-5">
+      
+      <div class="fade-in-up mb-5">
+        <a href="{{ url_for('dashboard') }}" class="text-muted text-decoration-none fw-medium small text-uppercase tracking-wide mb-3 d-inline-block">
+          <i class="bi bi-arrow-left"></i> Edit Details
+        </a>
+        <h1 class="display-4 serif fw-bold mb-2">{{ destination }}</h1>
+        <p class="text-muted fs-5">
+          {{ num_days }} Days • {{ budget | title }} Class
+        </p>
+      </div>
+
+      <div class="itinerary-timeline">
+        <!-- Namespace to keep a continuous counter across day loops -->
+        {% set seq = namespace(num=1) %}
+        
+        {% for day, places in itinerary.items() %}
+        <div class="fade-in-up delay-{{ loop.index % 3 + 1 }} mb-5">
+          
+          <div class="d-flex align-items-center mb-4">
+            <div class="day-badge me-3">{{ day }}</div>
+            <h3 class="serif m-0">Day {{ day }}</h3>
+          </div>
+
+          {% if places %}
+            {% for place in places %}
+            
+            <!-- Stay Duration Mapping based on Category -->
+            {% set dur_map = {'food': '1.5 hrs', 'beach': '4.0 hrs', 'nature': '3.0 hrs', 'museums': '2.5 hrs', 'nightlife': '3.0 hrs', 'sightseeing': '2.0 hrs'} %}
+            {% set est_time = dur_map.get(place.category, '2.0 hrs') %}
+
+            <div class="itinerary-card d-flex align-items-start gap-3">
+              <div class="flex-grow-1">
+                <h5 class="fw-bold mb-1">
+                  <span class="text-primary me-1">{{ seq.num }}.</span> {{ place.name }}
+                </h5>
+                
+                <span class="badge bg-light text-dark border rounded-pill px-3 py-2 fw-medium mb-3 mt-1">
+                  {{ place.category | title }}
+                </span>
+                
+                <div class="d-flex align-items-center text-muted small">
+                  <div class="text-warning me-3">
+                    <i class="bi bi-star-fill"></i> {{ place.rating }}
+                  </div>
+                  <div class="me-3 text-primary fw-medium">
+                    <i class="bi bi-clock-history"></i> {{ est_time }}
+                  </div>
+                  <div class="text-success">
+                    <i class="bi bi-geo-alt-fill"></i> Verified
+                  </div>
+                </div>
+              </div>
+
+              <!-- Button now triggers the map focus function -->
+              <button class="btn btn-light rounded-circle p-2 border" 
+                      onclick="focusPlace({{ place.latitude }}, {{ place.longitude }}, '{{ place.name }}')">
+                <i class="bi bi-arrow-up-right"></i>
+              </button>
+            </div>
+            
+            {% set seq.num = seq.num + 1 %}
+            {% endfor %}
+          {% else %}
+            <div class="itinerary-card bg-transparent border-dashed text-center p-5">
+              <p class="text-muted mb-0 fw-medium">Free time for spontaneous exploration.</p>
+            </div>
+          {% endif %}
+          
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Right Column: The Sticky Map -->
+    <div class="col-lg-6 col-xl-7 d-none d-lg-block fade-in-up delay-2">
+      <div class="position-sticky" style="top: 100px;">
+        <div id="map" class="shadow-lg" style="height: calc(100vh - 140px); border-radius: 32px; overflow: hidden; border: 1px solid var(--border-light);"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- 1. Add the Routing Machine CSS and JS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+<!-- 2. Your existing map script -->
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+      const itineraryData = {{ itinerary | tojson }};
+      initMap(itineraryData);
+  });
+</script>
+{% endblock %}

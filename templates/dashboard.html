@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+{% block title %}Design Your Journey — TravelAI{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-0 m-0">
+  
+  <a href="{{ url_for('my_trips') }}" class="position-absolute top-0 start-0 m-4 text-muted text-decoration-none fw-medium z-3 fade-in-up">
+    <i class="bi bi-arrow-left me-1"></i> Exit Planner
+  </a>
+
+  <form method="POST" action="{{ url_for('dashboard') }}" id="wizardForm" class="wizard-container">
+    
+    <input type="hidden" name="destination" id="final_destination">
+
+    <div class="wizard-step active text-center px-3" id="step-1">
+      <p class="text-muted text-uppercase tracking-wide fw-bold mb-2 fade-in-up"><i class="bi bi-globe"></i> Step 1 of 4</p>
+      <h1 class="display-3 serif mb-5 fade-in-up delay-1">Which country are you exploring?</h1>
+      
+      <div class="fade-in-up delay-2">
+        <input type="text" class="input-massive w-100 mb-5" id="country_input" placeholder="e.g. Japan, Italy, France" autocomplete="off" autofocus>
+      </div>
+
+      <div class="fade-in-up delay-3">
+        <button type="button" class="btn-luxury btn-lg w-100" onclick="goToStep(2)">
+          Press Enter <i class="bi bi-arrow-return-left ms-2"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="wizard-step text-center px-3" id="step-2">
+      <p class="text-muted text-uppercase tracking-wide fw-bold mb-2"><i class="bi bi-geo-alt"></i> Step 2 of 4</p>
+      <h1 class="display-4 serif mb-5">Where exactly in <span id="dynamic_country" style="color: var(--accent); font-style: italic;">that country</span>?</h1>
+      
+      <div>
+        <input type="text" class="input-massive w-100 mb-5" id="city_input" placeholder="e.g. City, island, or specific region" autocomplete="off">
+      </div>
+
+      <div class="d-flex justify-content-center gap-3">
+        <button type="button" class="btn-outline-luxury" onclick="goToStep(1)"><i class="bi bi-arrow-up"></i></button>
+        <button type="button" class="btn-luxury px-5" onclick="goToStep(3)">
+          Press Enter <i class="bi bi-arrow-return-left ms-2"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="wizard-step text-center px-3" id="step-3">
+      <p class="text-muted text-uppercase tracking-wide fw-bold mb-2"><i class="bi bi-calendar-week"></i> Step 3 of 4</p>
+      <h1 class="display-4 serif mb-5">How many days do you have?</h1>
+      
+      <div class="bento-grid mb-5 px-md-5">
+        {% for d in [2, 3, 5, 7] %}
+        <div class="bento-item">
+          <input type="radio" name="num_days" value="{{ d }}" id="day_{{ d }}" {% if d==3 %}checked{% endif %}>
+          <label class="bento-label" for="day_{{ d }}">
+            <h2 class="m-0 serif">{{ d }}</h2>
+            <span class="text-muted small fw-medium mt-1">Days</span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="d-flex justify-content-center gap-3">
+        <button type="button" class="btn-outline-luxury" onclick="goToStep(2)"><i class="bi bi-arrow-up"></i></button>
+        <button type="button" class="btn-luxury px-5" onclick="goToStep(4)">Continue</button>
+      </div>
+    </div>
+
+    <div class="wizard-step text-center px-3" id="step-4">
+      <p class="text-muted text-uppercase tracking-wide fw-bold mb-2"><i class="bi bi-stars"></i> Final Step</p>
+      <h1 class="display-4 serif mb-5">Curate your experience.</h1>
+      
+      <p class="fw-bold mb-3 text-start px-md-4">What interests you?</p>
+      <div class="bento-grid mb-5 px-md-4">
+        {% set prefs = [('food', 'bi-cup-hot', 'Culinary'), ('beach', 'bi-water', 'Coastal'), ('nature', 'bi-tree', 'Nature'), ('museums', 'bi-bank', 'Heritage'), ('nightlife', 'bi-moon-stars', 'Nightlife')] %}
+        {% for value, icon, label in prefs %}
+        <div class="bento-item">
+          <input type="checkbox" name="preferences" value="{{ value }}" id="pref_{{ value }}">
+          <label class="bento-label p-3" for="pref_{{ value }}">
+            <i class="bi {{ icon }} mb-2 fs-3"></i>
+            <span class="fw-medium">{{ label }}</span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <p class="fw-bold mb-3 text-start px-md-4">Travel Style</p>
+      <div class="bento-grid mb-5 px-md-4">
+        {% for val, lbl in [('low', 'Backpacker'), ('medium', 'Comfort'), ('high', 'Luxury')] %}
+        <div class="bento-item">
+          <input type="radio" name="budget" value="{{ val }}" id="budget_{{ val }}" {% if val == 'medium' %}checked{% endif %}>
+          <label class="bento-label p-3" for="budget_{{ val }}">
+            <span class="fw-medium">{{ lbl }}</span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="d-flex justify-content-center gap-3">
+        <button type="button" class="btn-outline-luxury" onclick="goToStep(3)"><i class="bi bi-arrow-up"></i></button>
+        <button type="submit" id="submitBtn" class="btn-luxury px-5">Craft My Itinerary <i class="bi bi-arrow-right ms-1"></i></button>
+      </div>
+    </div>
+
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Handle 'Enter' key to progress inputs smoothly
+  document.getElementById('country_input').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault(); 
+      goToStep(2);
+    }
+  });
+
+  document.getElementById('city_input').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault(); 
+      goToStep(3);
+    }
+  });
+
+  // Smooth Step Transitions & Validations
+  function goToStep(stepNum) {
+    
+    // --- Validation & Logic for Step 1 -> 2 ---
+    if(stepNum === 2) {
+        const country = document.getElementById('country_input').value.trim();
+        if(country === "") {
+            document.getElementById('country_input').style.borderBottomColor = 'red';
+            return;
+        }
+        document.getElementById('country_input').style.borderBottomColor = '';
+        
+        // Dynamically update the text on Step 2 to feel personalized!
+        document.getElementById('dynamic_country').innerText = country;
+        
+        // Auto-focus the next input after the animation completes
+        setTimeout(() => document.getElementById('city_input').focus(), 500);
+    }
+
+    // --- Validation for Step 2 -> 3 ---
+    if(stepNum === 3) {
+        if(document.getElementById('city_input').value.trim() === "") {
+            document.getElementById('city_input').style.borderBottomColor = 'red';
+            return;
+        }
+        document.getElementById('city_input').style.borderBottomColor = '';
+    }
+
+    // --- Animation Logic ---
+    document.querySelectorAll('.wizard-step').forEach((step, index) => {
+      step.classList.remove('active');
+      // Push completed steps upward
+      if(index + 1 < stepNum) {
+        step.classList.add('completed');
+      } else {
+        step.classList.remove('completed');
+      }
+    });
+    
+    // Activate target step
+    document.getElementById('step-' + stepNum).classList.add('active');
+  }
+
+  // Intercept the form submission to combine Country + City
+  document.getElementById('wizardForm').addEventListener('submit', function(e) {
+    const country = document.getElementById('country_input').value.trim();
+    const city = document.getElementById('city_input').value.trim();
+    
+    // Set the hidden input value (e.g., "Tokyo, Japan") for the Geoapify API
+    document.getElementById('final_destination').value = city + ", " + country;
+
+    // Loading State UI
+    const btn = document.getElementById('submitBtn');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Designing...';
+    btn.classList.add('disabled');
+  });
+</script>
+{% endblock %}

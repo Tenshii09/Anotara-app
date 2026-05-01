@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+{% block title %}My Journeys — TravelAI{% endblock %}
+
+{% block content %}
+<div class="container" style="padding-top: 120px; max-width: 1200px;">
+  
+  <form id="bulkDeleteForm" action="{{ url_for('delete_trips') }}" method="POST">
+    
+    <div class="d-flex flex-wrap justify-content-between align-items-end mb-5 fade-in-up">
+      <div>
+        <h1 class="display-4 serif fw-bold mb-2">Your Journeys.</h1>
+        <p class="text-muted fs-5 m-0">A collection of your curated itineraries.</p>
+      </div>
+      
+      <div class="d-flex gap-2 mt-4 mt-md-0">
+        <button type="button" id="toggleDeleteMode" class="btn-outline-luxury border-danger text-danger">
+          <i class="bi bi-trash3 me-2"></i>Delete Mode
+        </button>
+        
+        <button type="submit" id="confirmDeleteBtn" class="btn btn-danger rounded-pill px-4 d-none" 
+                onclick="return confirm('Delete selected journeys?');">
+          Confirm Deletion
+        </button>
+
+        <a href="{{ url_for('dashboard') }}" class="btn-luxury text-decoration-none">
+          <i class="bi bi-plus-lg me-2"></i>New Trip
+        </a>
+      </div>
+    </div>
+
+    {% if trips %}
+      <div class="row g-4">
+        {% for trip in trips %}
+        <div class="col-md-6 col-lg-4 fade-in-up delay-{{ loop.index % 3 + 1 }}">
+          <div class="itinerary-card h-100 d-flex flex-column position-relative overflow-hidden" id="card_{{ trip.id }}">
+            
+            <div class="delete-overlay d-none position-absolute w-100 h-100 d-flex align-items-center justify-content-center" 
+                 style="background: rgba(0,0,0,0.02); z-index: 20; cursor: pointer;"
+                 onclick="toggleSelection('{{ trip.id }}')">
+                <input type="checkbox" name="trip_ids" value="{{ trip.id }}" id="check_{{ trip.id }}" 
+                       class="form-check-input" style="transform: scale(1.8); cursor: pointer;">
+            </div>
+
+            <a href="#" class="text-decoration-none text-dark d-block">
+              <div class="mb-4">
+                <span class="badge bg-dark text-white rounded-pill px-3 py-2 fw-medium mb-3">
+                  <i class="bi bi-geo-alt-fill me-1"></i> {{ trip.total_places }} Stops
+                </span>
+                <h3 class="serif fw-bold mb-2">{{ trip.trip_name }}</h3>
+                <p class="text-muted small fw-medium text-uppercase tracking-wide">
+                  Created {{ trip.created_at.strftime('%B %d, %Y') if trip.created_at else 'Recently' }}
+                </p>
+              </div>
+
+              <div class="mt-auto pt-4 border-top border-light d-flex align-items-center justify-content-between text-dark fw-bold">
+                <span>View Details</span>
+                <div class="bg-light rounded-circle d-flex align-items-center justify-content-center" style="width: 35px; height: 35px;">
+                  <i class="bi bi-arrow-right"></i>
+                </div>
+              </div>
+            </a>
+
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-center py-5 mt-5">
+          <h2 class="serif">No journeys saved yet.</h2>
+      </div>
+    {% endif %}
+  </form>
+</div>
+
+<script>
+  const toggleBtn = document.getElementById('toggleDeleteMode');
+  const confirmBtn = document.getElementById('confirmDeleteBtn');
+  const overlays = document.querySelectorAll('.delete-overlay');
+
+  toggleBtn.addEventListener('click', () => {
+      const isActivating = confirmBtn.classList.contains('d-none');
+      
+      if(isActivating) {
+          confirmBtn.classList.remove('d-none');
+          toggleBtn.innerText = "Cancel";
+          toggleBtn.classList.replace('text-danger', 'text-secondary');
+          overlays.forEach(el => el.classList.remove('d-none'));
+      } else {
+          confirmBtn.classList.add('d-none');
+          toggleBtn.innerHTML = '<i class="bi bi-trash3 me-2"></i>Delete Mode';
+          toggleBtn.classList.replace('text-secondary', 'text-danger');
+          overlays.forEach(el => {
+              el.classList.add('d-none');
+              el.parentElement.style.border = "1px solid rgba(255, 255, 255, 0.4)";
+              el.parentElement.style.background = "rgba(255, 255, 255, 0.55)";
+          });
+          document.querySelectorAll('input[name="trip_ids"]').forEach(i => i.checked = false);
+      }
+  });
+
+  // Updated Selection Logic for better visual feedback
+  function toggleSelection(id) {
+      const cb = document.getElementById('check_' + id);
+      const card = document.getElementById('card_' + id);
+      cb.checked = !cb.checked;
+      
+      if(cb.checked) {
+          card.style.border = "3px solid #e11d48";
+          card.style.background = "rgba(225, 29, 72, 0.05)";
+      } else {
+          card.style.border = "1px solid rgba(255, 255, 255, 0.4)";
+          card.style.background = "rgba(255, 255, 255, 0.55)";
+      }
+  }
+</script>
+{% endblock %}
