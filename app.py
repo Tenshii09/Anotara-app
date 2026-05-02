@@ -1,11 +1,10 @@
-# app.py — Main Flask application
-# Travel Planner with Auth + Recommendation Engine
+# app.py — Anotara: Philippines Travel Planner
+# Mapbox (maps + geocoding) + Geoapify (places)
 
 from flask import (
     Flask, render_template, request,
     redirect, url_for, session, flash, jsonify
 )
-
 from flask_bcrypt import Bcrypt
 import mysql.connector
 import requests
@@ -20,16 +19,45 @@ app = Flask(__name__)
 app.config.from_object(Config)
 bcrypt = Bcrypt(app)
 
+# ── Philippines bounding box ──────────────────
+# Used to validate that searched destinations are inside the Philippines
+PH_BOUNDS = {
+    'min_lat':  4.5,
+    'max_lat': 21.5,
+    'min_lon': 116.0,
+    'max_lon': 127.0
+}
+
+# Popular Philippine destinations for autocomplete / suggestions
+# Popular Philippine destinations for autocomplete / suggestions
+# The 82 Official Philippine Provinces for autocomplete
+PH_DESTINATIONS = [
+    'Abra', 'Agusan del Norte', 'Agusan del Sur', 'Aklan', 'Albay', 'Antique', 
+    'Apayao', 'Aurora', 'Basilan', 'Bataan', 'Batanes', 'Batangas', 'Benguet', 
+    'Biliran', 'Bohol', 'Bukidnon', 'Bulacan', 'Cagayan', 'Camarines Norte',  
+    'Camarines Sur', 'Camiguin', 'Capiz', 'Catanduanes', 'Cavite', 'Cebu', 
+    'Cotabato', 'Davao de Oro', 'Davao del Norte', 'Davao del Sur', 
+    'Davao Occidental', 'Davao Oriental', 'Dinagat Islands', 'Eastern Samar', 
+    'Guimaras', 'Ifugao', 'Ilocos Norte', 'Ilocos Sur', 'Iloilo', 'Isabela', 
+    'Kalinga', 'La Union', 'Laguna', 'Lanao del Norte', 'Lanao del Sur', 
+    'Leyte', 'Maguindanao del Norte', 'Maguindanao del Sur', 'Marinduque', 
+    'Masbate', 'Misamis Occidental', 'Misamis Oriental', 'Mountain Province', 
+    'Negros Occidental', 'Negros Oriental', 'Northern Samar', 'Nueva Ecija', 
+    'Nueva Vizcaya', 'Occidental Mindoro', 'Oriental Mindoro', 'Palawan', 
+    'Pampanga', 'Pangasinan', 'Quezon', 'Quirino', 'Rizal', 'Romblon', 
+    'Samar', 'Sarangani', 'Siquijor', 'Sorsogon', 'South Cotabato', 
+    'Southern Leyte', 'Sultan Kudarat', 'Sulu', 'Surigao del Norte', 
+    'Surigao del Sur', 'Tarlac', 'Tawi-Tawi', 'Zambales', 
+    'Zamboanga del Norte', 'Zamboanga del Sur', 'Zamboanga Sibugay'
+]
+
 
 # ─────────────────────────────────────────────
 # Database Helper
 # ─────────────────────────────────────────────
 
 def get_db():
-    """
-    Opens and returns a MySQL connection.
-    Called at the start of each route that needs DB access.
-    """
+    """Opens and returns a MySQL connection."""
     return mysql.connector.connect(
         host     = app.config['DB_HOST'],
         user     = app.config['DB_USER'],
@@ -39,10 +67,7 @@ def get_db():
 
 
 def login_required(f):
-    """
-    Decorator: redirects to login if user is not in session.
-    Wrap any route that requires authentication with @login_required.
-    """
+    """Decorator — redirects to login if no active session."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -59,7 +84,6 @@ def login_required(f):
 
 @app.route('/')
 def index():
-    """Root route — redirect to dashboard if logged in, else login."""
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
@@ -67,16 +91,12 @@ def index():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    """
-    GET  — Show registration form.
-    POST — Validate inputs, hash password, insert user into DB.
-    """
+    """Register with username, email, hashed password."""
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         email    = request.form.get('email', '').strip()
         password = request.form.get('password', '')
 
-        # ── Basic validation ──────────────────────────
         if not username or not email or not password:
             flash('All fields are required.', 'danger')
             return redirect(url_for('register'))
@@ -85,22 +105,19 @@ def register():
             flash('Password must be at least 6 characters.', 'danger')
             return redirect(url_for('register'))
 
-        # ── Hash the password ─────────────────────────
         hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
 
-        # ── Insert into DB ────────────────────────────
-        db = get_db()
-        cursor = db.cursor()
+        db     = get_db()
+        cursor = db.cursor(buffered=True)
         try:
             cursor.execute(
                 "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
-                (username, email, hashed_pw)  # prepared statement — safe from SQL injection
+                (username, email, hashed_pw)
             )
             db.commit()
             flash('Account created! Please log in.', 'success')
             return redirect(url_for('login'))
         except mysql.connector.IntegrityError:
-            # Triggered when username or email already exists (UNIQUE constraint)
             flash('Username or email already taken.', 'danger')
             return redirect(url_for('register'))
         finally:
@@ -112,18 +129,13 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """
-    GET  — Show login form.
-    POST — Verify credentials, create session, redirect to dashboard.
-    """
+    """Login with username or email + password."""
     if request.method == 'POST':
-        identifier = request.form.get('identifier', '').strip()  # username OR email
+        identifier = request.form.get('identifier', '').strip()
         password   = request.form.get('password', '')
 
-        db = get_db()
-        cursor = db.cursor(dictionary=True)  # returns rows as dicts
-
-        # Allow login with either username or email
+        db     = get_db()
+        cursor = db.cursor(dictionary=True, buffered=True)
         cursor.execute(
             "SELECT * FROM users WHERE username = %s OR email = %s",
             (identifier, identifier)
@@ -132,11 +144,10 @@ def login():
         cursor.close()
         db.close()
 
-        # Verify user exists and password matches the stored hash
         if user and bcrypt.check_password_hash(user['password'], password):
             session['user_id']  = user['id']
             session['username'] = user['username']
-            flash(f"Welcome back, {user['username']}!", 'success')
+            flash(f"Mabuhay, {user['username']}! 🇵🇭", 'success')
             return redirect(url_for('dashboard'))
         else:
             flash('Invalid credentials. Try again.', 'danger')
@@ -147,52 +158,63 @@ def login():
 
 @app.route('/logout')
 def logout():
-    """Clear the session and send user back to login."""
+    """Clear session and redirect to login."""
     session.clear()
     flash('You have been logged out.', 'info')
     return redirect(url_for('login'))
 
 
 # ─────────────────────────────────────────────
-# DASHBOARD — User Input
+# DASHBOARD
 # ─────────────────────────────────────────────
 
 @app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
 def dashboard():
     """
-    GET  — Show the trip planning form.
-    POST — Collect inputs, fetch API data, run recommendation engine,
-           save itinerary to DB, render results.
+    GET  — Show multi-step wizard form.
+    POST — Validate PH destination, fetch places, build itinerary.
     """
     if request.method == 'POST':
-        destination  = request.form.get('destination', '').strip()
-        num_days     = int(request.form.get('num_days', 3))
-        budget       = request.form.get('budget', 'medium')
-        # Checkboxes return a list; getlist handles multiple selections
-        preferences  = request.form.getlist('preferences')
+        destination = request.form.get('destination', '').strip()
+        num_days    = int(request.form.get('num_days', 3))
+        budget      = request.form.get('budget', 'comfort')
+        preferences = request.form.getlist('preferences')
 
         if not destination:
             flash('Please enter a destination.', 'warning')
             return redirect(url_for('dashboard'))
 
-        # ── Step 1: Fetch places from API ─────────────
-        places = fetch_places(destination, preferences)
+        # ── Step 1: Geocode with Mapbox (primary) ─────
+        dest_coords = geocode_mapbox(destination)
 
-        if not places:
-            flash('No places found for that destination. Try another city.', 'warning')
+        # ── Step 2: Validate destination is in Philippines
+        if dest_coords and not is_in_philippines(dest_coords['lat'], dest_coords['lon']):
+            flash(
+                'This app is for Philippine destinations only. '
+                'Please enter a city or island in the Philippines. 🇵🇭',
+                'danger'
+            )
             return redirect(url_for('dashboard'))
 
-        # ── Step 2: Store fetched places in DB ────────
-        place_ids = save_places_to_db(places)
+        # ── Step 3: Fetch places via Geoapify ─────────
+        places = fetch_places(destination, preferences, dest_coords)
 
-        # ── Step 3: Run recommendation engine ─────────
-        itinerary = build_itinerary(places, preferences, num_days, budget)
+        if not places:
+            flash('No places found. Try another Philippine destination.', 'warning')
+            return redirect(url_for('dashboard'))
 
-        # ── Step 4: Save itinerary to DB ──────────────
+        # ── Step 4: Save places to DB ─────────────────
+        save_places_to_db(places)
+
+        # ── Step 5: Build itinerary ───────────────────
+        itinerary = build_itinerary(
+            places, preferences, num_days, budget, destination, dest_coords
+        )
+
+        # ── Step 6: Save itinerary ────────────────────
         itinerary_id = save_itinerary(session['user_id'], destination, itinerary)
 
-        # ── Step 5: Render results ─────────────────────
         return render_template(
             'itinerary.html',
             itinerary    = itinerary,
@@ -200,17 +222,110 @@ def dashboard():
             num_days     = num_days,
             budget       = budget,
             preferences  = preferences,
-            itinerary_id = itinerary_id
+            itinerary_id = itinerary_id,
+            dest_coords  = dest_coords,
+            mapbox_token = app.config['MAPBOX_TOKEN']
         )
 
-    return render_template('dashboard.html')
+    return render_template(
+        'dashboard.html',
+        destinations = PH_DESTINATIONS
+    )
 
 
 # ─────────────────────────────────────────────
-# API DATA FETCHING MODULE
+# GEOCODING — Mapbox (Primary)
 # ─────────────────────────────────────────────
 
-# Category mapping: user preference → Geoapify place category codes
+def geocode_mapbox(destination):
+    """
+    Uses Mapbox Geocoding API to convert a place name to lat/lon.
+    Restricts results to the Philippines using country=PH.
+    Returns {'lat': float, 'lon': float} or None.
+    """
+    token = app.config.get('MAPBOX_TOKEN', '')
+    if not token or token == 'YOUR_MAPBOX_TOKEN_HERE':
+        print("⚠️  Mapbox token not set — falling back to Geoapify geocoding.")
+        return geocode_geoapify(destination)
+
+    url = (
+        f"https://api.mapbox.com/geocoding/v5/mapbox.places/"
+        f"{requests.utils.quote(destination)}.json"
+    )
+    params = {
+        'access_token' : token,
+        'country'      : 'PH',       # Philippines only
+        'limit'        : 1,
+        'types'        : 'place,locality,region,poi'
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=8)
+        data = resp.json()
+
+        features = data.get('features', [])
+        if not features:
+            print(f"⚠️  Mapbox found no results for '{destination}' in PH.")
+            return geocode_geoapify(destination)
+
+        lon, lat = features[0]['geometry']['coordinates']
+        print(f"✅ Mapbox geocoded '{destination}' → Lat: {lat}, Lon: {lon}")
+        return {'lat': lat, 'lon': lon}
+
+    except Exception as e:
+        print(f"❌ Mapbox geocoding error: {e}")
+        return geocode_geoapify(destination)
+
+
+def geocode_geoapify(destination):
+    """
+    Geoapify geocoding fallback when Mapbox is unavailable.
+    Restricts search to the Philippines.
+    """
+    api_key = app.config.get('GEOAPIFY_KEY', '')
+    url     = '[https://api.geoapify.com/v1/geocode/search](https://api.geoapify.com/v1/geocode/search)'
+    params  = {
+        'text'    : f"{destination}, Philippines",
+        'filter'  : 'countrycode:ph',
+        'limit'   : 1,
+        'apiKey'  : api_key
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=8)
+        data = resp.json()
+
+        features = data.get('features', [])
+        if not features:
+            print(f"❌ Geoapify also found nothing for '{destination}'.")
+            return None
+
+        coords = features[0]['geometry']['coordinates']
+        lon, lat = coords[0], coords[1]
+        print(f"✅ Geoapify geocoded '{destination}' → Lat: {lat}, Lon: {lon}")
+        return {'lat': lat, 'lon': lon}
+
+    except Exception as e:
+        print(f"❌ Geoapify geocoding error: {e}")
+        return None
+
+
+def is_in_philippines(lat, lon):
+    """
+    Checks whether a coordinate pair falls within the Philippines bounding box.
+    Prevents users from generating itineraries for foreign destinations.
+    """
+    return (
+        PH_BOUNDS['min_lat'] <= lat <= PH_BOUNDS['max_lat'] and
+        PH_BOUNDS['min_lon'] <= lon <= PH_BOUNDS['max_lon']
+    )
+
+
+# ─────────────────────────────────────────────
+# PLACES FETCHING — Geoapify
+# ─────────────────────────────────────────────
+
+# Philippine-relevant category mapping
 CATEGORY_MAP = {
     'food'      : 'catering.restaurant,catering.cafe,catering.fast_food',
     'beach'     : 'beach,leisure.park',
@@ -219,89 +334,91 @@ CATEGORY_MAP = {
     'nightlife' : 'entertainment.nightclub,catering.bar',
 }
 
-def fetch_places(destination, preferences):
+
+def fetch_places(destination, preferences, dest_coords=None):
     """
-    Calls Geoapify Places API to retrieve attractions for the destination.
-    Prints errors to the terminal if the API fails!
+    Fetches nearby places from Geoapify Places API.
+    Uses dest_coords (from Mapbox geocoding) for accuracy.
+    Falls back to PH-aware seed data if API fails.
     """
     api_key = app.config.get('GEOAPIFY_KEY', '')
-    print(f"\n--- TRYING TO FETCH REAL DATA FOR: {destination} ---")
-    print(f"Using API Key: {api_key[:5]}... (if this is empty, config.py is wrong!)")
 
+    # Build category string
     if preferences:
-        categories = ','.join(CATEGORY_MAP.get(p, 'tourism.attraction') for p in preferences)
+        categories = ','.join(
+            CATEGORY_MAP.get(p, 'tourism.attraction') for p in preferences
+        )
     else:
-        categories = 'tourism.attraction,catering.restaurant,natural'
+        categories = 'tourism.attraction,catering.restaurant,natural,beach'
 
-    # ── Step A: Geocode the destination to lat/lon ────
-    geo_url = 'https://api.geoapify.com/v1/geocode/search'
-    geo_params = {'text': destination, 'limit': 1, 'apiKey': api_key}
+    # Resolve coordinates
+    if dest_coords:
+        lat, lon = dest_coords['lat'], dest_coords['lon']
+    else:
+        result = geocode_geoapify(destination)
+        if not result:
+            return get_ph_seed_places(destination, preferences, dest_coords)
+        lat, lon = result['lat'], result['lon']
 
-    try:
-        geo_resp = requests.get(geo_url, params=geo_params, timeout=8)
-        geo_data = geo_resp.json()
-        
-        # Catch API rejections (like Invalid Key)
-        if geo_resp.status_code != 200:
-            print(f"❌ GEOCODING API ERROR: {geo_data}")
-            return get_seed_places(destination, preferences)
-
-        coords = geo_data['features'][0]['geometry']['coordinates']
-        lon, lat = coords[0], coords[1]
-        print(f"✅ Geocoding Success! Found coordinates: Lat {lat}, Lon {lon}")
-
-    except Exception as e:
-        print(f"❌ GEOCODING CRASH: {e}")
-        return get_seed_places(destination, preferences)
-
-    # ── Step B: Fetch places around those coordinates ─
-    places_url = 'https://api.geoapify.com/v2/places'
-    places_params = {
+    # Fetch places from Geoapify
+    url    = 'https://api.geoapify.com/v2/places'
+    params = {
         'categories' : categories,
-        'filter'     : f'circle:{lon},{lat},10000',
-        'limit'      : 40,
+        'filter'     : f'circle:{lon},{lat},30000',  # 30km radius
+        'limit'      : 150,
         'apiKey'     : api_key
     }
 
     try:
-        resp = requests.get(places_url, params=places_params, timeout=10)
-        data = resp.json()
+        resp     = requests.get(url, params=params, timeout=10)
+        data     = resp.json()
+        features = data.get('features', [])
 
         if resp.status_code != 200:
-            print(f"❌ PLACES API ERROR: {data}")
-            return get_seed_places(destination, preferences)
+            print(f"❌ Geoapify Places error: {data}")
+            return get_ph_seed_places(destination, preferences, dest_coords)
 
-        features = data.get('features', [])
+        print(f"✅ Fetched {len(features)} places near {destination}.")
+
     except Exception as e:
-        print(f"❌ PLACES FETCH CRASH: {e}")
-        return get_seed_places(destination, preferences)
+        print(f"❌ Places fetch error: {e}")
+        return get_ph_seed_places(destination, preferences, dest_coords)
 
-    # ── Step C: Normalize API response ─
+    # Normalize response
     places = []
     for feat in features:
-        props = feat.get('properties', {})
-        geom  = feat.get('geometry', {})
-        coords = geom.get('coordinates', [0, 0])
+        props  = feat.get('properties', {})
+        geom   = feat.get('geometry', {})
+        coords = geom.get('coordinates', [lon, lat])
 
-        raw_cat  = props.get('categories', ['tourism'])[0] if props.get('categories') else 'tourism'
+        name = props.get('name', '').strip()
+        if not name:
+            continue
+
+        raw_cat  = (props.get('categories') or ['tourism'])[0]
         category = simplify_category(raw_cat)
 
         places.append({
-            'name'      : props.get('name', 'Unknown Place'),
+            'name'      : name,
             'category'  : category,
             'latitude'  : coords[1],
             'longitude' : coords[0],
-            'rating'    : round(props.get('datasource', {}).get('raw', {}).get('stars', 3.5) or 3.5, 1),
-            'city'      : destination,
-            'tags'      : raw_cat
+            'rating'    : round(
+                float(
+                    props.get('datasource', {})
+                        .get('raw', {})
+                        .get('stars', 3.5) or 3.5
+                ), 1
+            ),
+            'city'  : destination,
+            'tags'  : raw_cat
         })
 
-    print(f"✅ SUCCESS! Fetched {len(places)} real places from Geoapify.")
-    return places if places else get_seed_places(destination, preferences)
+    return places if places else get_ph_seed_places(destination, preferences, dest_coords)
 
 
 def simplify_category(raw):
-    """Maps verbose Geoapify category strings to simple labels."""
+    """Maps Geoapify category prefixes to our 6 simple labels."""
     mapping = {
         'catering'      : 'food',
         'beach'         : 'beach',
@@ -311,81 +428,152 @@ def simplify_category(raw):
         'education'     : 'museums',
         'entertainment' : 'nightlife',
     }
-    prefix = raw.split('.')[0]
-    return mapping.get(prefix, 'sightseeing')
+    return mapping.get(raw.split('.')[0], 'sightseeing')
 
 
-def get_seed_places(destination, preferences):
+def get_ph_seed_places(destination, preferences, dest_coords=None):
     """
-    Fallback dataset used when the API is unavailable.
-    Returns a curated list of generic places tagged to common categories.
-    Useful for offline demos and testing.
+    Philippines-specific fallback seed data.
+    Uses real geocoded coordinates so map pins appear at the correct location.
+    Includes iconic PH attractions styled per destination type.
     """
+    # Resolve base coordinates from dest_coords or geocoding
+    if dest_coords:
+        base_lat = dest_coords['lat']
+        base_lon = dest_coords['lon']
+    else:
+        result = geocode_geoapify(destination)
+        if result:
+            base_lat = result['lat']
+            base_lon = result['lon']
+        else:
+            # Geographic center of the Philippines as last resort
+            base_lat = 12.8797
+            base_lon = 121.7740
+
+    # 28 seed places with small coordinate offsets to spread pins realistically
     seed = [
-        {'name': f'{destination} Old Town',        'category': 'sightseeing', 'rating': 4.5, 'latitude': 14.5995, 'longitude': 120.9842, 'city': destination, 'tags': 'tourism'},
-        {'name': f'{destination} National Museum',  'category': 'museums',     'rating': 4.3, 'latitude': 14.5890, 'longitude': 120.9820, 'city': destination, 'tags': 'education'},
-        {'name': f'{destination} Central Park',     'category': 'nature',      'rating': 4.2, 'latitude': 14.5780, 'longitude': 120.9910, 'city': destination, 'tags': 'natural'},
-        {'name': f'{destination} Beach Resort',     'category': 'beach',       'rating': 4.6, 'latitude': 14.5600, 'longitude': 121.0000, 'city': destination, 'tags': 'beach'},
-        {'name': f'{destination} Night Market',     'category': 'nightlife',   'rating': 4.4, 'latitude': 14.5700, 'longitude': 120.9850, 'city': destination, 'tags': 'entertainment'},
-        {'name': f'Casa {destination} Restaurant',  'category': 'food',        'rating': 4.1, 'latitude': 14.5950, 'longitude': 120.9900, 'city': destination, 'tags': 'catering'},
-        {'name': f'{destination} Rooftop Bar',      'category': 'nightlife',   'rating': 4.0, 'latitude': 14.5660, 'longitude': 120.9870, 'city': destination, 'tags': 'entertainment'},
-        {'name': f'{destination} Heritage Walk',    'category': 'sightseeing', 'rating': 4.2, 'latitude': 14.5800, 'longitude': 120.9760, 'city': destination, 'tags': 'tourism'},
-        {'name': f'{destination} Street Food Hub',  'category': 'food',        'rating': 4.3, 'latitude': 14.5910, 'longitude': 120.9835, 'city': destination, 'tags': 'catering'},
-        {'name': f'{destination} Botanical Garden', 'category': 'nature',      'rating': 4.5, 'latitude': 14.5740, 'longitude': 120.9950, 'city': destination, 'tags': 'natural'},
-        {'name': f'{destination} Art Gallery',      'category': 'museums',     'rating': 4.1, 'latitude': 14.5820, 'longitude': 120.9800, 'city': destination, 'tags': 'education'},
-        {'name': f'{destination} Waterfront',       'category': 'beach',       'rating': 4.4, 'latitude': 14.5580, 'longitude': 121.0050, 'city': destination, 'tags': 'beach'},
+        # Sightseeing
+        {'name': f'{destination} Heritage District',    'category': 'sightseeing', 'rating': 4.6,
+         'latitude': base_lat+0.010, 'longitude': base_lon+0.005, 'city': destination, 'tags': 'tourism'},
+        {'name': f'{destination} Rizal Park',           'category': 'sightseeing', 'rating': 4.4,
+         'latitude': base_lat+0.018, 'longitude': base_lon-0.006, 'city': destination, 'tags': 'tourism'},
+        {'name': f'Fort {destination}',                 'category': 'sightseeing', 'rating': 4.5,
+         'latitude': base_lat-0.008, 'longitude': base_lon+0.012, 'city': destination, 'tags': 'tourism'},
+        {'name': f'{destination} Plaza Mayor',          'category': 'sightseeing', 'rating': 4.3,
+         'latitude': base_lat+0.022, 'longitude': base_lon-0.014, 'city': destination, 'tags': 'tourism'},
+
+        # Beach
+        {'name': f'{destination} White Sand Beach',     'category': 'beach', 'rating': 4.8,
+         'latitude': base_lat-0.015, 'longitude': base_lon+0.020, 'city': destination, 'tags': 'beach'},
+        {'name': f'{destination} Island Hopping Tour',  'category': 'beach', 'rating': 4.9,
+         'latitude': base_lat-0.022, 'longitude': base_lon+0.028, 'city': destination, 'tags': 'beach'},
+        {'name': f'{destination} Lagoon',               'category': 'beach', 'rating': 4.7,
+         'latitude': base_lat-0.030, 'longitude': base_lon+0.018, 'city': destination, 'tags': 'beach'},
+        {'name': f'{destination} Dive Site',            'category': 'beach', 'rating': 4.6,
+         'latitude': base_lat-0.025, 'longitude': base_lon+0.025, 'city': destination, 'tags': 'beach'},
+
+        # Nature
+        {'name': f'{destination} Chocolate Hills',      'category': 'nature', 'rating': 4.8,
+         'latitude': base_lat+0.025, 'longitude': base_lon+0.015, 'city': destination, 'tags': 'natural'},
+        {'name': f'{destination} Falls',                'category': 'nature', 'rating': 4.7,
+         'latitude': base_lat-0.010, 'longitude': base_lon-0.018, 'city': destination, 'tags': 'natural'},
+        {'name': f'{destination} Eco Trail',            'category': 'nature', 'rating': 4.4,
+         'latitude': base_lat-0.016, 'longitude': base_lon+0.016, 'city': destination, 'tags': 'natural'},
+        {'name': f'{destination} Volcano View',         'category': 'nature', 'rating': 4.6,
+         'latitude': base_lat+0.030, 'longitude': base_lon-0.010, 'city': destination, 'tags': 'natural'},
+
+        # Food
+        {'name': f'{destination} Lechon House',         'category': 'food', 'rating': 4.7,
+         'latitude': base_lat+0.003, 'longitude': base_lon+0.009, 'city': destination, 'tags': 'catering'},
+        {'name': f'{destination} Seafood Grill',        'category': 'food', 'rating': 4.5,
+         'latitude': base_lat-0.013, 'longitude': base_lon+0.007, 'city': destination, 'tags': 'catering'},
+        {'name': f'{destination} Carinderia Row',       'category': 'food', 'rating': 4.2,
+         'latitude': base_lat+0.006, 'longitude': base_lon-0.011, 'city': destination, 'tags': 'catering'},
+        {'name': f'{destination} Fine Dining',          'category': 'food', 'rating': 4.8,
+         'latitude': base_lat+0.009, 'longitude': base_lon+0.001, 'city': destination, 'tags': 'catering'},
+
+        # Museums
+        {'name': f'{destination} National Museum',      'category': 'museums', 'rating': 4.5,
+         'latitude': base_lat+0.005, 'longitude': base_lon-0.008, 'city': destination, 'tags': 'education'},
+        {'name': f'{destination} Cultural Center',      'category': 'museums', 'rating': 4.3,
+         'latitude': base_lat+0.014, 'longitude': base_lon-0.010, 'city': destination, 'tags': 'education'},
+        {'name': f'{destination} Heritage Museum',      'category': 'museums', 'rating': 4.2,
+         'latitude': base_lat+0.016, 'longitude': base_lon-0.004, 'city': destination, 'tags': 'education'},
+        {'name': f'{destination} Art Gallery',          'category': 'museums', 'rating': 4.1,
+         'latitude': base_lat+0.006, 'longitude': base_lon+0.003, 'city': destination, 'tags': 'education'},
+
+        # Nightlife
+        {'name': f'{destination} Night Market',         'category': 'nightlife', 'rating': 4.5,
+         'latitude': base_lat+0.008, 'longitude': base_lon-0.003, 'city': destination, 'tags': 'entertainment'},
+        {'name': f'{destination} Rooftop Bar',          'category': 'nightlife', 'rating': 4.4,
+         'latitude': base_lat-0.004, 'longitude': base_lon-0.011, 'city': destination, 'tags': 'entertainment'},
+        {'name': f'{destination} Jazz & Chill Lounge',  'category': 'nightlife', 'rating': 4.6,
+         'latitude': base_lat-0.008, 'longitude': base_lon-0.007, 'city': destination, 'tags': 'entertainment'},
+        {'name': f'{destination} Skybar',               'category': 'nightlife', 'rating': 4.7,
+         'latitude': base_lat+0.007, 'longitude': base_lon-0.013, 'city': destination, 'tags': 'entertainment'},
+
+        # Extra sightseeing filler for 7-day trips
+        {'name': f'{destination} Old Church',           'category': 'sightseeing', 'rating': 4.4,
+         'latitude': base_lat-0.005, 'longitude': base_lon-0.019, 'city': destination, 'tags': 'tourism'},
+        {'name': f'{destination} Baywalk Promenade',    'category': 'sightseeing', 'rating': 4.3,
+         'latitude': base_lat+0.012, 'longitude': base_lon+0.022, 'city': destination, 'tags': 'tourism'},
+        {'name': f'{destination} Sunset Viewpoint',     'category': 'nature', 'rating': 4.8,
+         'latitude': base_lat-0.020, 'longitude': base_lon+0.018, 'city': destination, 'tags': 'natural'},
+        {'name': f'{destination} Luxury Spa & Resort',  'category': 'sightseeing', 'rating': 4.9,
+         'latitude': base_lat+0.004, 'longitude': base_lon-0.002, 'city': destination, 'tags': 'leisure'},
     ]
     return seed
 
 
 # ─────────────────────────────────────────────
-# DATABASE SAVE HELPERS
+# DATABASE HELPERS
 # ─────────────────────────────────────────────
 
 def save_places_to_db(places):
     """
-    Inserts fetched places into the `places` table.
-    Uses INSERT IGNORE to avoid duplicate entries on repeat trips.
-    Returns list of inserted/existing place IDs.
+    Inserts places into DB using INSERT IGNORE to skip duplicates.
+    Uses buffered=True to prevent 'Unread result' InternalError.
+    Attaches the DB id back to each place dict for itinerary linking.
     """
-    db = get_db()
-    # ADD buffered=True TO THIS LINE
-    cursor = db.cursor(buffered=True) 
-    
-    ids = []
+    db     = get_db()
+    cursor = db.cursor(buffered=True)
+
     for place in places:
         cursor.execute(
             """
-            INSERT IGNORE INTO places (name, category, latitude, longitude, rating, city, tags)
+            INSERT IGNORE INTO places
+                (name, category, latitude, longitude, rating, city, tags)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (place['name'], place['category'], place['latitude'],
-             place['longitude'], place['rating'], place['city'], place['tags'])
+            (
+                place['name'], place['category'],
+                place['latitude'], place['longitude'],
+                place['rating'], place['city'], place['tags']
+            )
         )
         db.commit()
 
-        # Retrieve the ID (either newly inserted or existing)
-        cursor.execute("SELECT id FROM places WHERE name = %s AND city = %s",
-                       (place['name'], place['city']))
+        cursor.execute(
+            "SELECT id FROM places WHERE name = %s AND city = %s",
+            (place['name'], place['city'])
+        )
         row = cursor.fetchone()
         if row:
-            place['id'] = row[0]  # Attach DB id back to the dict
-            ids.append(row[0])
+            place['id'] = row[0]
 
     cursor.close()
     db.close()
-    return ids
 
 
 def save_itinerary(user_id, destination, itinerary):
     """
-    Saves the generated itinerary to the database under the logged-in user.
+    Saves a trip and all its day items to the DB.
     Returns the new itinerary ID.
     """
-    db = get_db()
-    cursor = db.cursor()
+    db     = get_db()
+    cursor = db.cursor(buffered=True)
 
-    # Create the parent itinerary record
     cursor.execute(
         "INSERT INTO itineraries (user_id, trip_name) VALUES (%s, %s)",
         (user_id, f'Trip to {destination}')
@@ -393,13 +581,16 @@ def save_itinerary(user_id, destination, itinerary):
     db.commit()
     itinerary_id = cursor.lastrowid
 
-    # Insert each place per day as an itinerary item
     for day_num, day_places in itinerary.items():
         for place in day_places:
             place_id = place.get('id')
             if place_id:
                 cursor.execute(
-                    "INSERT INTO itinerary_items (itinerary_id, day_number, place_id) VALUES (%s, %s, %s)",
+                    """
+                    INSERT INTO itinerary_items
+                        (itinerary_id, day_number, place_id)
+                    VALUES (%s, %s, %s)
+                    """,
                     (itinerary_id, day_num, place_id)
                 )
     db.commit()
@@ -413,107 +604,136 @@ def save_itinerary(user_id, destination, itinerary):
 # ─────────────────────────────────────────────
 
 def haversine(lat1, lon1, lat2, lon2):
-    """
-    Calculates the great-circle distance (km) between two GPS coordinates.
-    Used to score proximity between places.
-    """
-    R = 6371  # Earth's radius in km
+    """Great-circle distance in km between two GPS points."""
+    R    = 6371
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * \
-        math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    a    = (math.sin(dlat / 2) ** 2 +
+            math.cos(math.radians(lat1)) *
+            math.cos(math.radians(lat2)) *
+            math.sin(dlon / 2) ** 2)
     return R * 2 * math.asin(math.sqrt(a))
 
 
 def score_place(place, preferences, budget):
     """
-    Advanced scoring engine to differentiate between Luxury and Backpacker styles.
+    Scores a place using:
+    - Preference alignment   (+3 per match)
+    - Rating quality         (0–2 pts normalized)
+    - Travel style modifier  (backpacker vs luxury)
     """
-    score = 0.0
+    score    = 0.0
     category = place.get('category', '').lower()
-    tags = (place.get('tags') or '').lower()
+    tags     = (place.get('tags') or '').lower()
 
-    # 1. Preference Alignment (+3 points per match)
+    # Preference alignment
     for pref in preferences:
         if pref.lower() in category or pref.lower() in tags:
             score += 3.0
 
-    # 2. Rating Quality (Normalized 0–2 points)
-    rating = float(place.get('rating') or 3.5)
-    score += (rating / 5.0) * 2.0
+    # Rating bonus
+    rating  = float(place.get('rating') or 3.5)
+    score  += (rating / 5.0) * 2.0
 
-    # 3. Travel Style Intelligence
+    # Travel style
     if budget == 'high':
-        # LUXURY: Prioritize the "Best of the Best" and high-end categories
         if rating >= 4.5:
-            score += 2.0  # Huge bonus for elite ratings
+            score += 2.0
         if category in ['food', 'nightlife']:
-            score += 1.5  # Bonus for curated dining and entertainment
-        if 'luxury' in tags or 'boutique' in tags:
+            score += 1.5
+        if any(k in tags for k in ['luxury', 'boutique', 'resort']):
             score += 2.0
 
     elif budget == 'low':
-        # BACKPACKER: Prioritize beauty (Nature) and value (Street Food/Markets)
         if category in ['nature', 'beach']:
-            score += 2.5  # Nature is beautiful and usually free/cheap
-        if 'market' in tags or 'street_food' in tags:
+            score += 2.5
+        if any(k in tags for k in ['market', 'street_food']):
             score += 2.0
-        if category == 'food' and rating < 4.0:
-            score += 1.0  # Favor local "hole-in-the-wall" spots that are still good
-        
-        # Penalty for places that are traditionally very expensive
         if 'fine_dining' in tags or 'resort' in tags:
-            score -= 3.0 
+            score -= 3.0
 
     return score
 
 
-def build_itinerary(places, preferences, num_days, budget):
+def build_itinerary(places, preferences, num_days, budget, destination, dest_coords=None):
     """
-    Core recommendation engine with Geographical Routing.
+    Full recommendation pipeline:
+    1. Score all places
+    2. Deduplicate by name
+    3. Pad with PH seed data if needed (using real coords)
+    4. Greedy nearest-neighbor routing
+    5. Distribute sequentially into days (4 places/day)
     """
-    PLACES_PER_DAY = 4  
-    total_needed = num_days * PLACES_PER_DAY
+    PLACES_PER_DAY = 4
+    total_needed   = num_days * PLACES_PER_DAY
 
-    # 1. Score all places
+    # Score
     for place in places:
         place['score'] = score_place(place, preferences, budget)
 
-    # 2. Sort by score and remove duplicates
+    # Sort + deduplicate
     scored = sorted(places, key=lambda p: p['score'], reverse=True)
-    seen = set()
+    seen   = set()
     unique = []
     for p in scored:
         if p['name'] not in seen:
             seen.add(p['name'])
             unique.append(p)
 
-    # Grab the top candidates
+    # Pad with PH seed data at correct coordinates
+    if len(unique) < total_needed:
+        seeds = get_ph_seed_places(destination, preferences, dest_coords)
+        for s in seeds:
+            if s['name'] not in seen:
+                seen.add(s['name'])
+                s['score'] = score_place(s, preferences, budget)
+                unique.append(s)
+
+    # Generic filler if still short
+    pad   = 1
+    b_lat = dest_coords['lat'] if dest_coords else 12.8797
+    b_lon = dest_coords['lon'] if dest_coords else 121.7740
+
+    while len(unique) < total_needed:
+        cat = 'nightlife' if budget == 'high' else 'sightseeing'
+        off = pad * 0.0015
+        unique.append({
+            'name'      : f'Hidden Gem Experience {pad}',
+            'category'  : cat,
+            'rating'    : 4.8 if budget == 'high' else 4.0,
+            'latitude'  : b_lat + off,
+            'longitude' : b_lon + off,
+            'city'      : destination,
+            'tags'      : 'leisure',
+            'score'     : 1.0
+        })
+        pad += 1
+
     candidates = unique[:total_needed]
     if not candidates:
         return {}
 
-    # 3. GREEDY NEAREST NEIGHBOR ALGORITHM
-    # Start the trip at the highest-rated place
-    ordered_places = []
-    current_place = candidates.pop(0)
-    ordered_places.append(current_place)
+    # Greedy nearest-neighbor routing
+    ordered = []
+    current = candidates.pop(0)
+    ordered.append(current)
 
-    # Find the closest next place, move there, and repeat
     while candidates:
-        nearest = min(candidates, key=lambda p: haversine(
-            current_place['latitude'], current_place['longitude'],
-            p['latitude'], p['longitude']
-        ))
+        nearest = min(
+            candidates,
+            key=lambda p: haversine(
+                current['latitude'], current['longitude'],
+                p['latitude'],       p['longitude']
+            )
+        )
         candidates.remove(nearest)
-        ordered_places.append(nearest)
-        current_place = nearest
+        ordered.append(nearest)
+        current = nearest
 
-    # 4. Distribute into days sequentially (not round-robin!)
-    # Day 1 gets the first 4 places grouped together, Day 2 gets the next 4, etc.
+    # Distribute into days sequentially
     itinerary = {day: [] for day in range(1, num_days + 1)}
-    for i, place in enumerate(ordered_places):
-        day = (i // PLACES_PER_DAY) + 1 
+    for i, place in enumerate(ordered):
+        day = (i // PLACES_PER_DAY) + 1
         if day <= num_days:
             itinerary[day].append(place)
 
@@ -521,15 +741,15 @@ def build_itinerary(places, preferences, num_days, budget):
 
 
 # ─────────────────────────────────────────────
-# SAVED ITINERARIES VIEW
+# MY TRIPS
 # ─────────────────────────────────────────────
 
 @app.route('/my-trips')
 @login_required
 def my_trips():
-    """Shows all itineraries saved by the logged-in user."""
-    db = get_db()
-    cursor = db.cursor(dictionary=True)
+    """All saved itineraries for the logged-in user."""
+    db     = get_db()
+    cursor = db.cursor(dictionary=True, buffered=True)
     cursor.execute(
         """
         SELECT i.id, i.trip_name, i.created_at,
@@ -548,54 +768,70 @@ def my_trips():
     return render_template('my_trips.html', trips=trips)
 
 
+@app.route('/delete-trips', methods=['POST'])
+@login_required
+def delete_trips():
+    """Bulk delete selected itineraries belonging to the current user."""
+    itinerary_ids = request.form.getlist('trip_ids')
+
+    if not itinerary_ids:
+        flash('No trips selected.', 'warning')
+        return redirect(url_for('my_trips'))
+
+    db     = get_db()
+    cursor = db.cursor(buffered=True)
+    try:
+        placeholders = ','.join(['%s'] * len(itinerary_ids))
+        cursor.execute(
+            f"DELETE FROM itineraries WHERE id IN ({placeholders}) AND user_id = %s",
+            tuple(itinerary_ids) + (session['user_id'],)
+        )
+        db.commit()
+        flash(f'Removed {cursor.rowcount} trip(s).', 'success')
+    except mysql.connector.Error as e:
+        flash(f'Error: {e}', 'danger')
+    finally:
+        cursor.close()
+        db.close()
+
+    return redirect(url_for('my_trips'))
+
+
 # ─────────────────────────────────────────────
-# OPTIONAL JSON API ENDPOINT
+# JSON API ENDPOINT
 # ─────────────────────────────────────────────
 
 @app.route('/api/itinerary', methods=['POST'])
 @login_required
 def api_generate():
-    """
-    JSON endpoint — same logic as dashboard POST
-    but returns JSON instead of rendering a template.
-    Useful if you later build a mobile app frontend.
-    """
+    """JSON endpoint — same logic as dashboard POST."""
     data        = request.get_json()
-    destination = data.get('destination')
+    destination = data.get('destination', '')
     num_days    = int(data.get('num_days', 3))
     preferences = data.get('preferences', [])
-    budget      = data.get('budget', 'medium')
+    budget      = data.get('budget', 'comfort')
 
-    places    = fetch_places(destination, preferences)
-    itinerary = build_itinerary(places, preferences, num_days, budget)
+    dest_coords = geocode_mapbox(destination)
+
+    if dest_coords and not is_in_philippines(dest_coords['lat'], dest_coords['lon']):
+        return jsonify({'error': 'Destination must be in the Philippines.'}), 400
+
+    places    = fetch_places(destination, preferences, dest_coords)
+    itinerary = build_itinerary(
+        places, preferences, num_days, budget, destination, dest_coords
+    )
 
     return jsonify({
         'destination' : destination,
         'num_days'    : num_days,
+        'dest_coords' : dest_coords,
         'itinerary'   : itinerary
     })
 
-@app.route('/delete-trips', methods=['POST'])
-@login_required
-def delete_trips():
-    itinerary_ids = request.form.getlist('trip_ids')
-    if not itinerary_ids:
-        return redirect(url_for('my_trips'))
 
-    db = get_db()
-    cursor = db.cursor()
-    format_strings = ','.join(['%s'] * len(itinerary_ids))
-    query = f"DELETE FROM itineraries WHERE id IN ({format_strings}) AND user_id = %s"
-    params = tuple(itinerary_ids) + (session['user_id'],)
-    cursor.execute(query, params)
-    db.commit()
-    cursor.close()
-    db.close()
-    return redirect(url_for('my_trips'))
 # ─────────────────────────────────────────────
 # Run
 # ─────────────────────────────────────────────
 
 if __name__ == '__main__':
     app.run(debug=True)
-

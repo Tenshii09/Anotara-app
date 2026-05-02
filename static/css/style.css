@@ -1,57 +1,56 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap');
+/* ══════════════════════════════════════════════
+   Anotara — Philippines Travel Planner
+   Premium Glassmorphism UI
+══════════════════════════════════════════════ */
 
+@import url('[fonts.googleapis.com](https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap)');
+
+/* ── CSS Variables ─────────────────────────── */
 :root {
-  --bg-main: #FAFAFA;
-  /* UPDATED: Lower opacity (0.55) to let the vibrant pastels show through */
-  --surface: rgba(255, 255, 255, 0.55); 
-  --text-dark: #111827;
-  --text-muted: #6B7280;
-  --accent: #000000; 
-  --accent-glow: rgba(0, 0, 0, 0.15);
-  /* UPDATED: Glass-friendly border */
-  --border-light: rgba(255, 255, 255, 0.4);
-  --glass-bg: rgba(255, 255, 255, 0.45);
+  --surface         : rgba(255, 255, 255, 0.55);
+  --text-dark       : #111827;
+  --text-muted      : #6B7280;
+  --accent          : #000000;
+  --accent-glow     : rgba(0, 0, 0, 0.15);
+  --border-light    : rgba(255, 255, 255, 0.4);
+  --glass-bg        : rgba(255, 255, 255, 0.45);
   --transition-smooth: 0.6s cubic-bezier(0.22, 1, 0.36, 1);
   --transition-snappy: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* ── Body + Animated Gradient ──────────────── */
 body {
-  font-family: 'Inter', sans-serif;
-  /* ── FULL PREMIUM PASTEL GRADIENT ── */
-  /* Includes: Rose Pink, Lavender, Sky Blue, Mint, and Peach */
-  background: linear-gradient(
-    -45deg, 
-    #fbcfe8, 
-    #e9d5ff, 
-    #bae6fd, 
-    #ccfbf1, 
-    #ffedd5
-  );
+  font-family   : 'Inter', sans-serif;
+  background    : linear-gradient(-45deg, #fbcfe8, #e9d5ff, #bae6fd, #ccfbf1, #ffedd5);
   background-size: 400% 400%;
-  animation: gradientBG 18s ease infinite;
-  min-height: 100vh;
-  color: var(--text-dark);
-  overflow-x: hidden;
+  animation     : gradientBG 18s ease infinite;
+  min-height    : 100vh;
+  color         : var(--text-dark);
+  overflow-x    : hidden;
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── GRADIENT ANIMATION ── */
 @keyframes gradientBG {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
 }
 
-h1, h2, h3, .serif {
-  font-family: 'Playfair Display', serif;
+/* ── Typography ────────────────────────────── */
+h1, h2, h3, h4, .serif {
+  font-family   : 'Playfair Display', serif;
   letter-spacing: -0.5px;
 }
 
-/* ── Cinematic Page Transitions ── */
+.fw-500 { font-weight: 500; }
+.fw-600 { font-weight: 600; }
+.fw-700 { font-weight: 700; }
+
+/* ── Page Transitions ──────────────────────── */
 .fade-in-up {
-  animation: fadeInUp 0.8s var(--transition-smooth) forwards;
-  opacity: 0;
-  transform: translateY(40px);
+  animation : fadeInUp 0.8s var(--transition-smooth) forwards;
+  opacity   : 0;
+  transform : translateY(40px);
 }
 .delay-1 { animation-delay: 0.1s; }
 .delay-2 { animation-delay: 0.2s; }
@@ -61,184 +60,370 @@ h1, h2, h3, .serif {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Floating Glass Navbar ── */
+/* ── Floating Glass Navbar ─────────────────── */
 .navbar-floating {
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 90%;
-  max-width: 1200px;
-  background: var(--glass-bg);
+  position       : fixed;
+  top            : 20px;
+  left           : 50%;
+  transform      : translateX(-50%);
+  width          : 90%;
+  max-width      : 1200px;
+  background     : var(--glass-bg);
   backdrop-filter: blur(25px) saturate(160%);
   -webkit-backdrop-filter: blur(25px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 100px;
-  padding: 12px 24px;
-  z-index: 1000;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.05);
-  transition: var(--transition-smooth);
+  border         : 1px solid rgba(255, 255, 255, 0.4);
+  border-radius  : 100px;
+  padding        : 12px 28px;
+  z-index        : 1000;
+  box-shadow     : 0 10px 40px rgba(0,0,0,0.06);
 }
 
-/* ── Ultra-Premium Buttons ── */
+/* ── Buttons ───────────────────────────────── */
 .btn-luxury {
-  background: var(--accent);
-  color: #FFF;
-  border-radius: 100px;
-  padding: 16px 36px;
-  font-weight: 500;
-  font-size: 1.1rem;
-  border: none;
-  position: relative;
-  overflow: hidden;
-  transition: var(--transition-snappy);
-  box-shadow: 0 8px 20px var(--accent-glow);
+  background    : var(--accent);
+  color         : #fff;
+  border-radius : 100px;
+  padding       : 14px 32px;
+  font-weight   : 600;
+  font-size     : 0.95rem;
+  border        : none;
+  cursor        : pointer;
+  transition    : all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* Bouncy physics */
+  box-shadow    : 0 4px 15px rgba(0,0,0,0.15);
+  display       : inline-block;
+  text-align    : center;
+  position      : relative;
+  overflow      : hidden;
 }
+
+.btn-luxury::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%; width: 50%; height: 100%;
+  background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 100%);
+  transform: skewX(-25deg);
+  transition: all 0.7s ease;
+}
+
 .btn-luxury:hover {
-  transform: translateY(-3px) scale(1.02);
-  box-shadow: 0 15px 30px rgba(0,0,0,0.25);
-  color: #FFF;
+  transform : translateY(-4px) scale(1.03);
+  box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+  color     : #fff;
 }
+
+.btn-luxury:hover::after {
+  left: 200%; /* Creates a sleek shine effect sweeping across the button */
+}
+
+.btn-luxury:disabled {
+  opacity: 0.6;
+  cursor : not-allowed;
+  transform: none;
+}
+
 .btn-outline-luxury {
-  background: transparent;
-  color: var(--text-dark);
-  border: 1px solid var(--border-light);
-  border-radius: 100px;
-  padding: 14px 28px;
-  font-weight: 500;
-  transition: var(--transition-snappy);
+  background    : transparent;
+  color         : var(--text-dark);
+  border        : 1.5px solid rgba(0,0,0,0.2);
+  border-radius : 100px;
+  padding       : 12px 26px;
+  font-weight   : 500;
+  font-size     : 0.9rem;
+  cursor        : pointer;
+  transition    : var(--transition-snappy);
+  display       : inline-block;
+  text-align    : center;
+  text-decoration: none;
 }
 .btn-outline-luxury:hover {
-  border-color: var(--accent);
-  background: rgba(255, 255, 255, 0.3);
+  border-color : var(--accent);
+  background   : rgba(255,255,255,0.3);
+  color        : var(--text-dark);
 }
 
-/* ── The Full-Screen Wizard (Dashboard) ── */
-.wizard-container {
-  height: 100vh;
-  display: flex;
-  align-items: center;
+/* ── Auth Pages ────────────────────────────── */
+.auth-container {
+  min-height     : 100vh;
+  display        : flex;
+  align-items    : center;
   justify-content: center;
-  position: relative;
+  padding        : 120px 20px 40px; /* Adds 120px of space at the top */
 }
+.auth-card {
+  background     : var(--glass-bg);
+  backdrop-filter: blur(30px) saturate(160%);
+  -webkit-backdrop-filter: blur(30px) saturate(160%);
+  border         : 1px solid var(--border-light);
+  border-radius  : 28px;
+  padding        : 48px 40px;
+  width          : 100%;
+  max-width      : 440px;
+  box-shadow     : 0 20px 60px rgba(0,0,0,0.08);
+}
+
+.auth-input {
+  background     : rgba(255,255,255,0.6) !important;
+  border         : 1.5px solid var(--border-light) !important;
+  border-radius  : 14px !important;
+  padding        : 14px 18px !important;
+  font-size      : 0.95rem !important;
+  transition     : var(--transition-snappy) !important;
+  box-shadow     : none !important;
+}
+.auth-input:focus {
+  border-color   : var(--accent) !important;
+  background     : rgba(255,255,255,0.85) !important;
+  box-shadow     : none !important;
+  outline        : none !important;
+}
+
+/* ── Dashboard Wizard ──────────────────────── */
+.wizard-container {
+  min-height     : 100vh;
+  display        : flex;
+  align-items    : center;
+  justify-content: center;
+  position       : relative;
+  padding        : 100px 20px 40px;
+}
+
 .wizard-step {
-  position: absolute;
-  width: 100%;
-  max-width: 800px;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(50px) scale(0.95);
-  transition: var(--transition-smooth);
+  position   : absolute;
+  width      : 100%;
+  max-width  : 760px;
+  opacity    : 0;
+  visibility : hidden;
+  transform  : translateY(50px) scale(0.95);
+  transition : var(--transition-smooth);
+  padding    : 0 20px;
 }
 .wizard-step.active {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0) scale(1);
-  z-index: 10;
+  opacity    : 1;
+  visibility : visible;
+  transform  : translateY(0) scale(1);
+  z-index    : 10;
+  position   : relative;  /* keeps page height correct */
 }
 .wizard-step.completed {
-  transform: translateY(-100px) scale(0.9);
-  opacity: 0;
+  transform  : translateY(-80px) scale(0.92);
+  opacity    : 0;
+  visibility : hidden;
 }
 
-/* Massive Input Fields */
+/* Giant destination input */
 .input-massive {
-  font-size: 3rem;
-  font-weight: 700;
-  font-family: 'Playfair Display', serif;
-  border: none;
-  background: transparent;
-  border-bottom: 2px solid var(--border-light);
-  border-radius: 0;
-  padding: 10px 0;
-  color: var(--accent);
-  text-align: center;
-  box-shadow: none !important;
-  transition: var(--transition-snappy);
+  font-size      : 2.6rem;
+  font-weight    : 700;
+  font-family    : 'Playfair Display', serif;
+  border         : none;
+  background     : transparent;
+  border-bottom  : 2px solid var(--border-light);
+  border-radius  : 0;
+  padding        : 10px 0;
+  color          : var(--accent);
+  text-align     : center;
+  box-shadow     : none !important;
+  transition     : var(--transition-snappy);
+  width          : 100%;
 }
 .input-massive:focus {
-  border-color: var(--accent);
-  outline: none;
+  border-color : var(--accent);
+  outline      : none;
 }
-.input-massive::placeholder {
-  color: #9CA3AF;
-}
+.input-massive::placeholder { color: #9CA3AF; }
 
-/* Interactive Bento Grid Selectors */
+/* ── Bento Grid Selectors ──────────────────── */
 .bento-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); 
+  gap: 14px;
+  width: 100%;
 }
-.bento-item input[type="checkbox"], .bento-item input[type="radio"] {
-  display: none;
+
+.bento-item input[type="checkbox"],
+.bento-item input[type="radio"] {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
+/* ADD THIS right underneath to show focus states for keyboard users: */
+.bento-item input:focus-visible + .bento-label {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+  box-shadow: 0 10px 25px var(--accent-glow);
+}
+
 .bento-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display        : flex;
+  flex-direction : column;
+  align-items    : center;
   justify-content: center;
-  padding: 24px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border-light);
-  border-radius: 24px;
-  cursor: pointer;
-  transition: var(--transition-snappy);
-  height: 100%;
-  /* NEW: Glass Effect */
-  backdrop-filter: blur(25px) saturate(160%);
-  -webkit-backdrop-filter: blur(25px) saturate(160%);
+  padding        : 22px 14px;
+  background     : var(--surface);
+  border         : 1.5px solid var(--border-light);
+  border-radius  : 22px;
+  cursor         : pointer;
+  transition     : var(--transition-snappy);
+  height         : 100%;
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
 }
 .bento-label i {
-  font-size: 2rem;
-  margin-bottom: 12px;
-  color: var(--text-muted);
-  transition: var(--transition-snappy);
+  font-size     : 1.8rem;
+  margin-bottom : 10px;
+  color         : var(--text-muted);
+  transition    : var(--transition-snappy);
 }
+.bento-label span { font-size: 0.85rem; }
+
 .bento-item input:checked + .bento-label {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-  transform: translateY(-5px);
-  box-shadow: 0 10px 25px var(--accent-glow);
+  background   : var(--accent);
+  color        : white;
+  border-color : var(--accent);
+  transform    : translateY(-4px);
+  box-shadow   : 0 10px 25px var(--accent-glow);
 }
 .bento-item input:checked + .bento-label i {
   color: white;
 }
 
-/* ── Itinerary Results Styling ── */
+/* ── Itinerary Page ────────────────────────── */
 .itinerary-card {
-  background: var(--surface);
-  border-radius: 24px;
-  padding: 24px;
-  margin-bottom: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  transition: var(--transition-smooth);
-  /* NEW: Glass Effect */
+  background     : var(--surface);
+  border-radius  : 20px;
+  padding        : 20px;
+  margin-bottom  : 0;
+  border         : 1px solid rgba(255,255,255,0.4);
+  transition     : var(--transition-smooth);
   backdrop-filter: blur(25px) saturate(160%);
   -webkit-backdrop-filter: blur(25px) saturate(160%);
 }
 .itinerary-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 20px 40px rgba(0,0,0,0.06);
-  background: rgba(255, 255, 255, 0.65);
-}
-.day-badge {
-  background: var(--accent);
-  color: white;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-weight: 700;
-  font-size: 1.2rem;
-  box-shadow: 0 4px 12px var(--accent-glow);
+  transform : translateY(-3px);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.07);
+  background: rgba(255,255,255,0.68);
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar { width: 8px; }
+/* Day number circle */
+.day-badge {
+  background : var(--accent);
+  color      : white;
+  width      : 42px;
+  height     : 42px;
+  display    : flex;
+  align-items: center;
+  justify-content: center;
+  border-radius  : 50%;
+  font-weight    : 700;
+  font-size      : 1.1rem;
+  flex-shrink    : 0;
+  box-shadow     : 0 4px 12px var(--accent-glow);
+}
+
+/* Stop number inside place card */
+.stop-number {
+  width          : 28px;
+  height         : 28px;
+  border-radius  : 50%;
+  background     : var(--accent);
+  color          : white;
+  font-weight    : 700;
+  font-size      : 0.78rem;
+  display        : flex;
+  align-items    : center;
+  justify-content: center;
+  flex-shrink    : 0;
+}
+
+/* Place card left accent border */
+.place-card {
+  border-left: 4px solid var(--accent) !important;
+  transition : var(--transition-snappy) !important;
+}
+.place-card:hover {
+  transform : translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.09) !important;
+}
+
+/* ── Category Pills ────────────────────────── */
+.category-pill {
+  font-size    : 0.72rem;
+  font-weight  : 600;
+  padding      : 4px 12px;
+  border-radius: 100px;
+}
+.category-food        { background:#FEF3C7; color:#92400E; }
+.category-beach       { background:#E0F2FE; color:#075985; }
+.category-nature      { background:#DCFCE7; color:#14532D; }
+.category-museums     { background:#EDE9FE; color:#4C1D95; }
+.category-nightlife   { background:#111827; color:#F9FAFB; }
+.category-sightseeing { background:#DBEAFE; color:#1E40AF; }
+
+/* ── Map container ─────────────────────────── */
+#map {
+  border : 1px solid rgba(255,255,255,0.3);
+  z-index: 1;
+}
+
+/* Hide Leaflet Routing Machine panel */
+.leaflet-routing-container { display: none !important; }
+
+/* ── My Trips page ─────────────────────────── */
+.form-check-input:checked {
+  background-color: var(--accent);
+  border-color    : var(--accent);
+}
+
+/* ── Custom Scrollbar ──────────────────────── */
+::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.22); }
+
+/* ── Premium Staggered Animations ── */
+.bento-item, .place-card, .itinerary-card {
+  opacity: 0;
+  animation: slideUpFade 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Stagger the delays for the bento grid (Dashboard) */
+.bento-grid .bento-item:nth-child(1) { animation-delay: 0.05s; }
+.bento-grid .bento-item:nth-child(2) { animation-delay: 0.15s; }
+.bento-grid .bento-item:nth-child(3) { animation-delay: 0.25s; }
+.bento-grid .bento-item:nth-child(4) { animation-delay: 0.35s; }
+.bento-grid .bento-item:nth-child(5) { animation-delay: 0.45s; }
+
+/* Stagger the delays for itinerary stops (Map Page) */
+.col-lg-5 .mb-4:nth-child(1) .place-card { animation-delay: 0.1s; }
+.col-lg-5 .mb-4:nth-child(2) .place-card { animation-delay: 0.2s; }
+.col-lg-5 .mb-4:nth-child(3) .place-card { animation-delay: 0.3s; }
+.col-lg-5 .mb-4:nth-child(4) .place-card { animation-delay: 0.4s; }
+
+@keyframes slideUpFade {
+  0% { 
+    opacity: 0; 
+    transform: translateY(30px) scale(0.98); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateY(0) scale(1); 
+  }
+}
+/* ADD THIS at the bottom of style.css */
+.skeleton-box {
+  background: linear-gradient(90deg, rgba(255,255,255,0.4) 25%, rgba(255,255,255,0.8) 50%, rgba(255,255,255,0.4) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 12px;
+  height: 60px;
+  width: 100%;
+  margin-bottom: 15px;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

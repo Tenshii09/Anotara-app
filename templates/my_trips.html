@@ -1,116 +1,110 @@
 {% extends 'base.html' %}
-{% block title %}My Journeys — TravelAI{% endblock %}
+{% block title %}My Journeys — Anotara{% endblock %}
 
 {% block content %}
-<div class="container" style="padding-top: 120px; max-width: 1200px;">
-  
-  <form id="bulkDeleteForm" action="{{ url_for('delete_trips') }}" method="POST">
-    
-    <div class="d-flex flex-wrap justify-content-between align-items-end mb-5 fade-in-up">
-      <div>
-        <h1 class="display-4 serif fw-bold mb-2">Your Journeys.</h1>
-        <p class="text-muted fs-5 m-0">A collection of your curated itineraries.</p>
-      </div>
-      
-      <div class="d-flex gap-2 mt-4 mt-md-0">
-        <button type="button" id="toggleDeleteMode" class="btn-outline-luxury border-danger text-danger">
-          <i class="bi bi-trash3 me-2"></i>Delete Mode
-        </button>
-        
-        <button type="submit" id="confirmDeleteBtn" class="btn btn-danger rounded-pill px-4 d-none" 
-                onclick="return confirm('Delete selected journeys?');">
-          Confirm Deletion
-        </button>
+<div class="container py-5 mt-5">
 
-        <a href="{{ url_for('dashboard') }}" class="btn-luxury text-decoration-none">
-          <i class="bi bi-plus-lg me-2"></i>New Trip
-        </a>
+  <div class="d-flex justify-content-between align-items-center mb-5">
+    <div>
+      <h1 class="serif mb-1">My Journeys</h1>
+      <p class="text-muted">Your saved Philippine itineraries.</p>
+    </div>
+    <a href="{{ url_for('dashboard') }}"
+       class="btn-luxury text-decoration-none"
+       style="padding:12px 28px; font-size:0.9rem;">
+      + Plan New Trip
+    </a>
+  </div>
+
+  {% if trips %}
+
+  <!-- Bulk delete form -->
+  <form method="POST" action="{{ url_for('delete_trips') }}" id="deleteForm">
+
+    <!-- Select all + Delete button bar -->
+    <div class="d-flex align-items-center gap-3 mb-4">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="selectAll">
+        <label class="form-check-label small text-muted" for="selectAll">
+          Select All
+        </label>
       </div>
+      <button type="submit" class="btn-outline-luxury"
+              style="padding:8px 20px; font-size:0.82rem; color:#dc3545; border-color:#dc3545;"
+              onclick="return confirm('Delete selected trips?')">
+        <i class="bi bi-trash3 me-1"></i> Delete Selected
+      </button>
     </div>
 
-    {% if trips %}
-      <div class="row g-4">
-        {% for trip in trips %}
-        <div class="col-md-6 col-lg-4 fade-in-up delay-{{ loop.index % 3 + 1 }}">
-          <div class="itinerary-card h-100 d-flex flex-column position-relative overflow-hidden" id="card_{{ trip.id }}">
-            
-            <div class="delete-overlay d-none position-absolute w-100 h-100 d-flex align-items-center justify-content-center" 
-                 style="background: rgba(0,0,0,0.02); z-index: 20; cursor: pointer;"
-                 onclick="toggleSelection('{{ trip.id }}')">
-                <input type="checkbox" name="trip_ids" value="{{ trip.id }}" id="check_{{ trip.id }}" 
-                       class="form-check-input" style="transform: scale(1.8); cursor: pointer;">
-            </div>
+    <!-- Trip cards grid -->
+    <div class="row g-4">
+      {% for trip in trips %}
+      <div class="col-md-6 col-lg-4">
+        <div class="itinerary-card h-100 position-relative">
 
-            <a href="#" class="text-decoration-none text-dark d-block">
-              <div class="mb-4">
-                <span class="badge bg-dark text-white rounded-pill px-3 py-2 fw-medium mb-3">
-                  <i class="bi bi-geo-alt-fill me-1"></i> {{ trip.total_places }} Stops
-                </span>
-                <h3 class="serif fw-bold mb-2">{{ trip.trip_name }}</h3>
-                <p class="text-muted small fw-medium text-uppercase tracking-wide">
-                  Created {{ trip.created_at.strftime('%B %d, %Y') if trip.created_at else 'Recently' }}
-                </p>
-              </div>
-
-              <div class="mt-auto pt-4 border-top border-light d-flex align-items-center justify-content-between text-dark fw-bold">
-                <span>View Details</span>
-                <div class="bg-light rounded-circle d-flex align-items-center justify-content-center" style="width: 35px; height: 35px;">
-                  <i class="bi bi-arrow-right"></i>
-                </div>
-              </div>
-            </a>
-
+          <!-- Checkbox -->
+          <div class="position-absolute" style="top:16px; right:16px;">
+            <input class="form-check-input trip-checkbox" type="checkbox"
+                   name="trip_ids" value="{{ trip.id }}">
           </div>
+
+          <!-- Flag + Trip name -->
+          <div class="mb-3">
+            <span style="font-size:1.8rem;">🇵🇭</span>
+            <h5 class="fw-700 serif mt-2 mb-1">{{ trip.trip_name }}</h5>
+          </div>
+
+          <!-- Meta -->
+          <div class="d-flex flex-column gap-1 small text-muted">
+            <span>
+              <i class="bi bi-pin-map me-1"></i>
+              {{ trip.total_places }} places planned
+            </span>
+            <span>
+              <i class="bi bi-calendar3 me-1"></i>
+              {% if trip.created_at %}
+                {{ trip.created_at.strftime('%B %d, %Y') }}
+              {% else %}
+                Date unavailable
+              {% endif %}
+            </span>
+          </div>
+
         </div>
-        {% endfor %}
       </div>
-    {% else %}
-      <div class="text-center py-5 mt-5">
-          <h2 class="serif">No journeys saved yet.</h2>
-      </div>
-    {% endif %}
+      {% endfor %}
+    </div>
+
   </form>
+
+  {% else %}
+
+  <!-- Empty state -->
+  <div class="text-center py-5">
+    <div style="font-size:5rem;">🌴</div>
+    <h3 class="serif mt-3 mb-2">No trips yet</h3>
+    <p class="text-muted mb-4">
+      Start planning your first Philippine adventure.
+    </p>
+    <a href="{{ url_for('dashboard') }}"
+       class="btn-luxury text-decoration-none"
+       style="padding:14px 32px;">
+      Plan My First Trip
+    </a>
+  </div>
+
+  {% endif %}
+
 </div>
+{% endblock %}
 
+
+{% block scripts %}
 <script>
-  const toggleBtn = document.getElementById('toggleDeleteMode');
-  const confirmBtn = document.getElementById('confirmDeleteBtn');
-  const overlays = document.querySelectorAll('.delete-overlay');
-
-  toggleBtn.addEventListener('click', () => {
-      const isActivating = confirmBtn.classList.contains('d-none');
-      
-      if(isActivating) {
-          confirmBtn.classList.remove('d-none');
-          toggleBtn.innerText = "Cancel";
-          toggleBtn.classList.replace('text-danger', 'text-secondary');
-          overlays.forEach(el => el.classList.remove('d-none'));
-      } else {
-          confirmBtn.classList.add('d-none');
-          toggleBtn.innerHTML = '<i class="bi bi-trash3 me-2"></i>Delete Mode';
-          toggleBtn.classList.replace('text-secondary', 'text-danger');
-          overlays.forEach(el => {
-              el.classList.add('d-none');
-              el.parentElement.style.border = "1px solid rgba(255, 255, 255, 0.4)";
-              el.parentElement.style.background = "rgba(255, 255, 255, 0.55)";
-          });
-          document.querySelectorAll('input[name="trip_ids"]').forEach(i => i.checked = false);
-      }
+  // Select all checkboxes toggle
+  document.getElementById('selectAll')?.addEventListener('change', function () {
+    document.querySelectorAll('.trip-checkbox')
+      .forEach(cb => cb.checked = this.checked);
   });
-
-  // Updated Selection Logic for better visual feedback
-  function toggleSelection(id) {
-      const cb = document.getElementById('check_' + id);
-      const card = document.getElementById('card_' + id);
-      cb.checked = !cb.checked;
-      
-      if(cb.checked) {
-          card.style.border = "3px solid #e11d48";
-          card.style.background = "rgba(225, 29, 72, 0.05)";
-      } else {
-          card.style.border = "1px solid rgba(255, 255, 255, 0.4)";
-          card.style.background = "rgba(255, 255, 255, 0.55)";
-      }
-  }
 </script>
 {% endblock %}

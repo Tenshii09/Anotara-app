@@ -1,38 +1,47 @@
 {% extends 'base.html' %}
-{% block title %}Join — TravelAI{% endblock %}
+{% block title %}Join Anotara{% endblock %}
 
 {% block content %}
-<div class="container-fluid d-flex align-items-center justify-content-center" style="min-height: 100vh; padding-top: 120px; padding-bottom: 40px;">
-  <div class="col-11 col-md-6 col-lg-4">
-    
-    <div class="text-center mb-5 fade-in-up">
-      <h1 class="display-4 serif fw-bold mb-3">Begin your journey.</h1>
-      <p class="text-muted fs-5">Create an account to design your perfect trip.</p>
+<div class="auth-container">
+  <div class="auth-card fade-in-up">
+
+    <div class="text-center mb-4">
+      <div style="font-size:3rem;">🌴</div>
+      <h1 class="serif mt-2" style="font-size:2rem;">Begin your journey.</h1>
+      <p class="text-muted small">Create a free account to design your perfect Philippine trip.</p>
     </div>
 
     <form method="POST" action="{{ url_for('register') }}">
-      
-      <div class="mb-4 fade-in-up delay-1">
-        <input type="text" class="form-control form-control-lg border-0 border-bottom border-dark rounded-0 px-2 py-3 shadow-none bg-transparent" style="font-size: 1.1rem; font-weight: 500;" name="username" placeholder="Username" required minlength="3">
-      </div>
-      
-      <div class="mb-4 fade-in-up delay-1">
-        <input type="email" class="form-control form-control-lg border-0 border-bottom border-dark rounded-0 px-2 py-3 shadow-none bg-transparent" style="font-size: 1.1rem; font-weight: 500;" name="email" placeholder="Email address" required>
-      </div>
-      
-      <div class="mb-5 fade-in-up delay-2">
-        <input type="password" class="form-control form-control-lg border-0 border-bottom border-dark rounded-0 px-2 py-3 shadow-none bg-transparent" style="font-size: 1.1rem; font-weight: 500;" name="password" placeholder="Password (min. 6 chars)" required minlength="6">
+
+      <div class="mb-3">
+        <label class="form-label small fw-600 text-muted">Username</label>
+        <input type="text" name="username" class="form-control auth-input"
+               placeholder="e.g. juan_dela_cruz" required minlength="3" maxlength="50" autofocus>
       </div>
 
-      <div class="fade-in-up delay-3 text-center">
-        <button type="submit" class="btn-luxury w-100 mb-4 py-3">Create Account</button>
-        <p class="text-muted fw-medium">
-          Already have an account? 
-          <a href="{{ url_for('login') }}" class="text-dark fw-bold text-decoration-none border-bottom border-dark pb-1">Sign in</a>
-        </p>
+      <div class="mb-3">
+        <label class="form-label small fw-600 text-muted">Email Address</label>
+        <input type="email" name="email" class="form-control auth-input"
+               placeholder="you@email.com" required>
       </div>
+
+      <div class="mb-4">
+        <label class="form-label small fw-600 text-muted">Password</label>
+        <input type="password" name="password" class="form-control auth-input"
+               placeholder="Minimum 6 characters" required minlength="6">
+      </div>
+
+      <button type="submit" class="btn-luxury w-100"
+              style="display:block; text-align:center;">
+        Create Account
+      </button>
 
     </form>
+
+    <p class="text-center text-muted small mt-4 mb-0">
+      Already have an account?
+      <a href="{{ url_for('login') }}" class="text-dark fw-600">Sign in</a>
+    </p>
 
   </div>
 </div>
