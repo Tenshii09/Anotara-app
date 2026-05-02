@@ -62,7 +62,8 @@ def get_db():
         host     = app.config['DB_HOST'],
         user     = app.config['DB_USER'],
         password = app.config['DB_PASSWORD'],
-        database = app.config['DB_NAME']
+        database = app.config['DB_NAME'],
+        port     = app.config.get('DB_PORT', '3306') # Added port
     )
 
 
