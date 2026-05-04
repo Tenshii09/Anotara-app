@@ -10,6 +10,9 @@ import mysql.connector
 import requests
 import math
 from config import Config
+import pandas as pd
+import joblib
+import os
 
 # ─────────────────────────────────────────────
 # App Initialization
@@ -18,6 +21,21 @@ from config import Config
 app = Flask(__name__)
 app.config.from_object(Config)
 bcrypt = Bcrypt(app)
+
+# ─────────────────────────────────────────────
+# LOAD MACHINE LEARNING MODEL
+# ─────────────────────────────────────────────
+ML_MODEL_PATH = 'anotara_ml_model.pkl'
+ML_COLUMNS_PATH = 'anotara_model_columns.pkl'
+
+if os.path.exists(ML_MODEL_PATH) and os.path.exists(ML_COLUMNS_PATH):
+    ml_model = joblib.load(ML_MODEL_PATH)
+    ml_columns = joblib.load(ML_COLUMNS_PATH)
+    print("✅ Machine Learning Model Loaded Successfully!")
+else:
+    ml_model = None
+    ml_columns = None
+    print("⚠️ ML Model not found. Falling back to rule-based scoring.")
 
 # ── Philippines bounding box ──────────────────
 # Used to validate that searched destinations are inside the Philippines
@@ -615,6 +633,43 @@ def haversine(lat1, lon1, lat2, lon2):
             math.sin(dlon / 2) ** 2)
     return R * 2 * math.asin(math.sqrt(a))
 
+def score_place_ml(place, preferences, budget, num_days):
+    """
+    Uses the trained Random Forest model to predict how good of a match a place is.
+    Returns a score from 0.0 to 10.0 based on prediction probability.
+    """
+    if ml_model is None or ml_columns is None:
+        # Failsafe: if the model file is missing, use the old hardcoded logic
+        return score_place(place, preferences, budget)
+
+    # 1. Format the current place and user input to match our training CSV structure
+    row = {
+        'user_budget': budget,
+        'user_days': num_days,
+        'pref_food': 1 if 'food' in preferences else 0,
+        'pref_beach': 1 if 'beach' in preferences else 0,
+        'pref_nature': 1 if 'nature' in preferences else 0,
+        'pref_museums': 1 if 'museums' in preferences else 0,
+        'pref_nightlife': 1 if 'nightlife' in preferences else 0,
+        'place_province': place.get('city', ''),  # 'city' key holds the destination in your current dicts
+        'place_category': place.get('category', ''),
+        'place_rating': float(place.get('rating') or 3.5),
+    }
+    
+    # 2. Convert to DataFrame and apply One-Hot Encoding
+    df = pd.DataFrame([row])
+    df_encoded = pd.get_dummies(df, columns=['user_budget', 'place_province', 'place_category'])
+    
+    # 3. Align the columns so they match exactly what the model was trained on
+    # (Fills any missing columns with 0)
+    df_aligned = df_encoded.reindex(columns=ml_columns, fill_value=0)
+    
+    # 4. Predict the probability of a match (Class 1)
+    # predict_proba returns an array like [[prob_class_0, prob_class_1]]
+    match_probability = ml_model.predict_proba(df_aligned)[0][1]
+    
+    # Convert the 0.0 - 1.0 probability into a 0.0 - 10.0 score so your routing logic can rank them
+    return match_probability * 10.0
 
 def score_place(place, preferences, budget):
     """
@@ -659,18 +714,18 @@ def score_place(place, preferences, budget):
 def build_itinerary(places, preferences, num_days, budget, destination, dest_coords=None):
     """
     Full recommendation pipeline:
-    1. Score all places
+    1. Score all places using the AI Model
     2. Deduplicate by name
-    3. Pad with PH seed data if needed (using real coords)
+    3. Pad with PH seed data if needed
     4. Greedy nearest-neighbor routing
     5. Distribute sequentially into days (4 places/day)
     """
     PLACES_PER_DAY = 4
     total_needed   = num_days * PLACES_PER_DAY
 
-    # Score
+    # ─── UPDATED: Score using the Machine Learning Model ───
     for place in places:
-        place['score'] = score_place(place, preferences, budget)
+        place['score'] = score_place_ml(place, preferences, budget, num_days)
 
     # Sort + deduplicate
     scored = sorted(places, key=lambda p: p['score'], reverse=True)
@@ -687,7 +742,8 @@ def build_itinerary(places, preferences, num_days, budget, destination, dest_coo
         for s in seeds:
             if s['name'] not in seen:
                 seen.add(s['name'])
-                s['score'] = score_place(s, preferences, budget)
+                # ─── UPDATED: Score seed data using the ML Model ───
+                s['score'] = score_place_ml(s, preferences, budget, num_days)
                 unique.append(s)
 
     # Generic filler if still short
