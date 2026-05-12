@@ -853,6 +853,67 @@ def delete_trips():
 
     return redirect(url_for('my_trips'))
 
+@app.route('/trip/<int:trip_id>')
+@login_required
+def view_trip(trip_id):
+    """Loads a saved trip from the database and displays it on the itinerary map."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True, buffered=True)
+    
+    # 1. Verify the trip exists and belongs to this user
+    cursor.execute(
+        "SELECT * FROM itineraries WHERE id = %s AND user_id = %s",
+        (trip_id, session['user_id'])
+    )
+    trip = cursor.fetchone()
+    
+    if not trip:
+        flash('Trip not found.', 'danger')
+        cursor.close()
+        db.close()
+        return redirect(url_for('my_trips'))
+        
+    # 2. Fetch all the saved places for this specific trip
+    cursor.execute(
+        """
+        SELECT ii.day_number, p.* FROM itinerary_items ii
+        JOIN places p ON ii.place_id = p.id
+        WHERE ii.itinerary_id = %s
+        ORDER BY ii.day_number ASC, ii.id ASC
+        """,
+        (trip_id,)
+    )
+    items = cursor.fetchall()
+    cursor.close()
+    db.close()
+    
+    # 3. Group the places back into days (e.g., Day 1, Day 2)
+    itinerary = {}
+    num_days = 0
+    for item in items:
+        day = item['day_number']
+        if day > num_days:
+            num_days = day
+        if day not in itinerary:
+            itinerary[day] = []
+        itinerary[day].append(item)
+        
+    # 4. Extract the destination name (Removes "Trip to " from the title)
+    destination = trip['trip_name'].replace('Trip to ', '')
+    dest_coords = geocode_mapbox(destination)
+    
+    # 5. Render the exact same map template we use for new trips
+    return render_template(
+        'itinerary.html',
+        itinerary=itinerary,
+        destination=destination,
+        num_days=num_days,
+        budget='Saved Trip', # Fallback label
+        preferences=[],      # Fallback label
+        dest_coords=dest_coords,
+        mapbox_token=app.config.get('MAPBOX_TOKEN', '')
+    )
+
 
 # ─────────────────────────────────────────────
 # JSON API ENDPOINT

@@ -69,6 +69,13 @@
               {% endif %}
             </span>
           </div>
+          <div class="mt-4 pt-3" style="border-top: 1px solid rgba(0,0,0,0.05);">
+            <a href="{{ url_for('view_trip', trip_id=trip.id) }}" 
+               class="text-decoration-none fw-600" 
+               style="color: var(--text-dark); font-size: 0.9rem;">
+               View Itinerary <i class="bi bi-arrow-right ms-1"></i>
+            </a>
+          </div>
 
         </div>
       </div>
