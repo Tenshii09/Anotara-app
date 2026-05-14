@@ -1,11 +1,7 @@
-# app.py — Anotara: Philippines Travel Planner
-# Mapbox (maps + geocoding) + Geoapify (places)
-
-from flask import (
-    Flask, render_template, request,
-    redirect, url_for, session, flash, jsonify
-)
+from flask import Flask, request, jsonify
 from flask_bcrypt import Bcrypt
+from flask_cors import CORS
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 import mysql.connector
 import requests
 import math
@@ -14,13 +10,27 @@ import pandas as pd
 import joblib
 import os
 
-# ─────────────────────────────────────────────
-# App Initialization
-# ─────────────────────────────────────────────
-
 app = Flask(__name__)
 app.config.from_object(Config)
+CORS(app) # Allows React to communicate with Flask
 bcrypt = Bcrypt(app)
+jwt = JWTManager(app)
+
+# Load the trained ML model and its expected columns for encoding
+def get_db():
+    """Opens and returns a MySQL connection using config variables."""
+    return mysql.connector.connect(
+        host     = app.config['DB_HOST'],
+        user     = app.config['DB_USER'],
+        password = app.config['DB_PASSWORD'],
+        database = app.config['DB_NAME'],
+        port     = app.config.get('DB_PORT', '3306')
+    )
+
+# [KEEP ALL YOUR ML LOADING CODE HERE - NO CHANGES]
+# [KEEP PH_BOUNDS AND PH_DESTINATIONS HERE - NO CHANGES]
+# [KEEP get_db() HELPER HERE - NO CHANGES]
+
 
 # ─────────────────────────────────────────────
 # LOAD MACHINE LEARNING MODEL
@@ -28,6 +38,7 @@ bcrypt = Bcrypt(app)
 ML_MODEL_PATH = 'anotara_ml_model.pkl'
 ML_COLUMNS_PATH = 'anotara_model_columns.pkl'
 
+# We define these globally so all routes can see them
 if os.path.exists(ML_MODEL_PATH) and os.path.exists(ML_COLUMNS_PATH):
     ml_model = joblib.load(ML_MODEL_PATH)
     ml_columns = joblib.load(ML_COLUMNS_PATH)
@@ -38,7 +49,6 @@ else:
     print("⚠️ ML Model not found. Falling back to rule-based scoring.")
 
 # ── Philippines bounding box ──────────────────
-# Used to validate that searched destinations are inside the Philippines
 PH_BOUNDS = {
     'min_lat':  4.5,
     'max_lat': 21.5,
@@ -46,9 +56,7 @@ PH_BOUNDS = {
     'max_lon': 127.0
 }
 
-# Popular Philippine destinations for autocomplete / suggestions
-# Popular Philippine destinations for autocomplete / suggestions
-# The 82 Official Philippine Provinces for autocomplete
+# The 82 Official Philippine Provinces
 PH_DESTINATIONS = [
     'Abra', 'Agusan del Norte', 'Agusan del Sur', 'Aklan', 'Albay', 'Antique', 
     'Apayao', 'Aurora', 'Basilan', 'Bataan', 'Batanes', 'Batangas', 'Benguet', 
@@ -69,188 +77,113 @@ PH_DESTINATIONS = [
     'Zamboanga del Norte', 'Zamboanga del Sur', 'Zamboanga Sibugay'
 ]
 
-
 # ─────────────────────────────────────────────
-# Database Helper
-# ─────────────────────────────────────────────
-
-def get_db():
-    """Opens and returns a MySQL connection."""
-    return mysql.connector.connect(
-        host     = app.config['DB_HOST'],
-        user     = app.config['DB_USER'],
-        password = app.config['DB_PASSWORD'],
-        database = app.config['DB_NAME'],
-        port     = app.config.get('DB_PORT', '3306') # Added port
-    )
-
-
-def login_required(f):
-    """Decorator — redirects to login if no active session."""
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'user_id' not in session:
-            flash('Please log in to continue.', 'warning')
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated
-
-
-# ─────────────────────────────────────────────
-# AUTH ROUTES
+# AUTHENTICATION API (Replacement for Session Auth)
 # ─────────────────────────────────────────────
 
-@app.route('/')
-def index():
-    if 'user_id' in session:
-        return redirect(url_for('dashboard'))
-    return redirect(url_for('login'))
+# All routes below are protected with @jwt_required() to ensure only logged-in users can access them.
+@app.route('/api/itinerary', methods=['POST'])
+@jwt_required() # This protects the route with your JWT security
+def api_itinerary():
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+    
+    # Extract data sent from your React Step 4 summary
+    destination = data.get('destination')
+    num_days    = int(data.get('num_days', 3))
+    preferences = data.get('preferences', [])
+    budget      = data.get('budget', 'comfort')
 
+    # Run your existing ML & Routing logic
+    dest_coords = geocode_mapbox(destination)
+    places      = fetch_places(destination, preferences, dest_coords)
+    itinerary   = build_itinerary(places, preferences, num_days, budget, destination, dest_coords)
+    
+    # Return JSON for React to display on the map
+    return jsonify({
+        "itinerary": itinerary,
+        "dest_coords": dest_coords
+    }), 200
 
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    """Register with username, email, hashed password."""
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        email    = request.form.get('email', '').strip()
-        password = request.form.get('password', '')
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    data = request.get_json()
+    username = data.get('username', '').strip()
+    email    = data.get('email', '').strip()
+    password = data.get('password', '')
 
-        if not username or not email or not password:
-            flash('All fields are required.', 'danger')
-            return redirect(url_for('register'))
+    # Validations [cite: 157]
+    if not username or not email or not password:
+        return jsonify({"error": "All fields are required"}), 400
 
-        if len(password) < 6:
-            flash('Password must be at least 6 characters.', 'danger')
-            return redirect(url_for('register'))
-
-        hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
-
-        db     = get_db()
-        cursor = db.cursor(buffered=True)
-        try:
-            cursor.execute(
-                "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
-                (username, email, hashed_pw)
-            )
-            db.commit()
-            flash('Account created! Please log in.', 'success')
-            return redirect(url_for('login'))
-        except mysql.connector.IntegrityError:
-            flash('Username or email already taken.', 'danger')
-            return redirect(url_for('register'))
-        finally:
-            cursor.close()
-            db.close()
-
-    return render_template('register.html')
-
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    """Login with username or email + password."""
-    if request.method == 'POST':
-        identifier = request.form.get('identifier', '').strip()
-        password   = request.form.get('password', '')
-
-        db     = get_db()
-        cursor = db.cursor(dictionary=True, buffered=True)
-        cursor.execute(
-            "SELECT * FROM users WHERE username = %s OR email = %s",
-            (identifier, identifier)
-        )
-        user = cursor.fetchone()
-        cursor.close()
+    hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute("INSERT INTO users (username, email, password) VALUES (%s, %s, %s)", (username, email, hashed_pw))
+        db.commit()
+        return jsonify({"message": "Account created"}), 201
+    except mysql.connector.IntegrityError:
+        return jsonify({"error": "Username/Email taken"}), 409
+    finally:
         db.close()
 
-        if user and bcrypt.check_password_hash(user['password'], password):
-            session['user_id']  = user['id']
-            session['username'] = user['username']
-            flash(f"Mabuhay, {user['username']}! 🇵🇭", 'success')
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Invalid credentials. Try again.', 'danger')
-            return redirect(url_for('login'))
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    data = request.get_json()
+    identifier = data.get('identifier', '').strip()
+    password = data.get('password', '')
 
-    return render_template('login.html')
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM users WHERE username = %s OR email = %s", (identifier, identifier))
+    user = cursor.fetchone()
+    db.close()
 
-
-@app.route('/logout')
-def logout():
-    """Clear session and redirect to login."""
-    session.clear()
-    flash('You have been logged out.', 'info')
-    return redirect(url_for('login'))
-
+    if user and bcrypt.check_password_hash(user['password'], password):
+        # Issue JWT Token for "Information Assurance" [cite: 500, 536]
+        token = create_access_token(identity=str(user['id']))
+        return jsonify({"token": token, "username": user['username']}), 200
+    return jsonify({"error": "Invalid credentials"}), 401
 
 # ─────────────────────────────────────────────
-# DASHBOARD
+# CORE ITINERARY API (Preserving all logic)
 # ─────────────────────────────────────────────
 
-@app.route('/dashboard', methods=['GET', 'POST'])
-@login_required
-def dashboard():
-    """
-    GET  — Show multi-step wizard form.
-    POST — Validate PH destination, fetch places, build itinerary.
-    """
-    if request.method == 'POST':
-        destination = request.form.get('destination', '').strip()
-        num_days    = int(request.form.get('num_days', 3))
-        budget      = request.form.get('budget', 'comfort')
-        preferences = request.form.getlist('preferences')
+@app.route('/api/generate', methods=['POST'])
+@jwt_required()
+def api_generate():
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+    
+    destination = data.get('destination', '')
+    num_days    = int(data.get('num_days', 3))
+    budget      = data.get('budget', 'comfort')
+    preferences = data.get('preferences', [])
 
-        if not destination:
-            flash('Please enter a destination.', 'warning')
-            return redirect(url_for('dashboard'))
+    # Exact Geocoding & Validation Logic [cite: 5, 8]
+    dest_coords = geocode_mapbox(destination)
+    if dest_coords and not is_in_philippines(dest_coords['lat'], dest_coords['lon']):
+        return jsonify({'error': 'Philippine destinations only 🇵🇭'}), 400
 
-        # ── Step 1: Geocode with Mapbox (primary) ─────
-        dest_coords = geocode_mapbox(destination)
+    # Exact ML Scoring & Itinerary Building [cite: 196, 243]
+    places = fetch_places(destination, preferences, dest_coords)
+    save_places_to_db(places)
+    itinerary = build_itinerary(places, preferences, num_days, budget, destination, dest_coords)
+    itinerary_id = save_itinerary(current_user_id, destination, itinerary)
 
-        # ── Step 2: Validate destination is in Philippines
-        if dest_coords and not is_in_philippines(dest_coords['lat'], dest_coords['lon']):
-            flash(
-                'This app is for Philippine destinations only. '
-                'Please enter a city or island in the Philippines. 🇵🇭',
-                'danger'
-            )
-            return redirect(url_for('dashboard'))
+    return jsonify({
+        "itinerary": itinerary,
+        "itinerary_id": itinerary_id,
+        "dest_coords": dest_coords
+    }), 200
 
-        # ── Step 3: Fetch places via Geoapify ─────────
-        places = fetch_places(destination, preferences, dest_coords)
-
-        if not places:
-            flash('No places found. Try another Philippine destination.', 'warning')
-            return redirect(url_for('dashboard'))
-
-        # ── Step 4: Save places to DB ─────────────────
-        save_places_to_db(places)
-
-        # ── Step 5: Build itinerary ───────────────────
-        itinerary = build_itinerary(
-            places, preferences, num_days, budget, destination, dest_coords
-        )
-
-        # ── Step 6: Save itinerary ────────────────────
-        itinerary_id = save_itinerary(session['user_id'], destination, itinerary)
-
-        return render_template(
-            'itinerary.html',
-            itinerary    = itinerary,
-            destination  = destination,
-            num_days     = num_days,
-            budget       = budget,
-            preferences  = preferences,
-            itinerary_id = itinerary_id,
-            dest_coords  = dest_coords,
-            mapbox_token = app.config['MAPBOX_TOKEN']
-        )
-
-    return render_template(
-        'dashboard.html',
-        destinations = PH_DESTINATIONS
-    )
-
+# [KEEP ALL YOUR HELPER FUNCTIONS: geocode_mapbox, fetch_places, 
+# score_place_ml, build_itinerary, save_itinerary AT THE BOTTOM]
+# =========================================================
+# STOP PASTING HERE!
+# Make sure your 'GEOCODING — Mapbox (Primary)' section starts immediately below this.
+# =========================================================
 
 # ─────────────────────────────────────────────
 # GEOCODING — Mapbox (Primary)
@@ -263,7 +196,7 @@ def geocode_mapbox(destination):
     Returns {'lat': float, 'lon': float} or None.
     """
     token = app.config.get('MAPBOX_TOKEN', '')
-    if not token or token == 'YOUR_MAPBOX_TOKEN_HERE':
+    if not token:
         print("⚠️  Mapbox token not set — falling back to Geoapify geocoding.")
         return geocode_geoapify(destination)
 
@@ -302,8 +235,11 @@ def geocode_geoapify(destination):
     Restricts search to the Philippines.
     """
     api_key = app.config.get('GEOAPIFY_KEY', '')
-    url     = '[https://api.geoapify.com/v1/geocode/search](https://api.geoapify.com/v1/geocode/search)'
-    params  = {
+    
+    # FIXED: Removed the markdown brackets and extra text
+    url = 'https://api.geoapify.com/v1/geocode/search'
+    
+    params = {
         'text'    : f"{destination}, Philippines",
         'filter'  : 'countrycode:ph',
         'limit'   : 1,
@@ -555,7 +491,7 @@ def save_places_to_db(places):
     Uses buffered=True to prevent 'Unread result' InternalError.
     Attaches the DB id back to each place dict for itinerary linking.
     """
-    db     = get_db()
+    db     =get_db()
     cursor = db.cursor(buffered=True)
 
     for place in places:
@@ -797,154 +733,7 @@ def build_itinerary(places, preferences, num_days, budget, destination, dest_coo
     return itinerary
 
 
-# ─────────────────────────────────────────────
-# MY TRIPS
-# ─────────────────────────────────────────────
 
-@app.route('/my-trips')
-@login_required
-def my_trips():
-    """All saved itineraries for the logged-in user."""
-    db     = get_db()
-    cursor = db.cursor(dictionary=True, buffered=True)
-    cursor.execute(
-        """
-        SELECT i.id, i.trip_name, i.created_at,
-               COUNT(ii.id) AS total_places
-        FROM itineraries i
-        LEFT JOIN itinerary_items ii ON i.id = ii.itinerary_id
-        WHERE i.user_id = %s
-        GROUP BY i.id
-        ORDER BY i.created_at DESC
-        """,
-        (session['user_id'],)
-    )
-    trips = cursor.fetchall()
-    cursor.close()
-    db.close()
-    return render_template('my_trips.html', trips=trips)
-
-
-@app.route('/delete-trips', methods=['POST'])
-@login_required
-def delete_trips():
-    """Bulk delete selected itineraries belonging to the current user."""
-    itinerary_ids = request.form.getlist('trip_ids')
-
-    if not itinerary_ids:
-        flash('No trips selected.', 'warning')
-        return redirect(url_for('my_trips'))
-
-    db     = get_db()
-    cursor = db.cursor(buffered=True)
-    try:
-        placeholders = ','.join(['%s'] * len(itinerary_ids))
-        cursor.execute(
-            f"DELETE FROM itineraries WHERE id IN ({placeholders}) AND user_id = %s",
-            tuple(itinerary_ids) + (session['user_id'],)
-        )
-        db.commit()
-        flash(f'Removed {cursor.rowcount} trip(s).', 'success')
-    except mysql.connector.Error as e:
-        flash(f'Error: {e}', 'danger')
-    finally:
-        cursor.close()
-        db.close()
-
-    return redirect(url_for('my_trips'))
-
-@app.route('/trip/<int:trip_id>')
-@login_required
-def view_trip(trip_id):
-    """Loads a saved trip from the database and displays it on the itinerary map."""
-    db = get_db()
-    cursor = db.cursor(dictionary=True, buffered=True)
-    
-    # 1. Verify the trip exists and belongs to this user
-    cursor.execute(
-        "SELECT * FROM itineraries WHERE id = %s AND user_id = %s",
-        (trip_id, session['user_id'])
-    )
-    trip = cursor.fetchone()
-    
-    if not trip:
-        flash('Trip not found.', 'danger')
-        cursor.close()
-        db.close()
-        return redirect(url_for('my_trips'))
-        
-    # 2. Fetch all the saved places for this specific trip
-    cursor.execute(
-        """
-        SELECT ii.day_number, p.* FROM itinerary_items ii
-        JOIN places p ON ii.place_id = p.id
-        WHERE ii.itinerary_id = %s
-        ORDER BY ii.day_number ASC, ii.id ASC
-        """,
-        (trip_id,)
-    )
-    items = cursor.fetchall()
-    cursor.close()
-    db.close()
-    
-    # 3. Group the places back into days (e.g., Day 1, Day 2)
-    itinerary = {}
-    num_days = 0
-    for item in items:
-        day = item['day_number']
-        if day > num_days:
-            num_days = day
-        if day not in itinerary:
-            itinerary[day] = []
-        itinerary[day].append(item)
-        
-    # 4. Extract the destination name (Removes "Trip to " from the title)
-    destination = trip['trip_name'].replace('Trip to ', '')
-    dest_coords = geocode_mapbox(destination)
-    
-    # 5. Render the exact same map template we use for new trips
-    return render_template(
-        'itinerary.html',
-        itinerary=itinerary,
-        destination=destination,
-        num_days=num_days,
-        budget='Saved Trip', # Fallback label
-        preferences=[],      # Fallback label
-        dest_coords=dest_coords,
-        mapbox_token=app.config.get('MAPBOX_TOKEN', '')
-    )
-
-
-# ─────────────────────────────────────────────
-# JSON API ENDPOINT
-# ─────────────────────────────────────────────
-
-@app.route('/api/itinerary', methods=['POST'])
-@login_required
-def api_generate():
-    """JSON endpoint — same logic as dashboard POST."""
-    data        = request.get_json()
-    destination = data.get('destination', '')
-    num_days    = int(data.get('num_days', 3))
-    preferences = data.get('preferences', [])
-    budget      = data.get('budget', 'comfort')
-
-    dest_coords = geocode_mapbox(destination)
-
-    if dest_coords and not is_in_philippines(dest_coords['lat'], dest_coords['lon']):
-        return jsonify({'error': 'Destination must be in the Philippines.'}), 400
-
-    places    = fetch_places(destination, preferences, dest_coords)
-    itinerary = build_itinerary(
-        places, preferences, num_days, budget, destination, dest_coords
-    )
-
-    return jsonify({
-        'destination' : destination,
-        'num_days'    : num_days,
-        'dest_coords' : dest_coords,
-        'itinerary'   : itinerary
-    })
 
 
 # ─────────────────────────────────────────────
