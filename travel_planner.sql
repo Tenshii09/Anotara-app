@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS itineraries (
     id         INT AUTO_INCREMENT PRIMARY KEY,
     user_id    INT  NOT NULL,
     trip_name  VARCHAR(100),
+    destination VARCHAR(100),
+    budget     VARCHAR(20),
+    num_days   INT,
+    preferences JSON,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -40,4 +44,18 @@ CREATE TABLE IF NOT EXISTS itinerary_items (
     place_id     INT NOT NULL,
     FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE,
     FOREIGN KEY (place_id)     REFERENCES places(id)
+);
+
+-- Explicit feedback captured from the itinerary page.
+CREATE TABLE IF NOT EXISTS trip_feedback (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    itinerary_id   INT NOT NULL,
+    user_id        INT NOT NULL,
+    place_id       INT NOT NULL,
+    feedback_value TINYINT NOT NULL,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_trip_feedback (itinerary_id, user_id, place_id),
+    FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id)      REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (place_id)     REFERENCES places(id) ON DELETE CASCADE
 );

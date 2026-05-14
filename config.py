@@ -1,3 +1,5 @@
+"""Central environment-based configuration for the Flask backend."""
+
 import os
 from dotenv import load_dotenv
 
