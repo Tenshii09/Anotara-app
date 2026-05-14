@@ -65,7 +65,11 @@ function createTagElement(text, color) {
   return element;
 }
 
-export default function ItineraryMap({ itinerary, destCoords }) {
+export default function ItineraryMap({
+  itinerary,
+  destCoords,
+  activeDay = null,
+}) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
 
@@ -105,6 +109,7 @@ export default function ItineraryMap({ itinerary, destCoords }) {
 
     // Sort the itinerary once so route drawing and sidebar ordering stay in sync.
     const sortedDays = getSortedDays(itinerary);
+    const daysToRender = activeDay ? [Number(activeDay)] : sortedDays;
 
     map.on("load", () => {
       // Terrain makes the scene feel more like the original 3D map presentation.
@@ -153,7 +158,7 @@ export default function ItineraryMap({ itinerary, destCoords }) {
       const allCoordinates = [];
       let sequenceNumber = 1;
 
-      sortedDays.forEach((dayNumber) => {
+      daysToRender.forEach((dayNumber) => {
         const dayPlaces = itinerary[dayNumber] || [];
         const coordinates = dayPlaces.map(getValidCoordinate).filter(Boolean);
 
@@ -255,7 +260,7 @@ export default function ItineraryMap({ itinerary, destCoords }) {
       map.remove();
       mapRef.current = null;
     };
-  }, [itinerary, destCoords]);
+  }, [itinerary, destCoords, activeDay]);
 
   return <div ref={mapContainerRef} className="itinerary-map" />;
 }

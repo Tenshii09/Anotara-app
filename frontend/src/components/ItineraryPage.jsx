@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import ItineraryMap from "./ItineraryMap";
 import { API_BASE_URL } from "../lib/config";
-import { getStoredToken, loadTripData } from "../lib/storage";
+import { getStoredToken, loadTripData, saveTripData } from "../lib/storage";
 
 // If React router state is missing, fall back to localStorage so refreshes still work.
 function getTripFromLocation(locationState) {
@@ -18,8 +18,27 @@ export default function ItineraryPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const trip = getTripFromLocation(location.state);
+  const sortedDays = useMemo(
+    () =>
+      Object.keys(trip.itinerary || {})
+        .map(Number)
+        .sort((left, right) => left - right),
+    [trip.itinerary],
+  );
+  const [activeDay, setActiveDay] = useState(sortedDays[0] || 1);
+  const [localItinerary, setLocalItinerary] = useState(trip.itinerary);
   const [feedbackState, setFeedbackState] = useState({});
   const [feedbackError, setFeedbackError] = useState("");
+
+  useEffect(() => {
+    setLocalItinerary(trip.itinerary);
+  }, [trip.itinerary]);
+
+  useEffect(() => {
+    if (!sortedDays.includes(activeDay) && sortedDays.length > 0) {
+      setActiveDay(sortedDays[0]);
+    }
+  }, [activeDay, sortedDays]);
 
   // Without itinerary data there is nothing to render, so redirect users back to the wizard path.
   if (!trip?.itinerary || !trip?.destCoords) {
@@ -50,9 +69,49 @@ export default function ItineraryPage() {
     );
   }
 
-  const sortedDays = Object.keys(trip.itinerary)
-    .map(Number)
-    .sort((left, right) => left - right);
+  const updateTripState = (nextItinerary) => {
+    setLocalItinerary(nextItinerary);
+    saveTripData({ ...trip, itinerary: nextItinerary });
+  };
+
+  const persistDayOrder = async (dayNumber, nextPlaces) => {
+    if (!trip.itineraryId) {
+      return;
+    }
+
+    const token = getStoredToken();
+    const response = await fetch(
+      `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/items/reorder`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          items: nextPlaces.map((place, index) => ({
+            item_id: place.item_id,
+            day_number: dayNumber,
+            sequence_order: index + 1,
+          })),
+        }),
+      },
+    );
+
+    return response.json();
+  };
+
+  const updateDayPlaces = async (dayNumber, nextPlaces) => {
+    const nextItinerary = {
+      ...localItinerary,
+      [dayNumber]: nextPlaces,
+    };
+    updateTripState(nextItinerary);
+
+    if (trip.itineraryId) {
+      await persistDayOrder(dayNumber, nextPlaces);
+    }
+  };
 
   const handlePlaceFeedback = async (placeId, feedback) => {
     if (!trip.itineraryId || !placeId) {
@@ -87,6 +146,114 @@ export default function ItineraryPage() {
       }));
     } catch (error) {
       setFeedbackError("Network error while saving feedback.");
+    }
+  };
+
+  const handleMovePlace = async (dayNumber, index, direction) => {
+    const places = localItinerary[dayNumber] || [];
+    const targetIndex = index + direction;
+
+    if (targetIndex < 0 || targetIndex >= places.length) {
+      return;
+    }
+
+    const nextPlaces = places.slice();
+    const [movedPlace] = nextPlaces.splice(index, 1);
+    nextPlaces.splice(targetIndex, 0, movedPlace);
+    await updateDayPlaces(dayNumber, nextPlaces);
+  };
+
+  const handleSwapPlace = async (dayNumber, index) => {
+    const place = localItinerary[dayNumber]?.[index];
+    if (!place?.item_id || !trip.itineraryId) {
+      return;
+    }
+
+    setFeedbackError("");
+    const token = getStoredToken();
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/items/${place.item_id}/swap`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({}),
+        },
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        setFeedbackError(data.error || "Could not swap place.");
+        return;
+      }
+
+      const nextPlaces = (localItinerary[dayNumber] || []).slice();
+      nextPlaces[index] = {
+        ...place,
+        ...data.item.place,
+        item_id: data.item.item_id,
+        day_number: data.item.day_number,
+        sequence_order: data.item.sequence_order,
+        estimated_duration: data.item.estimated_duration,
+        is_locked: data.item.is_locked,
+        swap_history: data.item.swap_history,
+      };
+      updateTripState({
+        ...localItinerary,
+        [dayNumber]: nextPlaces,
+      });
+    } catch (error) {
+      setFeedbackError("Network error while swapping place.");
+    }
+  };
+
+  const handleToggleLock = async (dayNumber, index) => {
+    const place = localItinerary[dayNumber]?.[index];
+    if (!place?.item_id || !trip.itineraryId) {
+      return;
+    }
+
+    setFeedbackError("");
+    const token = getStoredToken();
+    const nextLocked = !place.is_locked;
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/itineraries/items/${place.item_id}/lock`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            itinerary_id: trip.itineraryId,
+            is_locked: nextLocked,
+          }),
+        },
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        setFeedbackError(data.error || "Could not update lock state.");
+        return;
+      }
+
+      const nextPlaces = (localItinerary[dayNumber] || []).map((item) =>
+        item.item_id === place.item_id
+          ? { ...item, is_locked: data.is_locked }
+          : item,
+      );
+      updateTripState({
+        ...localItinerary,
+        [dayNumber]: nextPlaces,
+      });
+    } catch (error) {
+      setFeedbackError("Network error while updating lock state.");
     }
   };
 
@@ -148,8 +315,37 @@ export default function ItineraryPage() {
               </div>
             )}
 
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                overflowX: "auto",
+                paddingBottom: "8px",
+                marginBottom: "18px",
+              }}
+            >
+              {sortedDays.map((dayNumber) => (
+                <button
+                  key={dayNumber}
+                  className="top-action-link"
+                  type="button"
+                  onClick={() => setActiveDay(dayNumber)}
+                  style={{
+                    whiteSpace: "nowrap",
+                    opacity: activeDay === dayNumber ? 1 : 0.6,
+                  }}
+                >
+                  Day {dayNumber}
+                </button>
+              ))}
+            </div>
+
             {sortedDays.map((dayNumber) => {
-              const places = trip.itinerary[dayNumber] || [];
+              if (dayNumber !== activeDay) {
+                return null;
+              }
+
+              const places = localItinerary[dayNumber] || [];
 
               return (
                 <section key={dayNumber} className="itinerary-day">
@@ -162,6 +358,13 @@ export default function ItineraryPage() {
                     >
                       <div className="place-name">
                         {index + 1}. {place.name}
+                        {place.is_locked && (
+                          <span
+                            style={{ marginLeft: "10px", fontSize: "0.78rem" }}
+                          >
+                            Locked
+                          </span>
+                        )}
                       </div>
                       <div className="place-meta">
                         {place.category} · ⭐{" "}
@@ -189,7 +392,7 @@ export default function ItineraryPage() {
                         </div>
                       )}
 
-                      {trip.itineraryId && place.id && (
+                      {(trip.itineraryId && place.id) || place.item_id ? (
                         <div
                           style={{
                             display: "flex",
@@ -198,6 +401,42 @@ export default function ItineraryPage() {
                             flexWrap: "wrap",
                           }}
                         >
+                          {index > 0 && (
+                            <button
+                              className="top-action-link"
+                              type="button"
+                              onClick={() =>
+                                handleMovePlace(dayNumber, index, -1)
+                              }
+                            >
+                              Move Up
+                            </button>
+                          )}
+                          {index < places.length - 1 && (
+                            <button
+                              className="top-action-link"
+                              type="button"
+                              onClick={() =>
+                                handleMovePlace(dayNumber, index, 1)
+                              }
+                            >
+                              Move Down
+                            </button>
+                          )}
+                          <button
+                            className="top-action-link"
+                            type="button"
+                            onClick={() => handleSwapPlace(dayNumber, index)}
+                          >
+                            Swap
+                          </button>
+                          <button
+                            className="top-action-link"
+                            type="button"
+                            onClick={() => handleToggleLock(dayNumber, index)}
+                          >
+                            {place.is_locked ? "Unlock" : "Lock"}
+                          </button>
                           <button
                             className="top-action-link"
                             type="button"
@@ -223,7 +462,7 @@ export default function ItineraryPage() {
                               : "Not ideal"}
                           </button>
                         </div>
-                      )}
+                      ) : null}
                     </article>
                   ))}
                 </section>
@@ -234,8 +473,9 @@ export default function ItineraryPage() {
           {/* Right panel is the Mapbox scene with terrain, buildings, markers, and route lines. */}
           <section className="itinerary-map-panel">
             <ItineraryMap
-              itinerary={trip.itinerary}
+              itinerary={localItinerary}
               destCoords={trip.destCoords}
+              activeDay={activeDay}
             />
           </section>
         </div>

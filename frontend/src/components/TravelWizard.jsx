@@ -21,6 +21,27 @@ const budgetOptions = [
   { value: "high", label: "Luxury" },
 ];
 
+const pacingOptions = [
+  { value: "Relaxed", label: "Relaxed" },
+  { value: "Moderate", label: "Moderate" },
+  { value: "Packed", label: "Packed" },
+];
+
+const companionOptions = [
+  { value: "Solo", label: "Solo" },
+  { value: "Couple", label: "Couple" },
+  { value: "Family_Kids", label: "Family / Kids" },
+  { value: "Friends", label: "Friends" },
+  { value: "Seniors", label: "Seniors" },
+];
+
+const transportOptions = [
+  { value: "Public", label: "Public Transit" },
+  { value: "Private_Car", label: "Private Car" },
+  { value: "Motorcycle", label: "Motorcycle" },
+  { value: "Walking", label: "Walking" },
+];
+
 const loadingMessages = [
   "Analyzing the best spots in the Philippines...",
   "Scoring places by distance, rating, and your preferences...",
@@ -35,6 +56,10 @@ function getInitialDraft() {
     numDays: draft.numDays || 3,
     preferences: draft.preferences || [],
     budget: draft.budget || "comfort",
+    pacingStyle: draft.pacingStyle || "Moderate",
+    companionType: draft.companionType || "Solo",
+    transportMode: draft.transportMode || "Public",
+    accommodation: draft.accommodation || "",
   };
 }
 
@@ -48,14 +73,36 @@ export default function TravelWizard() {
   const [numDays, setNumDays] = useState(initial.numDays);
   const [preferences, setPreferences] = useState(initial.preferences);
   const [budget, setBudget] = useState(initial.budget);
+  const [pacingStyle, setPacingStyle] = useState(initial.pacingStyle);
+  const [companionType, setCompanionType] = useState(initial.companionType);
+  const [transportMode, setTransportMode] = useState(initial.transportMode);
+  const [accommodation, setAccommodation] = useState(initial.accommodation);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState(loadingMessages[0]);
 
   // Persist the current form values so the user can safely reload or navigate away.
   useEffect(() => {
-    saveWizardDraft({ destination, numDays, preferences, budget });
-  }, [destination, numDays, preferences, budget]);
+    saveWizardDraft({
+      destination,
+      numDays,
+      preferences,
+      budget,
+      pacingStyle,
+      companionType,
+      transportMode,
+      accommodation,
+    });
+  }, [
+    destination,
+    numDays,
+    preferences,
+    budget,
+    pacingStyle,
+    companionType,
+    transportMode,
+    accommodation,
+  ]);
 
   // Rotate the loading message while the backend is generating the itinerary.
   useEffect(() => {
@@ -115,6 +162,10 @@ export default function TravelWizard() {
           num_days: numDays,
           preferences,
           budget,
+          pacing_style: pacingStyle,
+          companion_type: companionType,
+          transport_mode: transportMode,
+          accommodation,
         }),
       });
 
@@ -137,6 +188,10 @@ export default function TravelWizard() {
         numDays,
         preferences,
         budget,
+        pacingStyle,
+        companionType,
+        transportMode,
+        accommodation,
       };
 
       saveTripData(trip);
@@ -367,6 +422,78 @@ export default function TravelWizard() {
                 </div>
               </div>
 
+              <div style={{ marginTop: "28px" }}>
+                <p className="field-label" style={{ marginBottom: "12px" }}>
+                  Trip Context
+                </p>
+                <div className="bento-grid">
+                  <div className="bento-item" style={{ gridColumn: "1 / -1" }}>
+                    <label className="field-label" htmlFor="pacingStyle">
+                      Pacing Style
+                    </label>
+                    <select
+                      id="pacingStyle"
+                      className="auth-input"
+                      value={pacingStyle}
+                      onChange={(event) => setPacingStyle(event.target.value)}
+                    >
+                      {pacingOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="bento-item" style={{ gridColumn: "1 / -1" }}>
+                    <label className="field-label" htmlFor="companionType">
+                      Companion Type
+                    </label>
+                    <select
+                      id="companionType"
+                      className="auth-input"
+                      value={companionType}
+                      onChange={(event) => setCompanionType(event.target.value)}
+                    >
+                      {companionOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="bento-item" style={{ gridColumn: "1 / -1" }}>
+                    <label className="field-label" htmlFor="transportMode">
+                      Transport Mode
+                    </label>
+                    <select
+                      id="transportMode"
+                      className="auth-input"
+                      value={transportMode}
+                      onChange={(event) => setTransportMode(event.target.value)}
+                    >
+                      {transportOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="bento-item" style={{ gridColumn: "1 / -1" }}>
+                    <label className="field-label" htmlFor="accommodation">
+                      Accommodation Anchor
+                    </label>
+                    <input
+                      id="accommodation"
+                      className="auth-input"
+                      type="text"
+                      placeholder="Hotel, resort, or exact stay location"
+                      value={accommodation}
+                      onChange={(event) => setAccommodation(event.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div
                 style={{
                   marginTop: "28px",
@@ -468,6 +595,72 @@ export default function TravelWizard() {
                       : budget === "low"
                         ? "Backpacker"
                         : "Comfort"}
+                  </span>
+                </div>
+                <div className="summary-row">
+                  <span
+                    className="muted"
+                    style={{
+                      fontSize: "0.85rem",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                    }}
+                  >
+                    Pacing
+                  </span>
+                  <span style={{ fontWeight: 800 }}>{pacingStyle}</span>
+                </div>
+                <div className="summary-row">
+                  <span
+                    className="muted"
+                    style={{
+                      fontSize: "0.85rem",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                    }}
+                  >
+                    Companion
+                  </span>
+                  <span style={{ fontWeight: 800 }}>
+                    {companionOptions.find(
+                      (item) => item.value === companionType,
+                    )?.label || companionType}
+                  </span>
+                </div>
+                <div className="summary-row">
+                  <span
+                    className="muted"
+                    style={{
+                      fontSize: "0.85rem",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                    }}
+                  >
+                    Transport
+                  </span>
+                  <span style={{ fontWeight: 800 }}>
+                    {transportOptions.find(
+                      (item) => item.value === transportMode,
+                    )?.label || transportMode}
+                  </span>
+                </div>
+                <div className="summary-row">
+                  <span
+                    className="muted"
+                    style={{
+                      fontSize: "0.85rem",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                    }}
+                  >
+                    Accommodation
+                  </span>
+                  <span style={{ fontWeight: 800, textAlign: "right" }}>
+                    {accommodation || "Not set"}
                   </span>
                 </div>
               </div>

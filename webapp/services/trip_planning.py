@@ -100,7 +100,7 @@ def is_in_philippines(lat, lon):
     )
 
 
-def fetch_places(destination, preferences, dest_coords=None):
+def fetch_places(destination, preferences, dest_coords=None, trip_context=None):
     """Fetch nearby places from Geoapify and normalize the response shape."""
     api_key = current_app.config.get('GEOAPIFY_KEY', '')
 
@@ -152,6 +152,7 @@ def fetch_places(destination, preferences, dest_coords=None):
 
         raw_cat = (props.get('categories') or ['tourism'])[0]
         category = simplify_category(raw_cat)
+        environment_type, physical_intensity = classify_place_profile(category, raw_cat, props)
 
         places.append({
             'name': name,
@@ -161,7 +162,12 @@ def fetch_places(destination, preferences, dest_coords=None):
             'rating': round(float(props.get('datasource', {}).get('raw', {}).get('stars', 3.5) or 3.5), 1),
             'city': destination,
             'tags': raw_cat,
+            'environment_type': environment_type,
+            'physical_intensity': physical_intensity,
         })
+
+    if trip_context:
+        places = filter_places_by_context(places, trip_context)
 
     return places if places else get_ph_seed_places(destination, preferences, dest_coords)
 
@@ -178,6 +184,38 @@ def simplify_category(raw):
         'entertainment': 'nightlife',
     }
     return mapping.get(raw.split('.')[0], 'sightseeing')
+
+
+def classify_place_profile(category, raw_category, props):
+    """Classify a place so we can filter for families, seniors, and indoor pivots."""
+    text = f"{category} {raw_category} {props.get('name', '')} {props.get('formatted', '')}".lower()
+
+    if any(keyword in text for keyword in ['beach', 'surf', 'hike', 'trail', 'mountain', 'peak', 'sport']):
+        return 'Outdoor', 'High'
+    if any(keyword in text for keyword in ['park', 'nature', 'garden', 'walk', 'promenade']):
+        return 'Outdoor', 'Medium'
+    if any(keyword in text for keyword in ['museum', 'cafe', 'coffee', 'restaurant', 'bar', 'theatre', 'cinema', 'gallery']):
+        return 'Indoor', 'Low'
+    if category == 'nightlife':
+        return 'Indoor', 'Low'
+    return 'Mixed', 'Medium'
+
+
+def filter_places_by_context(places, trip_context):
+    """Apply hard filters before ML ranking so risky places never reach the shortlist."""
+    companion_type = (trip_context.get('companion_type') or '').lower()
+    pacing_style = (trip_context.get('pacing_style') or 'moderate').lower()
+
+    filtered = []
+    for place in places:
+        if companion_type in ['family_kids', 'seniors'] and place.get('physical_intensity') == 'High':
+            continue
+        filtered.append(place)
+
+    if pacing_style == 'relaxed':
+        filtered = [place for place in filtered if place.get('physical_intensity') != 'High' or place.get('category') in ['beach', 'nature']]
+
+    return filtered
 
 
 def get_ph_seed_places(destination, preferences, dest_coords=None):
@@ -297,8 +335,13 @@ def score_place(place, preferences, budget):
     return score
 
 
-def get_places_per_day(num_days, budget):
+def get_places_per_day(num_days, budget, pacing_style='Moderate'):
     """Return a smaller, experience-focused number of stops per day."""
+    pacing_style = (pacing_style or 'Moderate').lower()
+    if pacing_style == 'relaxed':
+        return 2
+    if pacing_style == 'packed':
+        return 4 if budget == 'high' else 3
     if budget == 'high':
         return 3
     return 2
@@ -311,7 +354,7 @@ def get_preference_match_count(place, preferences):
     return sum(1 for pref in preferences if pref.lower() in category or pref.lower() in tags)
 
 
-def enrich_place(place, preferences, budget, num_days, dest_coords=None):
+def enrich_place(place, preferences, budget, num_days, dest_coords=None, trip_context=None):
     """Attach UI-friendly planning metadata to each place."""
     preference_matches = get_preference_match_count(place, preferences)
     rating = float(place.get('rating') or 3.5)
@@ -321,9 +364,16 @@ def enrich_place(place, preferences, budget, num_days, dest_coords=None):
     place['recommended_minutes'] = estimate_stay_minutes(place, preferences, budget)
     place['why'] = build_place_reason(place, preferences, budget, preference_matches)
 
-    if dest_coords and 'latitude' in place and 'longitude' in place:
+    pacing_style = (trip_context or {}).get('pacing_style', 'Moderate')
+    if pacing_style == 'Relaxed':
+        place['score'] += 0.4 if place['recommended_minutes'] <= 120 else -0.3
+    elif pacing_style == 'Packed':
+        place['score'] += 0.4 if place['recommended_minutes'] <= 90 else 0.1
+
+    anchor_coords = (trip_context or {}).get('accommodation_coords') or dest_coords
+    if anchor_coords and 'latitude' in place and 'longitude' in place:
         place['distance_km'] = round(
-            haversine(dest_coords['lat'], dest_coords['lon'], place['latitude'], place['longitude']),
+            haversine(anchor_coords['lat'], anchor_coords['lon'], place['latitude'], place['longitude']),
             1,
         )
         place['score'] -= min(place['distance_km'] / 12.0, 2.0)
@@ -385,11 +435,11 @@ def build_place_reason(place, preferences, budget, preference_matches):
     return ', '.join(parts)
 
 
-def rank_candidates(candidates, preferences, budget, num_days, dest_coords=None):
+def rank_candidates(candidates, preferences, budget, num_days, dest_coords=None, trip_context=None):
     """Rank candidates using ML score first, then quality and route simplicity."""
     ranked = []
     for candidate in candidates:
-        ranked.append(enrich_place(candidate, preferences, budget, num_days, dest_coords))
+        ranked.append(enrich_place(candidate, preferences, budget, num_days, dest_coords, trip_context))
 
     return sorted(
         ranked,
@@ -416,12 +466,13 @@ def get_quality_cutoff(ranked_places):
     return max(average_score + 0.75, top_score - 0.9)
 
 
-def choose_best_itinerary_places(places, preferences, budget, num_days, dest_coords=None):
+def choose_best_itinerary_places(places, preferences, budget, num_days, dest_coords=None, trip_context=None):
     """Pick only the strongest places for the final itinerary output."""
-    places_per_day = get_places_per_day(num_days, budget)
+    pacing_style = (trip_context or {}).get('pacing_style', 'Moderate')
+    places_per_day = get_places_per_day(num_days, budget, pacing_style)
     total_needed = num_days * places_per_day
 
-    ranked = rank_candidates(places, preferences, budget, num_days, dest_coords)
+    ranked = rank_candidates(places, preferences, budget, num_days, dest_coords, trip_context)
     quality_cutoff = get_quality_cutoff(ranked)
     high_confidence = [
         place for place in ranked
@@ -485,9 +536,10 @@ def assign_places_to_days(places, num_days, places_per_day):
     return itinerary
 
 
-def build_itinerary(places, preferences, num_days, budget, destination, dest_coords=None):
+def build_itinerary(places, preferences, num_days, budget, destination, dest_coords=None, trip_context=None):
     """Rank places, keep only the strongest matches, then distribute them across days."""
-    places_per_day = get_places_per_day(num_days, budget)
+    pacing_style = (trip_context or {}).get('pacing_style', 'Moderate')
+    places_per_day = get_places_per_day(num_days, budget, pacing_style)
     total_needed = num_days * places_per_day
 
     seen = set()
@@ -531,6 +583,7 @@ def build_itinerary(places, preferences, num_days, budget, destination, dest_coo
         budget,
         num_days,
         dest_coords,
+        trip_context,
     )
 
     if not chosen:

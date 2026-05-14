@@ -7,7 +7,15 @@ generated trips back to the database.
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from webapp.services.database import save_itinerary, save_place_feedback, save_places_to_db
+from webapp.services.database import (
+    get_itinerary_item_context,
+    save_itinerary,
+    save_place_feedback,
+    save_places_to_db,
+    swap_itinerary_item,
+    update_itinerary_item_lock,
+    update_itinerary_item_order,
+)
 from webapp.services.trip_planning import (
     build_itinerary,
     fetch_places,
@@ -28,10 +36,27 @@ def api_itinerary():
     num_days = int(data.get('num_days', 3))
     preferences = data.get('preferences', [])
     budget = data.get('budget', 'comfort')
+    pacing_style = data.get('pacing_style', 'Moderate')
+    companion_type = data.get('companion_type', 'Solo')
+    transport_mode = data.get('transport_mode', 'Public')
+    accommodation = data.get('accommodation', '')
 
     dest_coords = geocode_mapbox(destination)
-    places = fetch_places(destination, preferences, dest_coords)
-    itinerary = build_itinerary(places, preferences, num_days, budget, destination, dest_coords)
+    accommodation_coords = geocode_mapbox(accommodation) if accommodation else None
+    if not accommodation_coords:
+        accommodation_coords = dest_coords
+    places = fetch_places(destination, preferences, dest_coords, {
+        'pacing_style': pacing_style,
+        'companion_type': companion_type,
+        'transport_mode': transport_mode,
+        'accommodation_coords': accommodation_coords,
+    })
+    itinerary = build_itinerary(places, preferences, num_days, budget, destination, dest_coords, {
+        'pacing_style': pacing_style,
+        'companion_type': companion_type,
+        'transport_mode': transport_mode,
+        'accommodation_coords': accommodation_coords,
+    })
 
     return jsonify({
         'itinerary': itinerary,
@@ -51,16 +76,43 @@ def api_generate():
     num_days = int(data.get('num_days', 3))
     budget = data.get('budget', 'comfort')
     preferences = data.get('preferences', [])
+    pacing_style = data.get('pacing_style', 'Moderate')
+    companion_type = data.get('companion_type', 'Solo')
+    transport_mode = data.get('transport_mode', 'Public')
+    accommodation = data.get('accommodation', '')
 
     dest_coords = geocode_mapbox(destination)
     if dest_coords and not is_in_philippines(dest_coords['lat'], dest_coords['lon']):
         return jsonify({'error': 'Philippine destinations only 🇵🇭'}), 400
 
-    places = fetch_places(destination, preferences, dest_coords)
-    itinerary = build_itinerary(places, preferences, num_days, budget, destination, dest_coords)
+    accommodation_coords = geocode_mapbox(accommodation) if accommodation else None
+    if not accommodation_coords:
+        accommodation_coords = dest_coords
+
+    trip_context = {
+        'pacing_style': pacing_style,
+        'companion_type': companion_type,
+        'transport_mode': transport_mode,
+        'accommodation_coords': accommodation_coords,
+    }
+
+    places = fetch_places(destination, preferences, dest_coords, trip_context)
+    itinerary = build_itinerary(places, preferences, num_days, budget, destination, dest_coords, trip_context)
     selected_places = [place for day_places in itinerary.values() for place in day_places]
     save_places_to_db(selected_places)
-    itinerary_id = save_itinerary(current_user_id, destination, itinerary, num_days, budget, preferences)
+    itinerary_id = save_itinerary(
+        current_user_id,
+        destination,
+        itinerary,
+        num_days,
+        budget,
+        preferences,
+        pacing_style=pacing_style,
+        companion_type=companion_type,
+        transport_mode=transport_mode,
+        accommodation_lat=(accommodation_coords or {}).get('lat'),
+        accommodation_lng=(accommodation_coords or {}).get('lon'),
+    )
 
     return jsonify({
         'itinerary': itinerary,
@@ -90,3 +142,52 @@ def api_itinerary_feedback(itinerary_id):
 
     save_place_feedback(current_user_id, itinerary_id, place_id, feedback_value)
     return jsonify({'message': 'Feedback saved.'}), 200
+
+
+@trip_bp.route('/api/itineraries/<int:itinerary_id>/items/reorder', methods=['PATCH'])
+@jwt_required()
+def api_reorder_itinerary_items(itinerary_id):
+    """Update the order of items within an itinerary."""
+    data = request.get_json() or {}
+    items = data.get('items', [])
+
+    if not isinstance(items, list) or not items:
+        return jsonify({'error': 'items must be a non-empty list'}), 400
+
+    try:
+        update_itinerary_item_order(itinerary_id, items)
+        return jsonify({'message': 'Itinerary order updated.'}), 200
+    except Exception as error:
+        return jsonify({'error': 'Could not reorder itinerary items'}), 500
+
+
+@trip_bp.route('/api/itineraries/<int:itinerary_id>/items/<int:item_id>/swap', methods=['POST'])
+@jwt_required()
+def api_swap_itinerary_item(itinerary_id, item_id):
+    """Replace a single itinerary stop with a nearby stronger candidate."""
+    swapped_item, error_message = swap_itinerary_item(itinerary_id, item_id)
+    if error_message:
+        return jsonify({'error': error_message}), 400
+
+    return jsonify({'message': 'Swap completed.', 'item': swapped_item}), 200
+
+
+@trip_bp.route('/api/itineraries/items/<int:item_id>/lock', methods=['PATCH'])
+@jwt_required()
+def api_lock_itinerary_item(item_id):
+    """Toggle or explicitly set the lock state of one itinerary stop."""
+    data = request.get_json() or {}
+    itinerary_id = data.get('itinerary_id')
+    if not itinerary_id:
+        return jsonify({'error': 'itinerary_id is required'}), 400
+
+    context = get_itinerary_item_context(itinerary_id, item_id)
+    if not context:
+        return jsonify({'error': 'Item not found'}), 404
+
+    desired_lock = data.get('is_locked')
+    if desired_lock is None:
+        desired_lock = not bool(context.get('is_locked'))
+
+    update_itinerary_item_lock(itinerary_id, item_id, desired_lock)
+    return jsonify({'message': 'Lock updated.', 'is_locked': bool(desired_lock)}), 200
