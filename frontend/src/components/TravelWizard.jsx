@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { API_BASE_URL, TOKEN_STORAGE_KEY } from "../lib/config";
-import { loadWizardDraft, saveWizardDraft, saveTripData } from "../lib/storage";
+import {
+  clearStoredToken,
+  loadWizardDraft,
+  saveWizardDraft,
+  saveTripData,
+} from "../lib/storage";
 import { PH_DESTINATIONS } from "../data/phDestinations";
 
 // The wizard mirrors the old Jinja dashboard steps, but now it is fully driven
@@ -172,6 +177,13 @@ export default function TravelWizard() {
       const data = await response.json();
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 422) {
+          clearStoredToken();
+          setError("Your login expired. Please sign in again.");
+          navigate("/login");
+          return;
+        }
+
         // Surface the API error instead of silently failing.
         setError(data.error || "Failed to generate itinerary.");
         setIsSubmitting(false);
@@ -196,7 +208,7 @@ export default function TravelWizard() {
 
       saveTripData(trip);
       navigate("/itinerary", { state: trip, replace: true });
-    } catch (requestError) {
+    } catch {
       // Network problems or backend crashes end up here.
       setError("API connection error. Please try again.");
       setIsSubmitting(false);

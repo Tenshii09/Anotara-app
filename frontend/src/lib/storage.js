@@ -13,7 +13,7 @@ function readJSON(key, fallback = null) {
   try {
     const rawValue = window.localStorage.getItem(key);
     return rawValue ? JSON.parse(rawValue) : fallback;
-  } catch (error) {
+  } catch {
     return fallback;
   }
 }
@@ -69,4 +69,12 @@ export function getStoredToken() {
   }
 
   return window.localStorage.getItem(TOKEN_STORAGE_KEY) || "";
+}
+
+export function clearStoredToken() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
 }

@@ -4,7 +4,9 @@ These functions isolate raw MySQL access so route handlers stay short and
 focused on request/response logic.
 """
 
+import hashlib
 import json
+from decimal import Decimal
 
 import mysql.connector
 from flask import current_app
@@ -39,6 +41,16 @@ def get_table_columns(table_name):
     finally:
         cursor.close()
         db.close()
+
+
+def _json_safe_value(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {key: _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(item) for item in value]
+    return value
 
 
 def ensure_itinerary_metadata_columns():
@@ -165,6 +177,149 @@ def ensure_feedback_columns():
         if 'feedback_value' in existing_columns:
             cursor.execute('UPDATE trip_feedback SET rating_type = CASE WHEN feedback_value = 1 THEN \'Best Pick\' ELSE \'Not Ideal\' END WHERE rating_type IS NULL OR rating_type = \'\'')
         db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def ensure_weather_alert_columns():
+    """Create the table used to persist weather alerts and smart suggestions."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather_alerts (
+                id           INT AUTO_INCREMENT PRIMARY KEY,
+                itinerary_id INT NOT NULL,
+                alert_key    VARCHAR(100) NOT NULL,
+                alert_type   VARCHAR(40) NOT NULL,
+                headline     VARCHAR(200) NOT NULL,
+                message      TEXT NOT NULL,
+                payload      JSON,
+                is_active    BOOLEAN DEFAULT TRUE,
+                created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                resolved_at  DATETIME NULL,
+                notification_signature VARCHAR(128),
+                notification_sent_at DATETIME NULL,
+                UNIQUE KEY unique_weather_alert (itinerary_id, alert_key),
+                FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        existing_columns = get_table_columns('weather_alerts')
+        if 'notification_signature' not in existing_columns:
+            cursor.execute('ALTER TABLE weather_alerts ADD COLUMN notification_signature VARCHAR(128)')
+        if 'notification_sent_at' not in existing_columns:
+            cursor.execute('ALTER TABLE weather_alerts ADD COLUMN notification_sent_at DATETIME NULL')
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def ensure_push_token_columns():
+    """Create the table used to persist Firebase Cloud Messaging tokens."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_tokens (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                user_id         INT NOT NULL,
+                token           TEXT NOT NULL,
+                token_hash      CHAR(64) NOT NULL,
+                platform        VARCHAR(40) DEFAULT 'web',
+                user_agent      VARCHAR(255),
+                created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_push_token (user_id, token_hash),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def save_push_token(user_id, token, user_agent=None, platform='web'):
+    """Persist or refresh an FCM token for one user."""
+    ensure_push_token_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+        cursor.execute(
+            """
+            INSERT INTO push_tokens
+                (user_id, token, token_hash, platform, user_agent)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                token = VALUES(token),
+                platform = VALUES(platform),
+                user_agent = VALUES(user_agent),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                user_id,
+                token,
+                token_hash,
+                platform,
+                user_agent,
+            ),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def delete_push_token(user_id, token):
+    """Remove an FCM token for one user."""
+    ensure_push_token_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+        cursor.execute(
+            """
+            DELETE FROM push_tokens
+            WHERE user_id = %s AND token_hash = %s
+            """,
+            (user_id, token_hash),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_push_tokens(user_id):
+    """Return all stored FCM tokens for a user."""
+    ensure_push_token_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT id, user_id, token, token_hash, platform, user_agent, created_at, updated_at
+            FROM push_tokens
+            WHERE user_id = %s
+            ORDER BY updated_at DESC, id DESC
+            """,
+            (user_id,),
+        )
+        return cursor.fetchall()
     finally:
         cursor.close()
         db.close()
@@ -363,6 +518,40 @@ def save_place_feedback(user_id, itinerary_id, place_id, feedback_value):
         db.close()
 
 
+def get_active_itineraries():
+    """Return active itineraries that should be checked by the weather monitor."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                user_id,
+                trip_name,
+                destination,
+                budget,
+                num_days,
+                preferences,
+                pacing_style,
+                companion_type,
+                transport_mode,
+                accommodation_lat,
+                accommodation_lng,
+                status,
+                created_at
+            FROM itineraries
+            WHERE status = 'Active'
+            ORDER BY id ASC
+            """
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
+
+
 def get_itinerary_item_context(itinerary_id, item_id):
     """Return the itinerary, item, and place data needed for editing operations."""
     db = get_db()
@@ -407,6 +596,317 @@ def get_itinerary_item_context(itinerary_id, item_id):
             (item_id, itinerary_id),
         )
         return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_itinerary_overview(itinerary_id):
+    """Return itinerary metadata and all saved items in day order."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                user_id,
+                trip_name,
+                destination,
+                budget,
+                num_days,
+                preferences,
+                pacing_style,
+                companion_type,
+                transport_mode,
+                accommodation_lat,
+                accommodation_lng,
+                status
+            FROM itineraries
+            WHERE id = %s
+            """,
+            (itinerary_id,),
+        )
+        itinerary = cursor.fetchone()
+        if not itinerary:
+            return None
+
+        cursor.execute(
+            """
+            SELECT
+                ii.id AS item_id,
+                ii.day_number,
+                ii.sequence_order,
+                ii.estimated_duration,
+                ii.is_locked,
+                ii.swap_history,
+                p.id AS place_id,
+                p.name,
+                p.category,
+                p.latitude,
+                p.longitude,
+                p.rating,
+                p.city,
+                p.tags,
+                p.environment_type,
+                p.physical_intensity
+            FROM itinerary_items ii
+            INNER JOIN places p ON p.id = ii.place_id
+            WHERE ii.itinerary_id = %s
+            ORDER BY ii.day_number ASC, ii.sequence_order ASC, ii.id ASC
+            """,
+            (itinerary_id,),
+        )
+        items = cursor.fetchall()
+        return {
+            'itinerary': itinerary,
+            'items': items,
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_itinerary_day_items(itinerary_id, day_number):
+    """Return one itinerary day with place metadata attached."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                ii.id AS item_id,
+                ii.itinerary_id,
+                ii.day_number,
+                ii.place_id,
+                ii.sequence_order,
+                ii.estimated_duration,
+                ii.is_locked,
+                ii.swap_history,
+                p.name,
+                p.category,
+                p.latitude,
+                p.longitude,
+                p.rating,
+                p.city,
+                p.tags,
+                p.environment_type,
+                p.physical_intensity
+            FROM itinerary_items ii
+            INNER JOIN places p ON p.id = ii.place_id
+            WHERE ii.itinerary_id = %s AND ii.day_number = %s
+            ORDER BY ii.sequence_order ASC, ii.id ASC
+            """,
+            (itinerary_id, day_number),
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_itinerary_day_items(itinerary_id, day_number, replacements):
+    """Replace the unlocked items for one day with new place ids."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        for replacement in replacements:
+            cursor.execute(
+                """
+                UPDATE itinerary_items
+                SET place_id = %s,
+                    sequence_order = %s,
+                    estimated_duration = %s,
+                    swap_history = COALESCE(swap_history, 0) + 1
+                WHERE id = %s AND itinerary_id = %s AND day_number = %s
+                """,
+                (
+                    int(replacement['place_id']),
+                    int(replacement.get('sequence_order', 1)),
+                    int(replacement.get('estimated_duration', 60)),
+                    int(replacement['item_id']),
+                    itinerary_id,
+                    day_number,
+                ),
+            )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def upsert_weather_alert(itinerary_id, alert_key, alert_type, headline, message, payload):
+    """Persist or refresh a weather alert for later review in the UI."""
+    ensure_weather_alert_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    notification_signature = (payload or {}).get('notification_signature')
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO weather_alerts
+                (itinerary_id, alert_key, alert_type, headline, message, payload, is_active, resolved_at, notification_signature, notification_sent_at)
+            VALUES (%s, %s, %s, %s, %s, %s, TRUE, NULL, %s, NULL)
+            ON DUPLICATE KEY UPDATE
+                alert_type = VALUES(alert_type),
+                headline = VALUES(headline),
+                message = VALUES(message),
+                payload = VALUES(payload),
+                is_active = TRUE,
+                resolved_at = NULL,
+                notification_signature = VALUES(notification_signature),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                itinerary_id,
+                alert_key,
+                alert_type,
+                headline,
+                message,
+                json.dumps(_json_safe_value(payload or {})),
+                notification_signature,
+            ),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def resolve_weather_alert(itinerary_id, alert_key):
+    """Mark a weather alert as resolved when the weather clears."""
+    ensure_weather_alert_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            UPDATE weather_alerts
+            SET is_active = FALSE,
+                resolved_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE itinerary_id = %s AND alert_key = %s
+            """,
+            (itinerary_id, alert_key),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_weather_alerts(itinerary_id, active_only=True):
+    """Return stored alerts for an itinerary."""
+    ensure_weather_alert_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        query = """
+            SELECT
+                id,
+                itinerary_id,
+                alert_key,
+                alert_type,
+                headline,
+                message,
+                payload,
+                is_active,
+                notification_signature,
+                notification_sent_at,
+                created_at,
+                updated_at,
+                resolved_at
+            FROM weather_alerts
+            WHERE itinerary_id = %s
+        """
+        params = [itinerary_id]
+        if active_only:
+            query += ' AND is_active = TRUE'
+        query += ' ORDER BY created_at DESC, id DESC'
+
+        cursor.execute(query, tuple(params))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def mark_weather_alert_notified(itinerary_id, alert_key, notification_signature):
+    """Record that a weather alert was already delivered through push notifications."""
+    ensure_weather_alert_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            UPDATE weather_alerts
+            SET notification_signature = %s,
+                notification_sent_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE itinerary_id = %s AND alert_key = %s
+            """,
+            (notification_signature, itinerary_id, alert_key),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_weather_alert_history(itinerary_id):
+    """Return all stored weather alerts for an itinerary, newest first."""
+    return list_weather_alerts(itinerary_id, active_only=False)
+
+
+def get_indoor_place_alternatives(city, excluded_place_ids=None, limit=4):
+    """Return indoor alternatives for weather pivots, filtered away from used places."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    excluded_place_ids = [int(place_id) for place_id in (excluded_place_ids or []) if place_id]
+
+    try:
+        query = (
+            """
+            SELECT id, name, category, latitude, longitude, rating, city, tags, environment_type, physical_intensity
+            FROM places
+            WHERE city = %s AND environment_type = 'Indoor'
+            """
+        )
+        params = [city]
+
+        if excluded_place_ids:
+            placeholders = ','.join(['%s'] * len(excluded_place_ids))
+            query += f" AND id NOT IN ({placeholders})"
+            params.extend(excluded_place_ids)
+
+        query += ' ORDER BY rating DESC, name ASC LIMIT %s'
+        params.append(int(limit))
+
+        cursor.execute(query, tuple(params))
+        results = cursor.fetchall()
+
+        if results:
+            return results
+
+        cursor.execute(
+            """
+            SELECT id, name, category, latitude, longitude, rating, city, tags, environment_type, physical_intensity
+            FROM places
+            WHERE city = %s
+            ORDER BY rating DESC, name ASC
+            LIMIT %s
+            """,
+            (city, int(limit)),
+        )
+        return cursor.fetchall()
     finally:
         cursor.close()
         db.close()

@@ -4,18 +4,25 @@ This blueprint turns submitted trip preferences into itinerary data and saves
 generated trips back to the database.
 """
 # TODO: Add error handling for geocoding failures, no places found, and DB issues.
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from webapp.services.database import (
     get_itinerary_item_context,
+    get_itinerary_overview,
+    get_weather_alert_history,
+    get_indoor_place_alternatives,
     save_itinerary,
     save_place_feedback,
+    save_push_token,
     save_places_to_db,
+    delete_push_token,
     swap_itinerary_item,
     update_itinerary_item_lock,
     update_itinerary_item_order,
 )
+from webapp.services.weather_monitor import build_weather_suggestion
 from webapp.services.trip_planning import (
     build_itinerary,
     fetch_places,
@@ -191,3 +198,58 @@ def api_lock_itinerary_item(item_id):
 
     update_itinerary_item_lock(itinerary_id, item_id, desired_lock)
     return jsonify({'message': 'Lock updated.', 'is_locked': bool(desired_lock)}), 200
+
+
+@trip_bp.route('/api/itineraries/<int:itinerary_id>/smart-suggestion', methods=['GET'])
+@jwt_required()
+def api_smart_suggestion(itinerary_id):
+    """Return a weather-aware suggestion banner for the saved itinerary."""
+    suggestion = build_weather_suggestion(itinerary_id, persist=True)
+    if not suggestion:
+        return jsonify({'error': 'Itinerary not found'}), 404
+    return jsonify(suggestion), 200
+
+
+@trip_bp.route('/api/itineraries/<int:itinerary_id>/weather-alerts', methods=['GET'])
+@jwt_required()
+def api_weather_alerts(itinerary_id):
+    """Return stored weather alerts for an itinerary."""
+    if not get_itinerary_overview(itinerary_id):
+        return jsonify({'error': 'Itinerary not found'}), 404
+
+    alert_history = get_weather_alert_history(itinerary_id)
+    return jsonify({'alerts': alert_history}), 200
+
+
+@trip_bp.route('/api/push-tokens', methods=['POST'])
+@jwt_required()
+def api_save_push_token():
+    """Store a Firebase Cloud Messaging token for the current user."""
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    token = (data.get('token') or '').strip()
+
+    if not token:
+        return jsonify({'error': 'token is required'}), 400
+
+    save_push_token(
+        current_user_id,
+        token,
+        user_agent=request.user_agent.string,
+        platform=data.get('platform', 'web'),
+    )
+    return jsonify({'message': 'Push token saved.'}), 200
+
+
+@trip_bp.route('/api/push-tokens', methods=['DELETE'])
+@jwt_required()
+def api_delete_push_token():
+    """Delete a Firebase Cloud Messaging token for the current user."""
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    token = (data.get('token') or '').strip()
+    if not token:
+        return jsonify({'error': 'token is required'}), 400
+
+    delete_push_token(current_user_id, token)
+    return jsonify({'message': 'Push token removed.'}), 200

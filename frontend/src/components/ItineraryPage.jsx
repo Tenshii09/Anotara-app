@@ -2,8 +2,65 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import ItineraryMap from "./ItineraryMap";
-import { API_BASE_URL } from "../lib/config";
-import { getStoredToken, loadTripData, saveTripData } from "../lib/storage";
+import {
+  API_BASE_URL,
+  FIREBASE_VAPID_KEY,
+  HAS_FIREBASE_CONFIG,
+  getMissingFirebaseConfigKeys,
+} from "../lib/config";
+import { getFirebasePushToken } from "../lib/firebase";
+import {
+  clearStoredToken,
+  getStoredToken,
+  loadTripData,
+  saveTripData,
+} from "../lib/storage";
+
+const WEATHER_NOTIFICATION_KEY = "anotara:last-weather-alert";
+
+function getWeatherNotificationSignature(data) {
+  if (!data) {
+    return "";
+  }
+
+  return [
+    data.headline || "",
+    data.message || "",
+    data.focus_day ?? "",
+    data.precipitation_probability ?? "",
+    data.weather_code ?? "",
+  ].join("|");
+}
+
+function maybeNotifyWeatherAlert(data) {
+  if (
+    typeof window === "undefined" ||
+    !("Notification" in window) ||
+    !data?.alert ||
+    window.Notification.permission !== "granted"
+  ) {
+    return;
+  }
+
+  const signature = getWeatherNotificationSignature(data);
+  const lastSignature = window.localStorage.getItem(WEATHER_NOTIFICATION_KEY);
+  if (!signature || signature === lastSignature) {
+    return;
+  }
+
+  const notification = new window.Notification("Anotara weather alert", {
+    body: data.message,
+    tag: signature,
+    renotify: false,
+  });
+
+  notification.onclick = () => {
+    window.focus();
+    notification.close();
+  };
+
+  window.localStorage.setItem(WEATHER_NOTIFICATION_KEY, signature);
+}
 
 // If React router state is missing, fall back to localStorage so refreshes still work.
 function getTripFromLocation(locationState) {
@@ -29,8 +86,94 @@ export default function ItineraryPage() {
   const [localItinerary, setLocalItinerary] = useState(trip.itinerary);
   const [feedbackState, setFeedbackState] = useState({});
   const [feedbackError, setFeedbackError] = useState("");
+  const [swappingItemId, setSwappingItemId] = useState(null);
+  const [smartSuggestion, setSmartSuggestion] = useState(null);
+  const [smartSuggestionError, setSmartSuggestionError] = useState("");
+  const [notificationPermission, setNotificationPermission] = useState(() =>
+    typeof window !== "undefined" && "Notification" in window
+      ? window.Notification.permission
+      : "unsupported",
+  );
+  const [pushStatus, setPushStatus] = useState("idle");
+  const [pushError, setPushError] = useState("");
+  const missingFirebaseConfig = getMissingFirebaseConfigKeys();
 
+  const enableDevicePushAlerts = async () => {
+    if (
+      typeof window === "undefined" ||
+      !("Notification" in window) ||
+      !("serviceWorker" in navigator) ||
+      !HAS_FIREBASE_CONFIG ||
+      !FIREBASE_VAPID_KEY
+    ) {
+      setPushStatus("unsupported");
+      setPushError(
+        missingFirebaseConfig.length
+          ? `Missing Firebase env vars: ${missingFirebaseConfig.join(", ")}`
+          : "Firebase Cloud Messaging is not configured.",
+      );
+      return;
+    }
+
+    setPushError("");
+    setPushStatus("loading");
+
+    const permission =
+      window.Notification.permission === "granted"
+        ? "granted"
+        : await window.Notification.requestPermission();
+    setNotificationPermission(permission);
+
+    if (permission !== "granted") {
+      setPushStatus(permission === "denied" ? "blocked" : "idle");
+      return;
+    }
+
+    try {
+      const firebaseToken = await getFirebasePushToken();
+
+      if (!firebaseToken) {
+        setPushStatus("error");
+        setPushError("Could not create a Firebase push token.");
+        return;
+      }
+
+      const token = getStoredToken();
+
+      const saveResponse = await fetch(`${API_BASE_URL}/api/push-tokens`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          token: firebaseToken,
+          platform: "web",
+          user_agent: navigator.userAgent,
+        }),
+      });
+
+      if (!saveResponse.ok) {
+        const data = await saveResponse.json();
+        setPushStatus("error");
+        setPushError(data.error || "Could not save the push subscription.");
+        return;
+      }
+
+      setPushStatus("subscribed");
+      if (smartSuggestion?.alert) {
+        maybeNotifyWeatherAlert(smartSuggestion);
+      }
+    } catch {
+      setPushStatus("error");
+      setPushError("Could not enable device push alerts.");
+    }
+  };
+
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    // React's hooks lint rule dislikes synchronous state syncing, but this page
+    // needs to mirror the latest trip payload whenever the router state changes.
     setLocalItinerary(trip.itinerary);
   }, [trip.itinerary]);
 
@@ -39,6 +182,194 @@ export default function ItineraryPage() {
       setActiveDay(sortedDays[0]);
     }
   }, [activeDay, sortedDays]);
+
+  useEffect(() => {
+    if (!trip.itineraryId) {
+      setSmartSuggestion(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const token = getStoredToken();
+
+    const loadSuggestion = async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/smart-suggestion`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+          },
+        );
+
+        const data = await response.json();
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 422) {
+            clearStoredToken();
+            navigate("/login");
+            return;
+          }
+
+          setSmartSuggestionError(
+            data.error || "Could not load smart suggestion.",
+          );
+          return;
+        }
+
+        setSmartSuggestion(data);
+        setSmartSuggestionError("");
+      } catch (_error) {
+        if (_error.name !== "AbortError") {
+          setSmartSuggestionError(
+            "Weather suggestions are temporarily unavailable.",
+          );
+        }
+      }
+    };
+
+    loadSuggestion();
+
+    return () => controller.abort();
+  }, [trip.itineraryId, navigate]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (!smartSuggestion?.alert) {
+      return;
+    }
+
+    if (pushStatus !== "subscribed") {
+      maybeNotifyWeatherAlert(smartSuggestion);
+    }
+  }, [smartSuggestion, pushStatus]);
+
+  useEffect(() => {
+    if (!trip.itineraryId) {
+      return;
+    }
+
+    if (
+      typeof window === "undefined" ||
+      !("Notification" in window) ||
+      window.Notification.permission !== "granted" ||
+      pushStatus === "subscribed"
+    ) {
+      return;
+    }
+
+    const token = getStoredToken();
+    const controller = new AbortController();
+
+    const loadAlertHistory = async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/weather-alerts`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+          },
+        );
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 422) {
+            clearStoredToken();
+            navigate("/login");
+            return;
+          }
+
+          return;
+        }
+
+        const data = await response.json();
+        const latestAlert = data.alerts?.[0];
+        if (latestAlert?.is_active) {
+          const signature = getWeatherNotificationSignature(
+            latestAlert.payload || latestAlert,
+          );
+          const lastSignature = window.localStorage.getItem(
+            WEATHER_NOTIFICATION_KEY,
+          );
+          if (signature && signature !== lastSignature) {
+            new window.Notification("Anotara weather alert", {
+              body: latestAlert.message,
+              tag: signature,
+              renotify: false,
+            });
+            window.localStorage.setItem(WEATHER_NOTIFICATION_KEY, signature);
+          }
+        }
+      } catch (_error) {
+        if (_error.name !== "AbortError") {
+          // Ignore background notification refresh failures; the in-page banner still renders.
+        }
+      }
+    };
+
+    loadAlertHistory();
+
+    return () => controller.abort();
+  }, [trip.itineraryId, notificationPermission, pushStatus, navigate]);
+
+  useEffect(() => {
+    if (!trip.itineraryId) {
+      return;
+    }
+
+    if (
+      typeof window === "undefined" ||
+      !("Notification" in window) ||
+      window.Notification.permission !== "granted" ||
+      !HAS_FIREBASE_CONFIG ||
+      !FIREBASE_VAPID_KEY
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const syncExistingSubscription = async () => {
+      try {
+        const firebaseToken = await getFirebasePushToken();
+        if (!firebaseToken) {
+          return;
+        }
+
+        const token = getStoredToken();
+
+        const response = await fetch(`${API_BASE_URL}/api/push-tokens`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            token: firebaseToken,
+            platform: "web",
+            user_agent: navigator.userAgent,
+          }),
+          signal: controller.signal,
+        });
+
+        if (response.ok) {
+          setPushStatus("subscribed");
+        }
+      } catch (_error) {
+        if (_error.name !== "AbortError") {
+          setPushStatus((current) =>
+            current === "subscribed" ? current : "idle",
+          );
+        }
+      }
+    };
+
+    syncExistingSubscription();
+
+    return () => controller.abort();
+  }, [trip.itineraryId, notificationPermission, navigate]);
 
   // Without itinerary data there is nothing to render, so redirect users back to the wizard path.
   if (!trip?.itinerary || !trip?.destCoords) {
@@ -144,7 +475,7 @@ export default function ItineraryPage() {
         ...current,
         [placeId]: feedback === "like" ? "liked" : "disliked",
       }));
-    } catch (error) {
+    } catch {
       setFeedbackError("Network error while saving feedback.");
     }
   };
@@ -165,12 +496,17 @@ export default function ItineraryPage() {
 
   const handleSwapPlace = async (dayNumber, index) => {
     const place = localItinerary[dayNumber]?.[index];
-    if (!place?.item_id || !trip.itineraryId) {
+    if (
+      !place?.item_id ||
+      !trip.itineraryId ||
+      swappingItemId === place.item_id
+    ) {
       return;
     }
 
     setFeedbackError("");
     const token = getStoredToken();
+    setSwappingItemId(place.item_id);
 
     try {
       const response = await fetch(
@@ -187,7 +523,10 @@ export default function ItineraryPage() {
 
       const data = await response.json();
       if (!response.ok) {
-        setFeedbackError(data.error || "Could not swap place.");
+        setFeedbackError(
+          data.error ||
+            "Could not swap place. Try another stop or unlock it first.",
+        );
         return;
       }
 
@@ -206,8 +545,10 @@ export default function ItineraryPage() {
         ...localItinerary,
         [dayNumber]: nextPlaces,
       });
-    } catch (error) {
+    } catch {
       setFeedbackError("Network error while swapping place.");
+    } finally {
+      setSwappingItemId(null);
     }
   };
 
@@ -252,7 +593,7 @@ export default function ItineraryPage() {
         ...localItinerary,
         [dayNumber]: nextPlaces,
       });
-    } catch (error) {
+    } catch {
       setFeedbackError("Network error while updating lock state.");
     }
   };
@@ -309,9 +650,154 @@ export default function ItineraryPage() {
               </div>
             )}
 
+            <div
+              className="glass-card"
+              style={{
+                marginBottom: "18px",
+                padding: "16px",
+                border: "1px solid rgba(59, 130, 246, 0.16)",
+                background:
+                  "linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.92))",
+              }}
+            >
+              <div className="hero-chip" style={{ marginBottom: "10px" }}>
+                Device Push
+              </div>
+              <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+                Subscribe this device to receive weather alerts even when the
+                app is closed.
+              </p>
+              {pushStatus === "subscribed" ? (
+                <p className="muted" style={{ marginBottom: 0 }}>
+                  Push alerts are enabled on this device.
+                </p>
+              ) : (
+                <button
+                  className="top-action-link"
+                  type="button"
+                  onClick={enableDevicePushAlerts}
+                  disabled={
+                    pushStatus === "loading" || pushStatus === "unsupported"
+                  }
+                >
+                  {pushStatus === "blocked"
+                    ? "Notifications blocked"
+                    : pushStatus === "loading"
+                      ? "Enabling..."
+                      : "Enable device push alerts"}
+                </button>
+              )}
+              {pushError && (
+                <p
+                  className="muted"
+                  style={{ marginBottom: 0, color: "#991b1b" }}
+                >
+                  {pushError}
+                </p>
+              )}
+              {pushStatus === "unsupported" &&
+                missingFirebaseConfig.length > 0 && (
+                  <p
+                    className="muted"
+                    style={{ marginBottom: 0, marginTop: 8 }}
+                  >
+                    Add the Firebase env vars in the frontend `.env` file, then
+                    reload the page.
+                  </p>
+                )}
+            </div>
+
+            {smartSuggestion?.alert && pushStatus !== "subscribed" && (
+              <div
+                className="glass-card"
+                style={{
+                  marginBottom: "18px",
+                  padding: "16px",
+                  border: "1px solid rgba(225, 29, 72, 0.24)",
+                  background:
+                    "linear-gradient(135deg, rgba(225, 29, 72, 0.08), rgba(255, 255, 255, 0.92))",
+                }}
+              >
+                <div className="hero-chip" style={{ marginBottom: "10px" }}>
+                  In-App Alert
+                </div>
+                <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+                  This fallback alert appears only when device push alerts are
+                  not enabled yet.
+                </p>
+              </div>
+            )}
+
             {feedbackError && (
               <div className="error-banner" style={{ marginBottom: "18px" }}>
                 {feedbackError}
+              </div>
+            )}
+
+            {smartSuggestionError && !smartSuggestion && (
+              <div className="error-banner" style={{ marginBottom: "18px" }}>
+                {smartSuggestionError}
+              </div>
+            )}
+
+            {smartSuggestion && (
+              <div
+                className="glass-card"
+                style={{
+                  marginBottom: "18px",
+                  padding: "18px",
+                  border: smartSuggestion.alert
+                    ? "1px solid rgba(225, 29, 72, 0.32)"
+                    : "1px solid rgba(59, 130, 246, 0.18)",
+                  background: smartSuggestion.alert
+                    ? "linear-gradient(135deg, rgba(225, 29, 72, 0.12), rgba(255, 255, 255, 0.92))"
+                    : "linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.92))",
+                }}
+              >
+                <div className="hero-chip" style={{ marginBottom: "10px" }}>
+                  Smart Suggestion
+                </div>
+                <h3
+                  className="serif"
+                  style={{ marginTop: 0, marginBottom: "8px" }}
+                >
+                  {smartSuggestion.headline}
+                </h3>
+                <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+                  {smartSuggestion.message}
+                </p>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Rain chance: {smartSuggestion.precipitation_probability || 0}%
+                </p>
+                {smartSuggestion.focus_day && (
+                  <button
+                    className="top-action-link"
+                    type="button"
+                    onClick={() =>
+                      setActiveDay(Number(smartSuggestion.focus_day))
+                    }
+                    style={{ marginBottom: "12px" }}
+                  >
+                    View Day {smartSuggestion.focus_day}
+                  </button>
+                )}
+                {smartSuggestion.indoor_alternatives?.length > 0 && (
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    {smartSuggestion.indoor_alternatives.map((place) => (
+                      <div
+                        key={place.id}
+                        className="place-card"
+                        style={{ margin: 0 }}
+                      >
+                        <div className="place-name">{place.name}</div>
+                        <div className="place-meta">
+                          {place.category} · ⭐{" "}
+                          {Number(place.rating || 0).toFixed(1)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -427,8 +913,11 @@ export default function ItineraryPage() {
                             className="top-action-link"
                             type="button"
                             onClick={() => handleSwapPlace(dayNumber, index)}
+                            disabled={swappingItemId === place.item_id}
                           >
-                            Swap
+                            {swappingItemId === place.item_id
+                              ? "Swapping..."
+                              : "Swap"}
                           </button>
                           <button
                             className="top-action-link"

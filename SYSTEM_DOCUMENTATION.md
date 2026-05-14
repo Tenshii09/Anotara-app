@@ -64,6 +64,22 @@ The product goal is not just to list nearby places. It is to act like a travel c
 - The backend returns an itinerary ID.
 - The frontend keeps the trip in localStorage so it can survive navigation or refresh.
 
+### 9. Device Push Notifications
+
+- Firebase Cloud Messaging sends weather alerts to registered devices.
+- The frontend registers an FCM token after notification permission is granted.
+- The backend stores user tokens and the weather monitor sends alert payloads through Firebase Admin.
+
+#### Firebase Setup Flow
+
+1. Create a Firebase project in the Firebase console.
+2. Add a web app and copy its config values into the frontend env file.
+3. Enable Cloud Messaging and copy the public VAPID key into `VITE_FIREBASE_VAPID_KEY`.
+4. Create a service account key for the backend and store it as JSON or a file path.
+5. Set `FIREBASE_PROJECT_ID` on the backend.
+6. Restart both the frontend and backend so the worker and push routes can read the new config.
+7. Open the itinerary page, grant notifications, and click the device push button to save the token.
+
 ## System Architecture
 
 ### High-Level Layers
@@ -102,6 +118,7 @@ Main backend responsibilities:
 - Fetch and normalize place data
 - Save places, trips, and feedback to MySQL
 - Load and apply the machine learning reranker
+- Send Firebase Cloud Messaging alerts from the weather monitor
 
 ### Data Layer
 
@@ -118,6 +135,7 @@ The database stores:
 - Mapbox geocoding is used first when available.
 - Geoapify is used for fallback geocoding and place search.
 - The system also uses a local ML model artifact saved as a joblib file.
+- Firebase Cloud Messaging is used for background push alerts.
 
 ## Backend Structure
 
@@ -150,6 +168,8 @@ It provides:
 - `POST /api/itinerary` for preview generation
 - `POST /api/generate` for final saved trip generation
 - `POST /api/itinerary/<itinerary_id>/feedback` for explicit user feedback
+- `POST /api/push-tokens` for FCM token registration
+- `DELETE /api/push-tokens` for FCM token removal
 
 ### Trip Planning Service
 
@@ -175,6 +195,7 @@ It handles:
 - Saving places
 - Saving itineraries
 - Saving explicit feedback
+- Saving Firebase push tokens
 - Schema compatibility checks for older databases
 
 ## Frontend Structure

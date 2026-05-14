@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "push-sw.js",
       registerType: "autoUpdate",
       injectRegister: "auto",
       includeAssets: ["favicon.svg", "pwa-icon.svg", "pwa-maskable.svg"],
@@ -35,35 +38,8 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/api\.geoapify\.com\/.*$/i,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "geoapify-api",
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24,
-              },
-            },
-          },
-          {
-            urlPattern: /^https?:\/\/[^/]+\/api\/.*$/i,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "anotara-api",
-              networkTimeoutSeconds: 4,
-              expiration: {
-                maxEntries: 40,
-                maxAgeSeconds: 60 * 30,
-              },
-            },
-          },
-        ],
+      injectManifest: {
+        globPatterns: ["**/*.{js,css,html,svg,ico,png,jpg,jpeg,webp}"],
       },
     }),
   ],
