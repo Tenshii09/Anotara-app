@@ -71,7 +71,7 @@ export default function AuthPage({ initialMode = "login" }) {
 
       // Store the JWT token in localStorage so later requests can authenticate.
       localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
-      navigate("/dashboard");
+      navigate(data.is_admin ? "/admin" : "/dashboard");
     } catch (error) {
       // Any network or backend failure ends up here.
       setMessage("Connection error.");

@@ -271,6 +271,22 @@ They preserve:
 4. The updated artifacts are saved as joblib files.
 5. The backend loads the new model on startup.
 
+### 5. Admin Analytics
+
+1. The backend exposes `/api/admin/analytics` for feedback trends and model status.
+2. The backend exposes `/api/admin/retrain` to run the training script on demand.
+3. Admin access is controlled by `ADMIN_EMAILS` and `ADMIN_USERNAMES` in the root `.env`.
+4. The React dashboard lives at `/admin` and shows category trends, top places, recent feedback, and artifact status.
+5. Retraining writes `anotara_model_metrics.json` alongside the joblib artifacts.
+6. Admin accounts can be created and updated from the admin dashboard after logging in with an allowed admin account.
+7. Admin accounts log in through the same login form as regular users, but they are redirected to `/admin` after authentication.
+
+### 6. Schema Migration
+
+1. Run `flask migrate-schema` in the deployed app context to apply all idempotent database upgrades.
+2. If Flask CLI is not available in deployment, run `python migrate_schema.py` from the project root.
+3. The migration only adds missing tables and columns, so it is safe to run more than once.
+
 ## Machine Learning Design
 
 ### Current Role of ML
@@ -371,13 +387,17 @@ The system is designed to produce a short list of high-value experiences instead
 - [config.py](config.py)
 - [travel_planner.sql](travel_planner.sql)
 - [train_model.py](train_model.py)
+- [migrate_schema.py](migrate_schema.py)
 - [webapp/routes/auth_routes.py](webapp/routes/auth_routes.py)
 - [webapp/routes/trip_routes.py](webapp/routes/trip_routes.py)
+- [webapp/routes/admin_routes.py](webapp/routes/admin_routes.py)
 - [webapp/services/database.py](webapp/services/database.py)
 - [webapp/services/trip_planning.py](webapp/services/trip_planning.py)
+- [webapp/services/admin_analytics.py](webapp/services/admin_analytics.py)
 - [frontend/src/components/AuthPage.jsx](frontend/src/components/AuthPage.jsx)
 - [frontend/src/components/TravelWizard.jsx](frontend/src/components/TravelWizard.jsx)
 - [frontend/src/components/ItineraryPage.jsx](frontend/src/components/ItineraryPage.jsx)
+- [frontend/src/components/AdminDashboard.jsx](frontend/src/components/AdminDashboard.jsx)
 - [frontend/src/components/ItineraryMap.jsx](frontend/src/components/ItineraryMap.jsx)
 
 ## Summary

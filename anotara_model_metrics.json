@@ -1,0 +1,8 @@
+{
+  "trained_at": "2026-05-16T05:37:45.987141+00:00",
+  "csv_rows": 15000,
+  "database_rows": 4,
+  "dataset_rows": 15004,
+  "accuracy": 0.9923358880373209,
+  "test_rows": 3001
+}

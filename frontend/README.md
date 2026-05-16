@@ -39,3 +39,18 @@ Setup steps:
 4. Add the backend service account JSON or file path to the root `.env`.
 5. Restart the Flask app and the Vite dev server.
 6. Visit the itinerary page, grant notification permission, and enable device push.
+
+## Admin Analytics
+
+The sprint 5 admin dashboard is available at `/admin`.
+
+Admin login uses the same sign-in form as the regular app. After authentication, admin accounts are redirected to the admin dashboard.
+
+Backend allowlist env vars:
+
+- `ADMIN_EMAILS`
+- `ADMIN_USERNAMES`
+
+Set either one to a comma-separated list of accounts that should be allowed to open the admin analytics page and trigger retraining.
+
+From the admin dashboard, you can create additional admin accounts and update the password for any existing admin account.

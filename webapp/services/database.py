@@ -249,6 +249,229 @@ def ensure_push_token_columns():
         db.close()
 
 
+def ensure_admin_account_columns():
+    """Create the table used to persist admin login accounts."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_accounts (
+                id            INT AUTO_INCREMENT PRIMARY KEY,
+                username      VARCHAR(50) NOT NULL UNIQUE,
+                email         VARCHAR(100) NOT NULL UNIQUE,
+                password_hash VARCHAR(255) NOT NULL,
+                is_active     BOOLEAN DEFAULT TRUE,
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+            """
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def ensure_admin_activity_columns():
+    """Create the table used to audit admin actions."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_activity_log (
+                id                 INT AUTO_INCREMENT PRIMARY KEY,
+                actor_identity     VARCHAR(100) NOT NULL,
+                action             VARCHAR(80) NOT NULL,
+                target_type        VARCHAR(80),
+                target_identifier   VARCHAR(120),
+                details            JSON,
+                created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_admin_activity_created_at (created_at),
+                INDEX idx_admin_activity_actor (actor_identity)
+            )
+            """
+        )
+        existing_columns = get_table_columns('admin_activity_log')
+        if 'details' not in existing_columns:
+            cursor.execute('ALTER TABLE admin_activity_log ADD COLUMN details JSON')
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def ensure_schema_upgrades():
+    """Apply all database schema upgrades needed by the current codebase."""
+    ensure_itinerary_metadata_columns()
+    ensure_place_metadata_columns()
+    ensure_itinerary_item_columns()
+    ensure_feedback_columns()
+    ensure_weather_alert_columns()
+    ensure_push_token_columns()
+    ensure_admin_account_columns()
+    ensure_admin_activity_columns()
+
+
+def create_admin_account(username, email, password_hash):
+    """Insert a new admin account and return its id."""
+    ensure_admin_account_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO admin_accounts (username, email, password_hash)
+            VALUES (%s, %s, %s)
+            """,
+            (username, email, password_hash),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_accounts():
+    """Return all admin accounts without exposing password hashes."""
+    ensure_admin_account_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT id, username, email, is_active, created_at, updated_at
+            FROM admin_accounts
+            ORDER BY created_at DESC, id DESC
+            """
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_admin_account_by_identifier(identifier):
+    """Look up an active admin account by username or email."""
+    ensure_admin_account_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT id, username, email, password_hash, is_active
+            FROM admin_accounts
+            WHERE (username = %s OR email = %s) AND is_active = TRUE
+            LIMIT 1
+            """,
+            (identifier, identifier),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_admin_account_by_id(admin_account_id):
+    """Look up an active admin account by id."""
+    ensure_admin_account_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT id, username, email, password_hash, is_active
+            FROM admin_accounts
+            WHERE id = %s AND is_active = TRUE
+            LIMIT 1
+            """,
+            (admin_account_id,),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_admin_account_password(admin_account_id, password_hash):
+    """Update the stored password hash for an admin account."""
+    ensure_admin_account_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            UPDATE admin_accounts
+            SET password_hash = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (password_hash, admin_account_id),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def record_admin_activity(actor_identity, action, target_type=None, target_identifier=None, details=None):
+    """Persist an auditable record of an admin action."""
+    ensure_admin_activity_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO admin_activity_log
+                (actor_identity, action, target_type, target_identifier, details)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                actor_identity,
+                action,
+                target_type,
+                target_identifier,
+                json.dumps(_json_safe_value(details or {})),
+            ),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_activity(limit=25):
+    """Return the latest admin audit events."""
+    ensure_admin_activity_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT id, actor_identity, action, target_type, target_identifier, details, created_at
+            FROM admin_activity_log
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+            """,
+            (int(limit),),
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
+
+
 def save_push_token(user_id, token, user_agent=None, platform='web'):
     """Persist or refresh an FCM token for one user."""
     ensure_push_token_columns()

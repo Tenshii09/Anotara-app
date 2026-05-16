@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
+import AdminDashboard from "./components/AdminDashboard";
 import AuthPage from "./components/AuthPage";
 import ItineraryPage from "./components/ItineraryPage";
 import TravelWizard from "./components/TravelWizard";
@@ -18,6 +19,8 @@ export default function App() {
         <Route path="/register" element={<AuthPage initialMode="register" />} />
         {/* The dashboard route preserves the old wizard experience in React. */}
         <Route path="/dashboard" element={<TravelWizard />} />
+        {/* Admin analytics and retraining live on a guarded page. */}
+        <Route path="/admin" element={<AdminDashboard />} />
         {/* The itinerary page is the React replacement for the old Flask Jinja result page. */}
         <Route path="/itinerary" element={<ItineraryPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

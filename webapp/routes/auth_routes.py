@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token
 
 from webapp.extensions import bcrypt
-from webapp.services.database import get_db
+from webapp.services.database import get_admin_account_by_identifier, get_db
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -54,6 +54,19 @@ def api_login():
     db.close()
 
     if user and bcrypt.check_password_hash(user['password'], password):
-        token = create_access_token(identity=str(user['id']))
-        return jsonify({'token': token, 'username': user['username']}), 200
+        token = create_access_token(identity=str(user['id']), additional_claims={'is_admin': False})
+        return jsonify({'token': token, 'username': user['username'], 'is_admin': False}), 200
+
+    admin_account = get_admin_account_by_identifier(identifier)
+    if admin_account and bcrypt.check_password_hash(admin_account['password_hash'], password):
+        token = create_access_token(
+            identity=f"admin:{admin_account['id']}",
+            additional_claims={
+                'is_admin': True,
+                'admin_account_id': admin_account['id'],
+                'admin_username': admin_account['username'],
+            },
+        )
+        return jsonify({'token': token, 'username': admin_account['username'], 'is_admin': True}), 200
+
     return jsonify({'error': 'Invalid credentials'}), 401

@@ -127,7 +127,7 @@ def load_database_examples():
 				SELECT
 					tf.itinerary_id,
 					tf.place_id,
-					tf.feedback_value,
+					tf.rating_type,
 					i.destination,
 					i.budget,
 					i.num_days,
@@ -144,7 +144,7 @@ def load_database_examples():
 		except Exception:
 			feedback_rows = []
 		feedback_lookup = {
-			(row['itinerary_id'], row['place_id']): int(row['feedback_value'])
+			(row['itinerary_id'], row['place_id']): 1 if row.get('rating_type') == 'Best Pick' else 0
 			for row in feedback_rows
 		}
 
@@ -255,3 +255,17 @@ print(classification_report(y_test, predictions, zero_division=0))
 
 joblib.dump(model, 'anotara_ml_model.pkl')
 print("💾 Model saved successfully as 'anotara_ml_model.pkl'!")
+
+training_summary = {
+	'trained_at': pd.Timestamp.utcnow().isoformat(),
+	'csv_rows': int(len(csv_df)),
+	'database_rows': int(len(db_df)),
+	'dataset_rows': int(len(df)),
+	'accuracy': float(accuracy),
+	'test_rows': int(len(X_test)),
+}
+
+with open('anotara_model_metrics.json', 'w', encoding='utf-8') as metrics_file:
+	json.dump(training_summary, metrics_file, indent=2)
+
+print("📝 Training summary saved as 'anotara_model_metrics.json'!")

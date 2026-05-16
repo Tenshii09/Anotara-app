@@ -23,3 +23,5 @@ class Config:
     FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', '')
     FIREBASE_SERVICE_ACCOUNT_JSON = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON', '')
     FIREBASE_SERVICE_ACCOUNT_PATH = os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH', '')
+    ADMIN_EMAILS = os.environ.get('ADMIN_EMAILS', '')
+    ADMIN_USERNAMES = os.environ.get('ADMIN_USERNAMES', '')
