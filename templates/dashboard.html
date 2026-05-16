@@ -155,6 +155,51 @@
         {% endfor %}
       </div>
 
+      <p class="text-start fw-600 mb-3" style="max-width:600px; margin:0 auto;">
+        Pacing Style
+      </p>
+      <div class="d-flex gap-3 justify-content-center flex-wrap mb-4">
+        {% for val, label in [('relaxed','Relaxed'),('moderate','Moderate'),('packed','Packed')] %}
+        <div class="bento-item flex-fill">
+          <input type="radio" name="pacing_style" id="pace_{{ val }}"
+                 value="{{ val }}" {% if val == 'moderate' %}checked{% endif %}>
+          <label for="pace_{{ val }}" class="bento-label">
+            <span class="fw-600">{{ label }}</span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <p class="text-start fw-600 mb-3" style="max-width:600px; margin:0 auto;">
+        Companion Type
+      </p>
+      <div class="d-flex gap-3 justify-content-center flex-wrap mb-4">
+        {% for val, label in [('solo','Solo'),('couple','Couple'),('friends','Friends'),('family_kids','Family + Kids'),('seniors','Seniors')] %}
+        <div class="bento-item flex-fill">
+          <input type="radio" name="companion_type" id="companion_{{ val }}"
+                 value="{{ val }}" {% if val == 'solo' %}checked{% endif %}>
+          <label for="companion_{{ val }}" class="bento-label">
+            <span class="fw-600">{{ label }}</span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <p class="text-start fw-600 mb-3" style="max-width:600px; margin:0 auto;">
+        Transport Mode
+      </p>
+      <div class="d-flex gap-3 justify-content-center flex-wrap mb-5">
+        {% for val, label in [('walking','Walking'),('public','Public Transit'),('motorcycle','Motorcycle'),('private_car','Private Car')] %}
+        <div class="bento-item flex-fill">
+          <input type="radio" name="transport_mode" id="transport_{{ val }}"
+                 value="{{ val }}" {% if val == 'public' %}checked{% endif %}>
+          <label for="transport_{{ val }}" class="bento-label">
+            <span class="fw-600">{{ label }}</span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+
       <div class="d-flex gap-3 justify-content-center">
         <button type="button" class="btn-outline-luxury" onclick="prevStep(3)">
           ↑ Back
@@ -196,9 +241,21 @@
           <span class="text-muted small">Interests</span>
           <span class="fw-600" id="confirmPrefs">—</span>
         </div>
-        <div class="d-flex justify-content-between">
+        <div class="d-flex justify-content-between mb-2">
           <span class="text-muted small">Travel Style</span>
           <span class="fw-600" id="confirmBudget">—</span>
+        </div>
+        <div class="d-flex justify-content-between mb-2">
+          <span class="text-muted small">Pacing</span>
+          <span class="fw-600" id="confirmPace">—</span>
+        </div>
+        <div class="d-flex justify-content-between mb-2">
+          <span class="text-muted small">Companion</span>
+          <span class="fw-600" id="confirmCompanion">—</span>
+        </div>
+        <div class="d-flex justify-content-between">
+          <span class="text-muted small">Transport</span>
+          <span class="fw-600" id="confirmTransport">—</span>
         </div>
       </div>
 
@@ -289,6 +346,35 @@ function populateConfirm() {
     const budgetMap = { low: 'Backpacker', comfort: 'Comfort', high: 'Luxury' };
     document.getElementById('confirmBudget').textContent =
         budgetEl ? (budgetMap[budgetEl.value] || budgetEl.value) : '—';
+
+    // Pacing
+    const paceEl = document.querySelector('input[name="pacing_style"]:checked');
+    const paceMap = { relaxed: 'Relaxed', moderate: 'Moderate', packed: 'Packed' };
+    document.getElementById('confirmPace').textContent =
+        paceEl ? (paceMap[paceEl.value] || paceEl.value) : '—';
+
+    // Companion
+    const companionEl = document.querySelector('input[name="companion_type"]:checked');
+    const companionMap = {
+        solo: 'Solo',
+        couple: 'Couple',
+        friends: 'Friends',
+        family_kids: 'Family + Kids',
+        seniors: 'Seniors'
+    };
+    document.getElementById('confirmCompanion').textContent =
+        companionEl ? (companionMap[companionEl.value] || companionEl.value) : '—';
+
+    // Transport
+    const transportEl = document.querySelector('input[name="transport_mode"]:checked');
+    const transportMap = {
+        walking: 'Walking',
+        public: 'Public Transit',
+        motorcycle: 'Motorcycle',
+        private_car: 'Private Car'
+    };
+    document.getElementById('confirmTransport').textContent =
+        transportEl ? (transportMap[transportEl.value] || transportEl.value) : '—';
 }
 
 // ── Prevent double-submit ────────────────────────────────────────────────────

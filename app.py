@@ -199,6 +199,9 @@ def dashboard():
         num_days    = int(request.form.get('num_days', 3))
         budget      = request.form.get('budget', 'comfort')
         preferences = request.form.getlist('preferences')
+        pacing_style = request.form.get('pacing_style', 'moderate')
+        companion_type = request.form.get('companion_type', 'solo')
+        transport_mode = request.form.get('transport_mode', 'public')
 
         if not destination:
             flash('Please enter a destination.', 'warning')
@@ -217,7 +220,8 @@ def dashboard():
             return redirect(url_for('dashboard'))
 
         # ── Step 3: Fetch places via Geoapify ─────────
-        places = fetch_places(destination, preferences, dest_coords)
+        places = fetch_places(destination, preferences, dest_coords, transport_mode)
+        places = filter_places_for_companion(places, companion_type)
 
         if not places:
             flash('No places found. Try another Philippine destination.', 'warning')
@@ -228,7 +232,7 @@ def dashboard():
 
         # ── Step 5: Build itinerary ───────────────────
         itinerary = build_itinerary(
-            places, preferences, num_days, budget, destination, dest_coords
+            places, preferences, num_days, budget, destination, dest_coords, pacing_style
         )
 
         # ── Step 6: Save itinerary ────────────────────
@@ -241,6 +245,9 @@ def dashboard():
             num_days     = num_days,
             budget       = budget,
             preferences  = preferences,
+            pacing_style = pacing_style,
+            companion_type = companion_type,
+            transport_mode = transport_mode,
             itinerary_id = itinerary_id,
             dest_coords  = dest_coords,
             mapbox_token = app.config['MAPBOX_TOKEN']
@@ -353,8 +360,70 @@ CATEGORY_MAP = {
     'nightlife' : 'entertainment.nightclub,catering.bar',
 }
 
+PACE_PLACES_PER_DAY = {
+    'relaxed': 3,
+    'moderate': 4,
+    'packed': 5,
+}
 
-def fetch_places(destination, preferences, dest_coords=None):
+TRANSPORT_SEARCH_RADIUS = {
+    'walking': 12000,
+    'public': 25000,
+    'motorcycle': 35000,
+    'private_car': 45000,
+}
+
+COMPANION_INTENSITY_LIMITS = {
+    'family_kids': {'high'},
+    'seniors': {'high'},
+}
+
+
+def get_places_per_day(pacing_style):
+    """Returns the number of stops to schedule each day for the selected pace."""
+    return PACE_PLACES_PER_DAY.get((pacing_style or 'moderate').strip().lower(), 4)
+
+
+def get_search_radius(transport_mode):
+    """Returns a search radius tuned to the user's transport flexibility."""
+    return TRANSPORT_SEARCH_RADIUS.get((transport_mode or 'public').strip().lower(), 30000)
+
+
+def infer_physical_intensity(place):
+    """Infers place intensity from the lightweight category/tag data we already have."""
+    category = (place.get('category') or '').lower()
+    combined = ' '.join([
+        place.get('name', ''),
+        place.get('tags', ''),
+        category,
+    ]).lower()
+
+    if any(word in combined for word in ['hike', 'trail', 'trek', 'volcano', 'falls', 'surf', 'dive']):
+        return 'high'
+    if category == 'nature':
+        return 'high'
+    if category in ['food', 'museums']:
+        return 'low'
+    return 'medium'
+
+
+def filter_places_for_companion(places, companion_type):
+    """Filters out high-intensity places for companion profiles that need gentler options."""
+    blocked_levels = COMPANION_INTENSITY_LIMITS.get(
+        (companion_type or 'solo').strip().lower(),
+        set()
+    )
+    if not blocked_levels:
+        return places
+
+    filtered = [
+        place for place in places
+        if infer_physical_intensity(place) not in blocked_levels
+    ]
+    return filtered or places
+
+
+def fetch_places(destination, preferences, dest_coords=None, transport_mode='public'):
     """
     Fetches nearby places from Geoapify Places API.
     Uses dest_coords (from Mapbox geocoding) for accuracy.
@@ -383,7 +452,7 @@ def fetch_places(destination, preferences, dest_coords=None):
     url    = 'https://api.geoapify.com/v2/places'
     params = {
         'categories' : categories,
-        'filter'     : f'circle:{lon},{lat},30000',  # 30km radius
+        'filter'     : f'circle:{lon},{lat},{get_search_radius(transport_mode)}',
         'limit'      : 150,
         'apiKey'     : api_key
     }
@@ -711,7 +780,15 @@ def score_place(place, preferences, budget):
     return score
 
 
-def build_itinerary(places, preferences, num_days, budget, destination, dest_coords=None):
+def build_itinerary(
+    places,
+    preferences,
+    num_days,
+    budget,
+    destination,
+    dest_coords=None,
+    pacing_style='moderate'
+):
     """
     Full recommendation pipeline:
     1. Score all places using the AI Model
@@ -720,7 +797,7 @@ def build_itinerary(places, preferences, num_days, budget, destination, dest_coo
     4. Greedy nearest-neighbor routing
     5. Distribute sequentially into days (4 places/day)
     """
-    PLACES_PER_DAY = 4
+    PLACES_PER_DAY = get_places_per_day(pacing_style)
     total_needed   = num_days * PLACES_PER_DAY
 
     # ─── UPDATED: Score using the Machine Learning Model ───
@@ -910,6 +987,9 @@ def view_trip(trip_id):
         num_days=num_days,
         budget='Saved Trip', # Fallback label
         preferences=[],      # Fallback label
+        pacing_style=None,
+        companion_type=None,
+        transport_mode=None,
         dest_coords=dest_coords,
         mapbox_token=app.config.get('MAPBOX_TOKEN', '')
     )
@@ -928,20 +1008,27 @@ def api_generate():
     num_days    = int(data.get('num_days', 3))
     preferences = data.get('preferences', [])
     budget      = data.get('budget', 'comfort')
+    pacing_style = data.get('pacing_style', 'moderate')
+    companion_type = data.get('companion_type', 'solo')
+    transport_mode = data.get('transport_mode', 'public')
 
     dest_coords = geocode_mapbox(destination)
 
     if dest_coords and not is_in_philippines(dest_coords['lat'], dest_coords['lon']):
         return jsonify({'error': 'Destination must be in the Philippines.'}), 400
 
-    places    = fetch_places(destination, preferences, dest_coords)
+    places    = fetch_places(destination, preferences, dest_coords, transport_mode)
+    places    = filter_places_for_companion(places, companion_type)
     itinerary = build_itinerary(
-        places, preferences, num_days, budget, destination, dest_coords
+        places, preferences, num_days, budget, destination, dest_coords, pacing_style
     )
 
     return jsonify({
         'destination' : destination,
         'num_days'    : num_days,
+        'pacing_style': pacing_style,
+        'companion_type': companion_type,
+        'transport_mode': transport_mode,
         'dest_coords' : dest_coords,
         'itinerary'   : itinerary
     })

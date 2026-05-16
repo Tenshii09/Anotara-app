@@ -27,6 +27,7 @@
       {% elif budget == 'low' %}Backpacker
       {% else %}Comfort
       {% endif %}
+      {% if pacing_style %} &bull; {{ pacing_style | replace('_', ' ') | title }} Pace{% endif %}
     </p>
     <div class="d-flex flex-wrap gap-2 mb-4">
       {% for pref in preferences %}
@@ -35,6 +36,18 @@
         {{ pref | title }}
       </span>
       {% endfor %}
+      {% if companion_type %}
+      <span class="badge rounded-pill px-3 py-2"
+            style="background:rgba(0,0,0,0.08); color:var(--text-dark); font-size:0.8rem;">
+        {{ companion_type | replace('_', ' ') | title }}
+      </span>
+      {% endif %}
+      {% if transport_mode %}
+      <span class="badge rounded-pill px-3 py-2"
+            style="background:rgba(0,0,0,0.08); color:var(--text-dark); font-size:0.8rem;">
+        {{ transport_mode | replace('_', ' ') | title }}
+      </span>
+      {% endif %}
     </div>
     <a href="{{ url_for('my_trips') }}"
        class="btn-outline-luxury text-decoration-none"
