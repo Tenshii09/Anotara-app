@@ -1,0 +1,88 @@
+/* Path: frontend/src/components/common/BottomNav.css */
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  padding: 8px 0;
+  z-index: 50;
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.bottom-nav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.bottom-nav-btn .icon {
+  font-size: 22px;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.bottom-nav-btn.active {
+  color: #3b82f6;
+}
+
+.bottom-nav-btn.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  height: 3px;
+  width: 40%;
+  background-color: #3b82f6;
+  border-radius: 2px;
+  left: 30%;
+  transition: left 0.3s ease;
+}
+
+.bottom-nav-btn:hover .icon {
+  transform: scale(1.2);
+}
+
+.center-btn {
+  background: #3b82f6;
+  color: white;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  margin-top: -24px; /* floating */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 26px;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+}
+
+.center-btn:active {
+  transform: scale(0.95);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+}
+
+.label {
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+/* Mobile-first: hide label on small screens except center */
+@media (max-width: 480px) {
+  .label {
+    display: none;
+  }
+}
