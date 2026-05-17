@@ -9,6 +9,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from webapp.services.database import (
+    get_db,
     get_itinerary_item_context,
     get_itinerary_overview,
     get_weather_alert_history,
@@ -253,3 +254,118 @@ def api_delete_push_token():
 
     delete_push_token(current_user_id, token)
     return jsonify({'message': 'Push token removed.'}), 200
+
+# ========================================================================
+# This endpoint returns a list of the user's saved itineraries with basic info for display in the itinerary list page. Detailed info for each itinerary is fetched separately when viewing an itinerary's details.
+@trip_bp.route('/api/itineraries', methods=['GET'])
+@jwt_required()
+def get_saved_itineraries():
+    current_user_id = get_jwt_identity()
+
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                destination,
+                budget,
+                num_days AS days,
+                created_at
+            FROM itineraries
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            """,
+            (current_user_id,)
+        )
+
+        itineraries = cursor.fetchall()
+
+        for trip in itineraries:
+            if trip.get("created_at"):
+                trip["created_at"] = trip["created_at"].strftime("%Y-%m-%d")
+
+        return jsonify(itineraries), 200
+
+    except Exception as error:
+        print("Error fetching itineraries:", error)
+        return jsonify({"error": "Failed to fetch itineraries"}), 500
+
+    finally:
+        cursor.close()
+        db.close()
+
+
+# This endpoint returns detailed info for a single itinerary, including the list of places grouped by day and ordered by sequence. This is used to display the full itinerary when viewing an individual trip. The itinerary overview page only fetches basic info for all itineraries, while this details endpoint is called when viewing a specific itinerary.
+@trip_bp.route('/api/itineraries/<int:itinerary_id>', methods=['GET'])
+@jwt_required()
+def get_saved_itinerary_details(itinerary_id):
+    current_user_id = get_jwt_identity()
+
+    try:
+        overview = get_itinerary_overview(itinerary_id)
+
+        if not overview:
+            return jsonify({"error": "Itinerary not found"}), 404
+
+        trip = overview.get("itinerary")
+        items = overview.get("items", [])
+
+        if int(trip.get("user_id")) != int(current_user_id):
+            return jsonify({"error": "You are not allowed to view this itinerary"}), 403
+
+        itinerary = {}
+
+        for item in items:
+            day = str(item.get("day_number"))
+
+            if day not in itinerary:
+                itinerary[day] = []
+
+            itinerary[day].append({
+                "item_id": item.get("item_id"),
+                "place_id": item.get("place_id"),
+                "name": item.get("name"),
+                "category": item.get("category"),
+                "lat": float(item["latitude"]) if item.get("latitude") is not None else None,
+                "lon": float(item["longitude"]) if item.get("longitude") is not None else None,
+                "rating": float(item["rating"]) if item.get("rating") is not None else 0,
+                "city": item.get("city"),
+                "tags": item.get("tags"),
+                "environment_type": item.get("environment_type"),
+                "physical_intensity": item.get("physical_intensity"),
+                "sequence_order": item.get("sequence_order"),
+                "estimated_duration": item.get("estimated_duration"),
+                "recommended_minutes": item.get("estimated_duration"),
+                "is_locked": bool(item.get("is_locked")),
+                "swap_history": item.get("swap_history", 0),
+            })
+
+        response = {
+            "id": trip.get("id"),
+            "itinerary_id": trip.get("id"),
+            "trip_name": trip.get("trip_name"),
+            "destination": trip.get("destination"),
+            "budget": trip.get("budget"),
+            "num_days": trip.get("num_days"),
+            "preferences": trip.get("preferences"),
+            "pacing_style": trip.get("pacing_style"),
+            "companion_type": trip.get("companion_type"),
+            "transport_mode": trip.get("transport_mode"),
+            "accommodation_lat": float(trip["accommodation_lat"]) if trip.get("accommodation_lat") is not None else None,
+            "accommodation_lng": float(trip["accommodation_lng"]) if trip.get("accommodation_lng") is not None else None,
+            "status": trip.get("status"),
+            "itinerary": itinerary,
+            "dest_coords": {
+                "lat": float(trip["accommodation_lat"]) if trip.get("accommodation_lat") is not None else None,
+                "lon": float(trip["accommodation_lng"]) if trip.get("accommodation_lng") is not None else None,
+            },
+        }
+
+        return jsonify(response), 200
+
+    except Exception as error:
+        print("Error fetching itinerary details:", error)
+        return jsonify({"error": str(error)}), 500
