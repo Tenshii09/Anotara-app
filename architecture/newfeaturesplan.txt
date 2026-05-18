@@ -1,0 +1,197 @@
+As a 30-year Agile Manager and Scrum Master, I can tell you that a vision this ambitious will collapse if we build the roof before pouring the foundation. You are combining complex Machine Learning logic, offline-first mobile capabilities, and a highly granular database.
+To ensure we deliver an "Exceptional" grade without critical bugs or integration nightmares, we must use a strictly dependency-driven Agile Software Development Life Cycle (SDLC). We will build the "Ano Tara App" iteratively, ensuring every new module snaps perfectly into a fully tested layer beneath it.
+Here is your master Agile SDLC and Sprint Plan, engineered for zero downtime and maximum panelist impact.
+Agile Project Strategy: The "Core-Out" Approach
+We will build from the database outward. If the database cannot hold the new data, the API cannot serve it. If the API cannot serve it, the React UI cannot display it.
+Sprint Duration: 1-2 Weeks per Sprint
+Ceremonies: Daily Standup (Code Sync), Sprint Review (Testing the module), Sprint Retrospective (Documenting for your Rubric).
+Sprint 0: The Architecture & Schema Foundation
+Goal: Prepare the database and backend to support granular constraints and ML variables.
+Dependency: Must be completed before touching the React UI or ML model.
+Database Schema Upgrades:
+Update itineraries table to include pacing_style ('Packed', 'Moderate', 'Relaxed'), companion_type ('Solo', 'Family_Kids', 'Seniors', etc.), and transport_mode.
+Add a status column ('Active', 'Archived', etc.) to support the "Soft Delete" feature.
+Update places table with environment_type ('Indoor', 'Outdoor') and physical_intensity.
+Update itinerary_items with sequence_order and is_locked (Boolean) to support drag-and-drop and granular regeneration.
+API Gateway Standardization:
+Ensure the Python Flask backend is fully refactored into a "Core Service" outputting JSON, completely decoupled from the frontend.
+Implement AES-256 encryption for sensitive data at rest and enforce HTTPS/TLS for data in transit.
+Sprint 1: The "Travel Context" & Intelligent Engine Upgrade
+Goal: Collect the new data on the frontend and use it to filter ML results.
+Dependency: Requires Sprint 0 Database Schema.
+Frontend (React):
+Update the TravelWizard component to collect the "Missing Preferences": Pacing Style, Companion Type, and Transport Mode.
+Implement Mapbox geocoding to capture the user's accommodation as the anchor for distance calculations.
+Backend (Flask Core Service):
+Upgrade the POST /api/v1/itineraries/generate endpoint to ingest the new logistical variables.
+Implement "Hard Filtering": If companion_type is 'Family_Kids' or 'Seniors', strictly exclude places where physical_intensity = 'High' before the ML model runs.
+Implement the "Pacing Governor": Adjust the ML clustering density based on pacing_style to cap daily stops.
+Sprint 2: The "Island-Hopper" PWA Transformation
+Goal: Make the web app behave natively on mobile and work offline.
+Dependency: Requires the core trip generation (Sprint 1) to be stable so we know what data to cache.
+Frontend (React/Vite):
+Implement the vite-plugin-pwa to generate the manifest.json, allowing mobile home screen installation.
+Write the Service Worker (sw.js) to cache the app's HTML/CSS/JS shell.
+Configure Local Storage to save the generated itinerary JSON payload and JWT authentication token directly to the device.
+Quality Assurance:
+Test that the app loads its shell and cached itinerary data in under 3 seconds with zero network connectivity.
+Sprint 3: The Granular Control & "Day-by-Day" UX
+Goal: Build the interactive, editable map dashboard without forcing full trip regenerations.
+Dependency: Requires Sprint 1 generation logic and Sprint 2 mobile responsiveness.
+Backend (Micro-Endpoints):
+Create lightweight endpoints: PATCH /items/reorder (batch updating sequence_order), POST /items/swap, and PATCH /items/lock.
+Frontend (React):
+Build the "Master Overview" screen with horizontal scrollable tabs for Day 1, Day 2, etc..
+Implement Drag-and-Drop Reordering that instantly updates the map polyline.
+Add the "Swap This Place" button, allowing the frontend to ping the swap API and dynamically replace a single stop.
+Sprint 4: The "Real-World Curveball" (Live Monitor & Notifications)
+Goal: Anticipate problems before they happen using background tasks and external APIs.
+Dependency: Requires Sprint 3's swapping mechanism to be fully operational so the system can suggest alternatives.
+Backend (Cron & APIs):
+Set up a background worker script (Cron Job) that runs every 6 hours, querying active itineraries within 72 hours of starting.
+Integrate an external Weather API (e.g., OpenWeatherMap) to check for rain.
+If rain is detected, pre-calculate an alternative route using places where environment_type = 'Indoor'.
+Frontend & Notifications:
+Integrate Firebase Cloud Messaging (FCM) to trigger a push notification to the user's device (e.g., "⚠️ Weather Alert").
+Display the "Smart Suggestion" banner allowing users to instantly apply the indoor itinerary.
+Sprint 5: Admin Analytics & ML Retraining Loop
+Goal: Fulfill the ITST 303 visualization requirements and make the ML model genuinely intelligent.
+Dependency: Can only be done once the system is generating trips and capturing feedback.
+Backend (Python Automation):
+Build the POST /api/v1/feedback endpoint to capture 'Best Pick' or 'Not Ideal' ratings.
+Write the "Evolution Script" (running off-peak) to aggregate feedback and downgrade/upgrade baseline recommendation weights in the ML model.
+Frontend (Admin Dashboard):
+Build a secure, admin-only dashboard using Chart.js or Plotly.
+Visualize live analytics like "Category Popularity," user demographics, and "ML Feedback Stats".
+
+API PLAN/To execute this advanced schema flawlessly and prove to the panel that this is an enterprise-grade, highly integrated system, the architecture must transition from basic database queries to an intelligent, decoupled API ecosystem. The React frontend and the backend ML service must communicate through strictly defined, asynchronous endpoints.
+Here is the exact API System Connection and Modification Plan to bridge the database upgrades to the user interface and the Machine Learning engine.
+Phase 1: The Context-Aware Generation Engine (API Core)
+The initial trip generation must ingest the new demographic and logistical variables to feed the ML clustering algorithm.
+Endpoint: POST /api/v1/itineraries/generate
+System Logic:
+Data Ingestion: The API receives the payload including pacing_style, companion_type, transport_mode, and the geocoded accommodation_lat/lng.
+Hard Filtering (The Pre-processing Stage): Before the ML model even runs, the backend executes strict SQL exclusions. If companion_type is 'Family_Kids' or 'Seniors', it instantly filters out all rows in the places table where physical_intensity = 'High'.
+Route Anchoring: The accommodation_lat/lng is set as "Node 0" in the distance calculation matrix. All Day 1 routing begins and ends relative to this coordinate.
+Pacing Governor: The ML clustering algorithm adjusts its density parameter based on pacing_style. If 'Relaxed', it caps sequence_order limits to 2-3 stops per day_number and increases the estimated_duration buffers.
+Phase 2: The Granular Control API (Interactive UI Support)
+To support the drag-and-drop and micro-editing features without crashing the system or forcing full regenerations, we need modular, lightweight endpoints.
+Drag-and-Drop Reordering:
+Endpoint: PATCH /api/v1/itineraries/{id}/items/reorder
+System Logic: When a user drags an item in the frontend, React sends an array of item_ids and their new sequence_order integers. The backend performs a batch UPDATE in the itinerary_items table, instantly recalculating the polyline map coordinates to send back to the UI.
+The Micro-Swap Engine:
+Endpoint: POST /api/v1/itineraries/{id}/items/{item_id}/swap
+System Logic: The system identifies the geographic cluster of the rejected place. The ML model queries the places table for the next-highest scored location within a 3-kilometer radius that shares the same budget and environment_type. It increments swap_history by +1 for the rejected item and replaces the record.
+The State Locker:
+Endpoint: PATCH /api/v1/itineraries/items/{item_id}/lock
+System Logic: Toggles the is_locked boolean. When a user subsequently hits the "Regenerate Day" endpoint, the database script runs DELETE FROM itinerary_items WHERE day_number = X AND is_locked = FALSE, safely preserving their anchored choices.
+Phase 3: The Automated "Live Monitor" & Webhooks
+This is the system integration masterstroke that ties external APIs, database state, and mobile notifications together.
+The Cron Job (Background Task):
+System Logic: A scheduled background worker script runs every 6 hours. It queries the itineraries table for records where status = 'Active' and the start date is within 72 hours.
+External API Integration:
+The worker pulls the lat/lng of the itinerary and hits an external Weather API (e.g., OpenWeatherMap).
+The Pivot Trigger:
+If the Weather API returns a high probability of precipitation, the system flags the itinerary. It pre-calculates an alternative route by exclusively querying the places table where environment_type = 'Indoor'.
+It triggers a push notification payload to the React PWA via Firebase Cloud Messaging, prompting the user to review the "Smart Suggestion."
+Phase 4: The Machine Learning Retraining Loop
+The feedback module must be decoupled from the core UX to prevent app slowdowns.
+Endpoint: POST /api/v1/feedback
+System Logic: The UI sends the rating_type ('Best Pick', 'Not Ideal') seamlessly in the background. The API writes this to the trip_feedback table.
+The Evolution Script: During off-peak hours (e.g., 3:00 AM), an automated Python script aggregates the trip_feedback data. If a specific place_id accumulates a high volume of 'Not Ideal' ratings or has a massive spike in swap_history, the script automatically downgrades its baseline recommendation weight in the primary ML model.
+
+
+CRUD FUNCTIONALITIES PLAN:
+1. CREATE: The Missing Preferences (The "Travel Context" Module)
+Right now, your app asks for destination, budget, days, and basic interests. That’s good, but it's not enough for a 100% realistic experience. We are missing the Travel Context. To generate a truly flawless itinerary, your system must collect these additional data points before hitting "Generate":
+The Missing PreferenceWhy the User Needs It (Tourism Reality)How the System Uses It (Database/ML)Pacing Style
+Do they want to see 6 things a day (Packed), or 2 things with lots of rest (Relaxed)?
+Adjusts the max_stops_per_day variable in your Python ML clustering algorithm.
+Companion Type
+A family with toddlers or a senior citizen cannot hike up a steep mountain.
+Acts as a strict filter. Drops places flagged with high_physical_activity if "Seniors/Kids" is selected.
+Accommodation Anchor
+Where are they sleeping? An itinerary must start and end logically based on their hotel.
+Uses Mapbox to geocode their hotel, setting it as the origin_point for route distance calculations.
+Transport Mode
+Do they have a rented car/van, or are they relying on tricycles and jeepneys?
+Impacts travel time estimates between stops.
+2. READ: The "Day-by-Day" Interactive Viewer
+When the ML model finishes generating the trip, the user shouldn't just see a boring text list. They need an interactive, highly visual dashboard.
+UI Components the User MUST See:
+The "Master Overview" Screen:
+A summary card at the top: "Your 3-Day Relaxed Trip to Cebu | Budget: Comfort."
+A horizontal scrollable tab for Day 1, Day 2, Day 3.
+The "Day View" Focus:
+When the user clicks "Day 1," the map instantly re-centers and draws a polyline route only for Day 1.
+The list below filters to show only Day 1 stops.
+The "Stop Details" Expansion (The Micro-Interaction):
+When they tap a specific place (e.g., "Magellan's Cross"), an accordion or modal slides up showing:
+Why we picked this: (e.g., "Highly rated for History buffs!")
+Suggested Duration: (e.g., "Spend about 45 mins here.")
+Logistics: "15 mins via tricycle from your previous stop."
+Practical Info: Operating hours, entrance fees (if known), and a quick tip (e.g., "Dress modestly, it's a religious site.").
+3. UPDATE: The "Granular Regeneration" Engine (The Game-Changer)
+This is where you get your perfect grade. Users change their minds. If your app forces them to regenerate the entire 3-day trip just because they don't like one museum, they will uninstall it.
+The UI Interactions for Editing:
+The "Swap This Place" Button: \* Next to every generated stop, there is a "Swap" icon.
+**Use Case:** The user sees "Art Museum" but they hate art. They click "Swap."
+**System Action:** The React frontend pings the Flask API (`/api/itinerary/swap`). The ML reranker looks for the next best place in that specific geographic cluster that fits their budget, and dynamically replaces only that stop without ruining the rest of the day's route.
+The "Regenerate Day" Button:
+Use Case: The user looks at Day 2 and thinks, "Actually, I want a beach day instead of city tours."
+System Action: They click "Regenerate Day 2." A quick modal asks: "What's the new vibe for this day?" The system deletes the Day 2 items in the itinerary_items MySQL table, generates a new day, and updates the UI.
+Drag-and-Drop Reordering:
+Let users manually drag stops up or down if they want to change the sequence.
+The map route updates instantly.
+4. DELETE: Archiving and Trashing
+Keep this clean and safe.
+Soft Deletes: If a user deletes an itinerary, change its status in the database to "archived" instead of wiping it completely. This prevents accidental data loss and allows you to keep historical data for your Admin Analytics Dashboard.
+UI Component: A simple "My Trips" dashboard where active trips are prominent, and a separate tab exists for "Past/Archived Trips."
+5. The "Real-World Curveball": Predictive & Dynamic Adjustments
+You described a brilliant feature: the system acting as a proactive travel guide when situations change. Here is how we build that "No Butas" feature:
+The Feature: "Ano Tara: Live Trip Monitor"
+The Concept: The user plans a trip 2 months in advance. Three days before the trip, a low-pressure area (LPA) forms, bringing heavy rain to their destination.
+The System Action (Backend):
+A daily cron job (background task) in your Python backend checks the upcoming active itineraries.
+It queries an external Weather API (like OpenWeatherMap) for the destination dates.
+It detects a high probability of rain.
+The UI/UX Action (Frontend/Mobile):
+Firebase Cloud Messaging sends a push notification: "⚠️ Weather Alert: Rain expected on Day 2 of your Siargao trip. Tap to adjust your plans."
+The user taps the notification and opens the app.
+The app displays a "Smart Suggestion" banner: "Since heavy rain is predicted, we recommend swapping your 'Island Hopping' on Day 2 with these top-rated indoor cafes and local museums."
+The user clicks "Apply Smart Fix," and the ML reranker safely updates Day 2 with indoor activities.
+This level of empathy—anticipating the user's problem before they even arrive at the destination—is the pinnacle of Design Thinking. It proves to your panel that your app is not just a database wrapper, but an intelligent assistant.
+Given these advanced functionalities, the database schema will need to handle a bit more complexity (like storing the "Companion Type" and "Transport Mode"). Would you like me to map out the exact MySQL table updates needed to support these new granular features?
+
+
+DATABASE PLAN:
+1. Upgrading the itineraries Table (The Master Trip Record)
+To support the new Travel Context module (Pacing, Companions, Transport), we need to add fields that dictate how the ML model generates the trip. We also need a status flag for our "Soft Delete" feature.
+Required New Columns:
+pacing_style (ENUM/VARCHAR): Stores 'Packed', 'Moderate', or 'Relaxed'. Determines the max_stops_per_day.
+companion_type (ENUM/VARCHAR): Stores 'Solo', 'Couple', 'Family_Kids', 'Friends', or 'Seniors'. Used to filter out physically demanding places.
+transport_mode (ENUM/VARCHAR): Stores 'Public', 'Private_Car', 'Motorcycle', or 'Walking'. Used for travel time calculations.
+accommodation_lat (DECIMAL/FLOAT): The geographic anchor for Day 1 routing.
+accommodation_lng (DECIMAL/FLOAT): The geographic anchor for Day 1 routing.
+status (ENUM): 'Active', 'Draft', 'Archived' (Soft Delete), 'Completed'.
+2. Upgrading the itinerary_items Table (The Granular Engine)
+This table links the saved places to a specific itinerary. To support Drag-and-Drop Reordering, Granular Swapping, and the Interactive Day-by-Day View, we must add strict sequencing and locking mechanisms.
+Required New Columns:
+day_number (INT): Groups the stops (e.g., Day 1, Day 2) for the frontend tabbed view.
+sequence_order (INT): Determines the chronological order of stops within a specific day. If a user drags and drops a place, this number updates.
+estimated_duration (INT): How many minutes the user is expected to spend here (creates the "Breathing Room" pacing).
+is_locked (BOOLEAN): A crucial UX feature. If a user regenerates a day but wants to keep a specific restaurant, they "lock" it. The ML system will skip this row when deleting/replacing items for that day.
+swap_history (INT): Tracks how many times a user clicked "Swap This Place". Useful for analytics to see if the model's first choice was poor.
+3. Upgrading the places (or destinations) Table (The ML Fuel)
+To allow the system to pivot during a Live Trip Monitor (Weather Alert) or when filtering for Companion Types, the actual places in your database need metadata.
+Required New Columns:
+environment_type (ENUM): 'Indoor', 'Outdoor', 'Mixed'. If the background task detects rain via the weather API, the ML model will exclusively query places marked 'Indoor'.
+physical_intensity (ENUM): 'Low' (Museums, Cafes), 'Medium' (Walking tours), 'High' (Hiking, Surfing). Filtered against the user's companion_type.
+4. Creating the trip_feedback Table (The ML Retraining Loop)
+To satisfy the system integration and ML requirements, we need a dedicated table to capture the user's ratings for specific stops. This data will be periodically fed back into your Python model to improve future recommendations.
+Table Structure:
+Column NameData TypePurposefeedback_idPrimary KeyUnique identifier.user_idForeign KeyThe user giving the feedback.place_idForeign KeyThe specific tourist spot being rated.itinerary_idForeign KeyThe context in which they visited it.rating_typeENUM'Best Pick', 'Neutral', 'Not Ideal'.feedback_notesTEXTOptional user comments.
+Execution Strategy for the Panel Defense
+When you present this schema to your panel, you frame it perfectly: "We didn't just build tables to store data; we designed a schema that acts as the backbone for our Machine Learning constraints and dynamic user interface." This proves you understand the intersection of database architecture (ITST 303), system integration (ITEL 305), and mobile user experience (ITST 304).
+
+

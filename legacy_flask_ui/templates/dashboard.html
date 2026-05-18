@@ -1,0 +1,426 @@
+<!-- Multi-step trip wizard that collects destination, duration, interests, and travel style. -->
+{% extends 'base.html' %} {% block title %}Design Your Journey — Ano tara?{%
+endblock %} {% block content %}
+
+<!-- ── Exit link (top-left, outside wizard) ── -->
+<div style="position: fixed; top: 28px; left: 40px; z-index: 1100">
+  <a
+    href="{{ url_for('my_trips') }}"
+    class="text-decoration-none text-muted small fw-500"
+    style="letter-spacing: 0.05em"
+  >
+    ← Exit Planner
+  </a>
+</div>
+
+<!-- ── Premium Progress Indicator ── -->
+<div
+  style="
+    position: fixed;
+    top: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1100;
+  "
+  id="stepIndicator"
+>
+  <div
+    style="
+      background: rgba(255, 255, 255, 0.6);
+      backdrop-filter: blur(20px) saturate(160%);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      padding: 8px 24px;
+      border-radius: 100px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+    "
+  >
+    <span
+      class="small fw-700"
+      style="letter-spacing: 0.15em; font-size: 0.75rem"
+    >
+      <span style="color: var(--text-muted)">STEP</span>
+      <span id="currentStep" style="color: var(--text-dark)">1</span>
+      <span style="color: var(--text-muted)">OF 4</span>
+    </span>
+  </div>
+</div>
+<!-- ── Wizard container ── -->
+<div class="wizard-container">
+  <form method="POST" action="{{ url_for('dashboard') }}" id="wizardForm">
+    <!-- ════════════════════════════════
+       STEP 1 — Destination
+       ════════════════════════════════ -->
+    <div class="wizard-step active" id="step1">
+      <div class="text-center">
+        <p class="text-muted small fw-600 mb-3" style="letter-spacing: 0.1em">
+          STEP 1 OF 4 &nbsp;·&nbsp; WHERE TO?
+        </p>
+        <h2 class="serif mb-5" style="font-size: 3rem">
+          Where in the Philippines<br />are you headed?
+        </h2>
+
+        <!-- Destination input with datalist autocomplete -->
+        <input
+          type="text"
+          name="destination"
+          id="destinationInput"
+          class="form-control input-massive text-center"
+          placeholder="e.g. Palawan, Cebu, Siargao…"
+          list="phDestinations"
+          required
+          autocomplete="off"
+        />
+        <datalist id="phDestinations">
+          {% for dest in destinations %}
+          <option value="{{ dest }}">{% endfor %}</option>
+        </datalist>
+
+        <p class="text-muted small mt-3">🇵🇭 Philippines destinations only</p>
+
+        <div class="mt-5">
+          <button type="button" class="btn-luxury" onclick="nextStep(1)">
+            Continue →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════
+       STEP 2 — Number of Days
+       ════════════════════════════════ -->
+    <div class="wizard-step" id="step2">
+      <div class="text-center">
+        <p class="text-muted small fw-600 mb-3" style="letter-spacing: 0.1em">
+          STEP 2 OF 4
+        </p>
+        <h2 class="serif mb-5" style="font-size: 3rem">
+          How many days do you have?
+        </h2>
+
+        <div
+          class="bento-grid justify-content-center"
+          style="
+            max-width: 500px;
+            margin: 0 auto;
+            grid-template-columns: repeat(4, 1fr);
+          "
+        >
+          {% for d in [2, 3, 5, 7] %}
+          <div class="bento-item">
+            <input
+              type="radio"
+              name="num_days"
+              id="days{{ d }}"
+              value="{{ d }}"
+              {%
+              if
+              d=""
+              ="3"
+              %}checked{%
+              endif
+              %}
+            />
+            <label for="days{{ d }}" class="bento-label">
+              <span
+                style="
+                  font-size: 2rem;
+                  font-weight: 700;
+                  font-family: &quot;Playfair Display&quot;, serif;
+                "
+              >
+                {{ d }}
+              </span>
+              <span class="small text-muted mt-1">Days</span>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="mt-5 d-flex gap-3 justify-content-center">
+          <button
+            type="button"
+            class="btn-outline-luxury"
+            onclick="prevStep(2)"
+          >
+            ↑ Back
+          </button>
+          <button type="button" class="btn-luxury" onclick="nextStep(2)">
+            Continue →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════
+       STEP 3 — Interests + Travel Style
+       ════════════════════════════════ -->
+    <div class="wizard-step" id="step3">
+      <div class="text-center">
+        <p class="text-muted small fw-600 mb-2" style="letter-spacing: 0.1em">
+          ✦ STEP 3 OF 4
+        </p>
+        <h2 class="serif mb-2" style="font-size: 2.8rem">
+          Curate your experience.
+        </h2>
+        <p class="text-muted mb-5">What makes your perfect Philippine trip?</p>
+
+        <!-- Interests -->
+        <p
+          class="text-start fw-600 mb-3"
+          style="max-width: 600px; margin: 0 auto"
+        >
+          What interests you?
+        </p>
+        <div
+          class="d-flex flex-wrap justify-content-center gap-3"
+          style="max-width: 600px; margin: 0 auto 32px"
+        >
+          {% set interests = [ ('food', 'bi-egg-fried', 'Culinary'), ('beach',
+          'bi-water', 'Coastal'), ('nature', 'bi-tree', 'Nature'), ('museums',
+          'bi-bank', 'Heritage'), ('nightlife', 'bi-moon-stars-fill',
+          'Nightlife'), ] %} {% for val, icon, label in interests %}
+          <div class="bento-item flex-fill">
+            <input
+              type="checkbox"
+              name="preferences"
+              id="pref_{{ val }}"
+              value="{{ val }}"
+            />
+            <label for="pref_{{ val }}" class="bento-label">
+              <i class="bi {{ icon }}"></i>
+              <span class="small fw-600">{{ label }}</span>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- Travel Style -->
+        <p
+          class="text-start fw-600 mb-3"
+          style="max-width: 600px; margin: 0 auto"
+        >
+          Travel Style
+        </p>
+        <div class="d-flex gap-3 justify-content-center flex-wrap mb-5">
+          {% for val, label in
+          [('low','Backpacker'),('comfort','Comfort'),('high','Luxury')] %}
+          <div class="bento-item flex-fill">
+            <input
+              type="radio"
+              name="budget"
+              id="budget_{{ val }}"
+              value="{{ val }}"
+              {%
+              if
+              val=""
+              ="comfort"
+              %}checked{%
+              endif
+              %}
+            />
+            <label
+              for="budget_{{ val }}"
+              class="bento-label"
+              style="border-radius: 100px; padding: 14px 28px"
+            >
+              <span class="fw-600">{{ label }}</span>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="d-flex gap-3 justify-content-center">
+          <button
+            type="button"
+            class="btn-outline-luxury"
+            onclick="prevStep(3)"
+          >
+            ↑ Back
+          </button>
+          <button type="button" class="btn-luxury" onclick="nextStep(3)">
+            Continue →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════
+       STEP 4 — Confirm
+       ════════════════════════════════ -->
+    <div class="wizard-step" id="step4">
+      <div class="text-center">
+        <p class="text-muted small fw-600 mb-3" style="letter-spacing: 0.1em">
+          ✦ FINAL STEP
+        </p>
+        <h2 class="serif mb-2" style="font-size: 3rem">Ready to explore?</h2>
+        <p class="text-muted mb-5">
+          We'll craft a personalised Philippine itinerary just for you.
+        </p>
+
+        <!-- Summary card -->
+        <div
+          class="itinerary-card text-start mx-auto mb-5"
+          style="max-width: 420px"
+        >
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted small">Destination</span>
+            <span class="fw-600" id="confirmDest">—</span>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted small">Duration</span>
+            <span class="fw-600" id="confirmDays">—</span>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted small">Interests</span>
+            <span class="fw-600" id="confirmPrefs">—</span>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span class="text-muted small">Travel Style</span>
+            <span class="fw-600" id="confirmBudget">—</span>
+          </div>
+        </div>
+
+        <div class="d-flex gap-3 justify-content-center">
+          <button
+            type="button"
+            class="btn-outline-luxury"
+            onclick="prevStep(4)"
+          >
+            ↑ Back
+          </button>
+          <button type="submit" class="btn-luxury" id="submitBtn">
+            Craft My Itinerary →
+          </button>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- Fullscreen Glass Loading Overlay -->
+<div
+  id="craftingOverlay"
+  class="d-none"
+  style="
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    background: var(--glass-bg);
+    backdrop-filter: blur(35px) saturate(200%);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  "
+>
+  <div
+    class="w-100 mx-auto mb-4"
+    style="max-width: 400px; text-align: left; opacity: 0.7"
+  >
+    <div class="skeleton-box"></div>
+    <div class="skeleton-box" style="width: 80%"></div>
+    <div class="skeleton-box" style="width: 90%"></div>
+  </div>
+  <h2 class="serif mb-2" style="font-size: 2.5rem">Crafting your journey...</h2>
+  <p class="text-muted fw-500" id="loadingText">
+    Analyzing the best spots in the Philippines 🌴
+  </p>
+</div>
+
+{% endblock %} {% block scripts %}
+<script>
+  // ── Wizard Navigation ────────────────────────────────────────────────────────
+
+  let currentStep = 1;
+  const totalSteps = 4;
+
+  function showStep(n) {
+    document.querySelectorAll(".wizard-step").forEach((el, i) => {
+      el.classList.remove("active", "completed");
+      if (i + 1 < n) el.classList.add("completed");
+      if (i + 1 === n) el.classList.add("active");
+    });
+    document.getElementById("currentStep").textContent = n;
+    currentStep = n;
+  }
+
+  function nextStep(from) {
+    // Validate step 1 — destination must not be empty
+    if (from === 1) {
+      const dest = document.getElementById("destinationInput").value.trim();
+      if (!dest) {
+        document.getElementById("destinationInput").focus();
+        return;
+      }
+    }
+    if (from < totalSteps) {
+      if (from === totalSteps - 1) populateConfirm();
+      showStep(from + 1);
+    }
+  }
+
+  function prevStep(from) {
+    if (from > 1) showStep(from - 1);
+  }
+
+  // ── Populate confirmation summary (Step 4) ──────────────────────────────────
+
+  function populateConfirm() {
+    // Destination
+    document.getElementById("confirmDest").textContent =
+      document.getElementById("destinationInput").value || "—";
+
+    // Days
+    const dayEl = document.querySelector('input[name="num_days"]:checked');
+    document.getElementById("confirmDays").textContent = dayEl
+      ? dayEl.value + " days"
+      : "—";
+
+    // Interests
+    const prefs = [
+      ...document.querySelectorAll('input[name="preferences"]:checked'),
+    ].map((el) => el.value.charAt(0).toUpperCase() + el.value.slice(1));
+    document.getElementById("confirmPrefs").textContent = prefs.length
+      ? prefs.join(", ")
+      : "General";
+
+    // Budget
+    const budgetEl = document.querySelector('input[name="budget"]:checked');
+    const budgetMap = { low: "Backpacker", comfort: "Comfort", high: "Luxury" };
+    document.getElementById("confirmBudget").textContent = budgetEl
+      ? budgetMap[budgetEl.value] || budgetEl.value
+      : "—";
+  }
+
+  // ── Prevent double-submit ────────────────────────────────────────────────────
+
+  // ── Prevent double-submit & Trigger Premium Loader ──
+  document.getElementById("wizardForm").addEventListener("submit", function () {
+    // Hide the wizard
+    document.querySelector(".wizard-container").style.opacity = "0";
+
+    // Show the fullscreen overlay
+    const overlay = document.getElementById("craftingOverlay");
+    overlay.classList.remove("d-none");
+    overlay.style.animation = "fadeIn 0.5s ease forwards";
+
+    // Cycle through fun loading messages to keep them entertained
+    const messages = [
+      "Finding the best hidden gems... 💎",
+      "Calculating optimal travel routes... 🗺️",
+      "Checking local ratings and reviews... ⭐",
+      "Packing your virtual bags... 🎒",
+      "Almost ready! ✈️",
+    ];
+    let msgIndex = 0;
+    setInterval(() => {
+      msgIndex = (msgIndex + 1) % messages.length;
+      document.getElementById("loadingText").textContent = messages[msgIndex];
+    }, 2500);
+  });
+</script>
+{% endblock %}

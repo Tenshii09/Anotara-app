@@ -39,7 +39,8 @@ CATEGORY_MAP = {
     'beach': 'beach,leisure.park',
     'nature': 'natural,leisure.park',
     'museums': 'tourism.attraction,education.library',
-    'nightlife': 'entertainment.nightclub,catering.bar',
+    # Geoapify rejects entertainment.nightclub, so keep nightlife on supported categories.
+    'nightlife': 'catering.bar,adult.nightclub,entertainment.cinema,entertainment.culture.theatre',
     'sightseeing': 'tourism.attraction'
 }
 CATEGORIES = list(CATEGORY_MAP.keys())

@@ -1,0 +1,24 @@
+Installing Virtual Environment and Dependencies
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python --version
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+cd frontend
+npm install
+npm run build
+
+Removing venv
+deactivate  
+# Remove virtual environment
+Remove-Item -Path .venv -Recurse -Force
+
+# Remove node_modules
+Remove-Item -Path frontend\node_modules -Recurse -Force
+
+# Remove build/dist folder
+Remove-Item -Path frontend\dist -Recurse -Force
+
+# Remove Python cache
+Remove-Item -Path **\__pycache__ -Recurse -Force

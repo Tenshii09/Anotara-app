@@ -1,3 +1,4 @@
 # Add this to .gitignore
 .env
 __pycache__/
+anotarasystem-firebase-adminsdk-fbsvc-68333f97d3.json
