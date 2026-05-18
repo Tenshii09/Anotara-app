@@ -9,7 +9,7 @@ export default function BottomNav() {
   const tabs = [
     { label: "Dashboard", path: "/dashboard", icon: "🏠" },
     { label: "My Trips", path: "/my-trips", icon: "🗺️" },
-    { label: "Trip Generator", path: "/dashboard", icon: "✈️", isCenter: true },
+    { label: "Trip Generator", path: "/generate", icon: "✈️", isCenter: true },
     { label: "Discover", path: "/discover", icon: "🔍" },
     { label: "Profile", path: "/profile", icon: "👤" },
   ];
