@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS itineraries (
     accommodation_lat DECIMAL(10, 7),
     accommodation_lng DECIMAL(10, 7),
     status VARCHAR(20) DEFAULT 'Active',
+    trip_start_date DATE NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

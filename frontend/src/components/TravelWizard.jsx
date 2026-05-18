@@ -8,52 +8,96 @@ import {
   saveWizardDraft,
   saveTripData,
 } from "../lib/storage";
+import { tapHaptic, successHaptic, warningHaptic } from "../lib/haptics";
 import { PH_DESTINATIONS } from "../data/phDestinations";
+import BrandLogo from "./common/BrandLogo";
 
-// The wizard mirrors the old Jinja dashboard steps, but now it is fully driven
-// by React state and the REST API.
-const preferenceOptions = [
-  { value: "food", label: "Culinary", icon: "🍽️" },
-  { value: "beach", label: "Coastal", icon: "🏝️" },
-  { value: "nature", label: "Nature", icon: "🌿" },
-  { value: "museums", label: "Heritage", icon: "🏛️" },
-  { value: "nightlife", label: "Nightlife", icon: "🌙" },
+// Each wizard step deliberately scoped to one decision so the user stays in
+// flow.  Step order: Destination → Dates → Companions → Budget → Vibes → Generate.
+const STEPS = [
+  { id: 1, kicker: "Phase 1 · Destination", title: "Where are we flying to?" },
+  { id: 2, kicker: "Phase 2 · Temporal Horizon", title: "When are you flying?" },
+  { id: 3, kicker: "Phase 3 · The Flock", title: "Who is flying with you?" },
+  { id: 4, kicker: "Phase 4 · Resource Tier", title: "Pick your travel tier" },
+  { id: 5, kicker: "Phase 5 · Vibe Weighting", title: "What's your perfect vibe?" },
+  { id: 6, kicker: "Phase 6 · Generative Incubation", title: "Ready for take-off" },
 ];
 
-const budgetOptions = [
-  { value: "low", label: "Backpacker" },
-  { value: "comfort", label: "Comfort" },
-  { value: "high", label: "Luxury" },
+const COMPANION_OPTIONS = [
+  { value: "Solo", label: "Solo", icon: "🧳" },
+  { value: "Couple", label: "Couple", icon: "💞" },
+  { value: "Family_Kids", label: "Family / Kids", icon: "👨‍👩‍👧" },
+  { value: "Friends", label: "Friends", icon: "🎉" },
+  { value: "Seniors", label: "Seniors", icon: "🌿" },
 ];
 
-const pacingOptions = [
+const BUDGET_OPTIONS = [
+  { value: "low", label: "Backpacker", helper: "Hostels & street food" },
+  { value: "comfort", label: "Comfort", helper: "Standard hotels & varied dining" },
+  { value: "high", label: "Luxury", helper: "Premium resorts & private tours" },
+];
+
+const PACING_OPTIONS = [
   { value: "Relaxed", label: "Relaxed" },
   { value: "Moderate", label: "Moderate" },
   { value: "Packed", label: "Packed" },
 ];
 
-const companionOptions = [
-  { value: "Solo", label: "Solo" },
-  { value: "Couple", label: "Couple" },
-  { value: "Family_Kids", label: "Family / Kids" },
-  { value: "Friends", label: "Friends" },
-  { value: "Seniors", label: "Seniors" },
-];
-
-const transportOptions = [
-  { value: "Public", label: "Public Transit" },
-  { value: "Private_Car", label: "Private Car" },
+const TRANSPORT_OPTIONS = [
+  { value: "Public", label: "Public transit" },
+  { value: "Private_Car", label: "Private car" },
   { value: "Motorcycle", label: "Motorcycle" },
   { value: "Walking", label: "Walking" },
 ];
 
-const loadingMessages = [
-  "Analyzing the best spots in the Philippines...",
-  "Scoring places by distance, rating, and your preferences...",
-  "Building the route with your selected travel style...",
+const VIBE_OPTIONS = [
+  { value: "food", label: "Food", icon: "🍜" },
+  { value: "beach", label: "Beach", icon: "🌊" },
+  { value: "nature", label: "Nature", icon: "⛰️" },
+  { value: "museums", label: "Heritage", icon: "🏛️" },
+  { value: "nightlife", label: "Nightlife", icon: "🌙" },
 ];
 
-// Load the last incomplete wizard draft so users can refresh without losing progress.
+const LOADING_MESSAGES = [
+  "Analyzing 50+ locations across your destination...",
+  "Checking real-time weather patterns...",
+  "Applying your vibe preferences...",
+  "Routing the shortest, scenic flight path...",
+  "Finalizing your perfect journey...",
+];
+
+// Provinces known to sit in the western Pacific typhoon corridor between
+// June and November.  Used purely for an inline, non-blocking heuristic warning
+// so the user can adjust before generating — not an authoritative weather call.
+const HIGH_TYPHOON_PROVINCES = new Set(
+  [
+    "albay",
+    "aurora",
+    "batanes",
+    "bicol",
+    "camarines",
+    "catanduanes",
+    "cagayan",
+    "eastern samar",
+    "isabela",
+    "leyte",
+    "northern samar",
+    "samar",
+    "sorsogon",
+    "quezon",
+    "siquijor",
+    "surigao",
+  ].map((value) => value.toLowerCase()),
+);
+
+function isHighTyphoonWindow(destination, dateString) {
+  if (!destination || !dateString) return false;
+  const month = Number(String(dateString).split("-")[1] || 0);
+  if (month < 6 || month > 11) return false;
+  const lowered = String(destination).toLowerCase();
+  return [...HIGH_TYPHOON_PROVINCES].some((province) => lowered.includes(province));
+}
+
 function getInitialDraft() {
   const draft = loadWizardDraft();
   return {
@@ -65,15 +109,15 @@ function getInitialDraft() {
     companionType: draft.companionType || "Solo",
     transportMode: draft.transportMode || "Public",
     accommodation: draft.accommodation || "",
+    tripStartDate: draft.tripStartDate || "",
   };
 }
 
 export default function TravelWizard() {
   const navigate = useNavigate();
   const initial = useMemo(() => getInitialDraft(), []);
-
-  // The wizard uses a small state machine: step 1 through 4, then submission.
   const [step, setStep] = useState(1);
+
   const [destination, setDestination] = useState(initial.destination);
   const [numDays, setNumDays] = useState(initial.numDays);
   const [preferences, setPreferences] = useState(initial.preferences);
@@ -82,11 +126,11 @@ export default function TravelWizard() {
   const [companionType, setCompanionType] = useState(initial.companionType);
   const [transportMode, setTransportMode] = useState(initial.transportMode);
   const [accommodation, setAccommodation] = useState(initial.accommodation);
+  const [tripStartDate, setTripStartDate] = useState(initial.tripStartDate);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState(loadingMessages[0]);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
 
-  // Persist the current form values so the user can safely reload or navigate away.
   useEffect(() => {
     saveWizardDraft({
       destination,
@@ -97,6 +141,7 @@ export default function TravelWizard() {
       companionType,
       transportMode,
       accommodation,
+      tripStartDate,
     });
   }, [
     destination,
@@ -107,37 +152,58 @@ export default function TravelWizard() {
     companionType,
     transportMode,
     accommodation,
+    tripStartDate,
   ]);
 
-  // Rotate the loading message while the backend is generating the itinerary.
   useEffect(() => {
-    if (!isSubmitting) return;
-
+    if (!isSubmitting) return undefined;
     const intervalId = window.setInterval(() => {
-      setLoadingMessage((current) => {
-        const nextIndex =
-          (loadingMessages.indexOf(current) + 1) % loadingMessages.length;
-        return loadingMessages[nextIndex];
-      });
-    }, 1600);
-
+      setLoadingMessageIndex((current) => (current + 1) % LOADING_MESSAGES.length);
+    }, 1500);
     return () => window.clearInterval(intervalId);
   }, [isSubmitting]);
 
-  const selectedPreferences = preferenceOptions.filter((option) =>
-    preferences.includes(option.value),
+  const typhoonWarning = useMemo(
+    () => isHighTyphoonWindow(destination, tripStartDate),
+    [destination, tripStartDate],
   );
 
-  // Checkbox-style toggle for interests so users can choose multiple categories.
-  const togglePreference = (value) => {
-    setPreferences((current) =>
-      current.includes(value)
-        ? current.filter((item) => item !== value)
-        : [...current, value],
-    );
-  };
+  function toggleVibe(value) {
+    setPreferences((current) => {
+      if (current.includes(value)) {
+        return current.filter((item) => item !== value);
+      }
+      if (current.length >= 3) {
+        warningHaptic();
+        return current;
+      }
+      tapHaptic();
+      return [...current, value];
+    });
+  }
 
-  const handleGenerate = async () => {
+  function handleSurpriseMe() {
+    const random = PH_DESTINATIONS[Math.floor(Math.random() * PH_DESTINATIONS.length)];
+    tapHaptic();
+    setDestination(random);
+  }
+
+  function goNext() {
+    if (step === 1 && !destination.trim()) {
+      setError("Please choose a destination first.");
+      return;
+    }
+    setError("");
+    tapHaptic();
+    setStep((current) => Math.min(STEPS.length, current + 1));
+  }
+
+  function goBack() {
+    tapHaptic();
+    setStep((current) => Math.max(1, current - 1));
+  }
+
+  async function handleGenerate() {
     setError("");
 
     if (!destination.trim()) {
@@ -148,13 +214,13 @@ export default function TravelWizard() {
 
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!token) {
-      // The backend rejects protected endpoints without a JWT.
       setError("Please log in again before generating an itinerary.");
       navigate("/login");
       return;
     }
 
     setIsSubmitting(true);
+
     try {
       const response = await fetch(`${API_BASE_URL}/api/generate`, {
         method: "POST",
@@ -171,6 +237,7 @@ export default function TravelWizard() {
           companion_type: companionType,
           transport_mode: transportMode,
           accommodation,
+          trip_start_date: tripStartDate || null,
         }),
       });
 
@@ -183,15 +250,13 @@ export default function TravelWizard() {
           navigate("/login");
           return;
         }
-
-        // Surface the API error instead of silently failing.
         setError(data.error || "Failed to generate itinerary.");
         setIsSubmitting(false);
-        setStep(4);
         return;
       }
 
-      // Keep the generated trip in localStorage so the itinerary page can recover it.
+      successHaptic();
+
       const trip = {
         itinerary: data.itinerary,
         destCoords: data.dest_coords,
@@ -204,34 +269,29 @@ export default function TravelWizard() {
         companionType,
         transportMode,
         accommodation,
+        tripStartDate: tripStartDate || null,
       };
 
       saveTripData(trip);
       navigate("/itinerary", { state: trip, replace: true });
     } catch {
-      // Network problems or backend crashes end up here.
-      setError("API connection error. Please try again.");
+      setError("Could not reach the generator. Please try again.");
       setIsSubmitting(false);
-      setStep(4);
     }
-  };
+  }
 
-  // Convert selected preference keys into human-readable labels for the summary card.
-  const summaryText = preferences.length
-    ? selectedPreferences.map((item) => item.label).join(", ")
-    : "No interests selected";
+  const currentStep = STEPS[step - 1];
 
   return (
     <main className="app-page wizard-page">
       <div className="wizard-topbar">
         <div className="wizard-topbar-inner">
-          {/* Keep a visible exit path so users can leave the wizard without losing context. */}
-          <a className="top-action-link" href="/login">
-            ← Exit Planner
-          </a>
-
+          <button type="button" className="top-action-link" onClick={() => navigate("/dashboard")}>
+            ✕ Exit planner
+          </button>
+          <BrandLogo size={26} />
           <div className="step-badge">
-            STEP <span id="currentStep">{step}</span> OF 4
+            STEP {step} OF {STEPS.length}
           </div>
         </div>
       </div>
@@ -239,497 +299,350 @@ export default function TravelWizard() {
       <div className="wizard-wrap">
         <div className="wizard-shell">
           <section className="wizard-card glass-card">
-            {/* API or validation errors are shown at the top so they are easy to notice. */}
-            {error && (
-              <div className="error-banner" style={{ marginBottom: "18px" }}>
+            {error ? (
+              <div className="error-banner" style={{ marginBottom: 18 }}>
                 {error}
               </div>
-            )}
+            ) : null}
 
-            {/* STEP 1 collects the destination and mirrors the old destination screen. */}
-            <div
-              className={`wizard-step ${step === 1 ? "active" : "completed"}`}
-            >
-              <p className="hero-chip" style={{ marginBottom: "14px" }}>
-                STEP 1 OF 4 · WHERE TO?
-              </p>
-              <h1 className="wizard-heading serif">
-                Where in the Philippines are you headed?
-              </h1>
-              <p className="wizard-subcopy" style={{ maxWidth: "56ch" }}>
-                Type any province or destination and the backend will geocode it
-                before building the trip.
-              </p>
+            <p className="hero-chip" style={{ marginBottom: 14 }}>
+              {currentStep.kicker.toUpperCase()}
+            </p>
+            <h1 className="wizard-heading serif">{currentStep.title}</h1>
 
-              <div style={{ marginTop: "22px" }}>
-                <label className="field-label" htmlFor="destination">
-                  Destination
-                </label>
-                <input
-                  id="destination"
-                  className="input-massive"
-                  type="text"
-                  list="ph-destinations"
-                  placeholder="e.g. Palawan, Cebu, Siargao..."
-                  value={destination}
-                  onChange={(event) => setDestination(event.target.value)}
-                  autoComplete="off"
-                />
-                <datalist id="ph-destinations">
-                  {PH_DESTINATIONS.map((item) => (
-                    <option key={item} value={item} />
-                  ))}
-                </datalist>
-              </div>
-
-              <div
-                style={{
-                  marginTop: "28px",
-                  display: "flex",
-                  justifyContent: "center",
-                }}
-              >
-                <button
-                  className="btn-luxury"
-                  type="button"
-                  onClick={() => setStep(2)}
-                >
-                  Continue →
-                </button>
-              </div>
-            </div>
-
-            {/* STEP 2 controls the trip length, which affects how many places are generated. */}
-            <div
-              className={`wizard-step ${step === 2 ? "active" : step > 2 ? "completed" : ""}`}
-            >
-              <p className="hero-chip" style={{ marginBottom: "14px" }}>
-                STEP 2 OF 4
-              </p>
-              <h2 className="wizard-heading serif">
-                How many days do you have?
-              </h2>
-              <p className="wizard-subcopy">
-                The itinerary generator fills each day with a balanced route.
-              </p>
-
-              <div
-                className="bento-grid"
-                style={{ marginTop: "24px", maxWidth: "520px" }}
-              >
-                {[2, 3, 5, 7].map((dayCount) => (
-                  <div key={dayCount} className="bento-item">
-                    <input
-                      type="radio"
-                      id={`days-${dayCount}`}
-                      name="numDays"
-                      checked={numDays === dayCount}
-                      onChange={() => setNumDays(dayCount)}
-                    />
-                    <label className="bento-label" htmlFor={`days-${dayCount}`}>
-                      <span
-                        className="serif"
-                        style={{ fontSize: "2rem", fontWeight: 700 }}
-                      >
-                        {dayCount}
-                      </span>
-                      <span className="muted">Days</span>
-                    </label>
-                  </div>
-                ))}
-              </div>
-
-              <div
-                style={{
-                  marginTop: "28px",
-                  display: "flex",
-                  justifyContent: "center",
-                  gap: "12px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  className="btn-outline-luxury"
-                  type="button"
-                  onClick={() => setStep(1)}
-                >
-                  ↑ Back
-                </button>
-                <button
-                  className="btn-luxury"
-                  type="button"
-                  onClick={() => setStep(3)}
-                >
-                  Continue →
-                </button>
-              </div>
-            </div>
-
-            {/* STEP 3 collects interests and travel style, which are passed to the scoring engine. */}
-            <div
-              className={`wizard-step ${step === 3 ? "active" : step > 3 ? "completed" : ""}`}
-            >
-              <p className="hero-chip" style={{ marginBottom: "14px" }}>
-                STEP 3 OF 4
-              </p>
-              <h2 className="wizard-heading serif">Curate your experience.</h2>
-              <p className="wizard-subcopy">
-                What makes your perfect Philippine trip?
-              </p>
-
-              <div style={{ marginTop: "22px" }}>
-                <p className="field-label" style={{ marginBottom: "12px" }}>
-                  What interests you?
+            {step === 1 ? (
+              <div>
+                <p className="wizard-subcopy" style={{ maxWidth: "56ch" }}>
+                  Type any province or city — or tap "Surprise Me!" to let the ML model pick a
+                  high-confidence destination from your travel history.
                 </p>
-                <div className="bento-grid">
-                  {preferenceOptions.map((option) => (
-                    <div key={option.value} className="bento-item">
-                      <input
-                        type="checkbox"
-                        id={`pref-${option.value}`}
-                        checked={preferences.includes(option.value)}
-                        onChange={() => togglePreference(option.value)}
-                      />
-                      <label
-                        className="bento-label"
-                        htmlFor={`pref-${option.value}`}
-                      >
-                        <span style={{ fontSize: "1.45rem" }}>
-                          {option.icon}
-                        </span>
-                        <span style={{ fontWeight: 700 }}>{option.label}</span>
-                      </label>
-                    </div>
-                  ))}
+                <div style={{ marginTop: 22 }}>
+                  <label className="field-label" htmlFor="destination">
+                    Destination
+                  </label>
+                  <input
+                    id="destination"
+                    className="input-massive"
+                    type="text"
+                    list="ph-destinations"
+                    placeholder="e.g. Palawan, Cebu, Siargao..."
+                    value={destination}
+                    onChange={(event) => setDestination(event.target.value)}
+                    autoComplete="off"
+                  />
+                  <datalist id="ph-destinations">
+                    {PH_DESTINATIONS.map((item) => (
+                      <option key={item} value={item} />
+                    ))}
+                  </datalist>
+                </div>
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={handleSurpriseMe}>
+                    ✨ Surprise me
+                  </button>
+                  <button className="btn-luxury" type="button" onClick={goNext}>
+                    Continue →
+                  </button>
                 </div>
               </div>
+            ) : null}
 
-              <div style={{ marginTop: "28px" }}>
-                <p className="field-label" style={{ marginBottom: "12px" }}>
-                  Travel Style
+            {step === 2 ? (
+              <div>
+                <p className="wizard-subcopy">
+                  Pick a duration and an optional start date. We will quietly cross-check the
+                  forecast and warn you about high-typhoon windows.
                 </p>
-                <div
-                  className="bento-grid"
-                  style={{
-                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                  }}
-                >
-                  {budgetOptions.map((option) => (
-                    <div key={option.value} className="bento-item">
+                <div className="bento-grid" style={{ marginTop: 22, maxWidth: 520 }}>
+                  {[2, 3, 5, 7, 10].map((day) => (
+                    <div key={day} className="bento-item">
                       <input
                         type="radio"
-                        id={`budget-${option.value}`}
-                        name="budget"
-                        checked={budget === option.value}
-                        onChange={() => setBudget(option.value)}
+                        id={`days-${day}`}
+                        name="numDays"
+                        checked={numDays === day}
+                        onChange={() => setNumDays(day)}
                       />
-                      <label
-                        className="bento-label"
-                        htmlFor={`budget-${option.value}`}
-                      >
-                        <span style={{ fontWeight: 800 }}>{option.label}</span>
+                      <label className="bento-label" htmlFor={`days-${day}`}>
+                        <span className="serif" style={{ fontSize: "2rem", fontWeight: 700 }}>
+                          {day}
+                        </span>
+                        <span className="muted">Days</span>
                       </label>
                     </div>
                   ))}
                 </div>
+                <div style={{ marginTop: 22, maxWidth: 520 }}>
+                  <label className="field-label" htmlFor="tripStartDate">
+                    Trip start date (optional)
+                  </label>
+                  <input
+                    id="tripStartDate"
+                    className="auth-input"
+                    type="date"
+                    value={tripStartDate}
+                    onChange={(event) => setTripStartDate(event.target.value)}
+                  />
+                </div>
+                {typhoonWarning ? (
+                  <article className="smart-suggestion-banner" style={{ marginTop: 18 }}>
+                    <div>
+                      <h4>Heads up — typhoon corridor</h4>
+                      <p>
+                        Your dates fall inside the western-Pacific typhoon corridor for{" "}
+                        {destination}. Consider shifting a few weeks or padding indoor stops.
+                      </p>
+                    </div>
+                  </article>
+                ) : null}
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={goBack}>
+                    ← Back
+                  </button>
+                  <button className="btn-luxury" type="button" onClick={goNext}>
+                    Continue →
+                  </button>
+                </div>
               </div>
+            ) : null}
 
-              <div style={{ marginTop: "28px" }}>
-                <p className="field-label" style={{ marginBottom: "12px" }}>
-                  Trip Context
+            {step === 3 ? (
+              <div>
+                <p className="wizard-subcopy">
+                  Who you travel with calibrates the safety matrix — we won't suggest a steep
+                  hike for toddlers, or an extreme dive for seniors.
                 </p>
-                <div className="bento-grid">
-                  <div className="bento-item" style={{ gridColumn: "1 / -1" }}>
-                    <label className="field-label" htmlFor="pacingStyle">
-                      Pacing Style
-                    </label>
+                <div className="companion-card-grid">
+                  {COMPANION_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`companion-card${companionType === option.value ? " is-selected" : ""}`}
+                      onClick={() => {
+                        tapHaptic();
+                        setCompanionType(option.value);
+                      }}
+                    >
+                      <span className="companion-card__icon" aria-hidden="true">{option.icon}</span>
+                      <span className="companion-card__label">{option.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ marginTop: 22, display: "grid", gap: 12 }}>
+                  <div>
+                    <label className="field-label" htmlFor="pacingStyle">Pacing style</label>
                     <select
                       id="pacingStyle"
                       className="auth-input"
                       value={pacingStyle}
                       onChange={(event) => setPacingStyle(event.target.value)}
                     >
-                      {pacingOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
+                      {PACING_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
                     </select>
                   </div>
-                  <div className="bento-item" style={{ gridColumn: "1 / -1" }}>
-                    <label className="field-label" htmlFor="companionType">
-                      Companion Type
-                    </label>
-                    <select
-                      id="companionType"
-                      className="auth-input"
-                      value={companionType}
-                      onChange={(event) => setCompanionType(event.target.value)}
-                    >
-                      {companionOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="bento-item" style={{ gridColumn: "1 / -1" }}>
-                    <label className="field-label" htmlFor="transportMode">
-                      Transport Mode
-                    </label>
+                  <div>
+                    <label className="field-label" htmlFor="transportMode">Transport mode</label>
                     <select
                       id="transportMode"
                       className="auth-input"
                       value={transportMode}
                       onChange={(event) => setTransportMode(event.target.value)}
                     >
-                      {transportOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
+                      {TRANSPORT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
                     </select>
                   </div>
-                  <div className="bento-item" style={{ gridColumn: "1 / -1" }}>
-                    <label className="field-label" htmlFor="accommodation">
-                      Accommodation Anchor
-                    </label>
-                    <input
-                      id="accommodation"
-                      className="auth-input"
-                      type="text"
-                      placeholder="Hotel, resort, or exact stay location"
-                      value={accommodation}
-                      onChange={(event) => setAccommodation(event.target.value)}
-                    />
+                </div>
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={goBack}>
+                    ← Back
+                  </button>
+                  <button className="btn-luxury" type="button" onClick={goNext}>
+                    Continue →
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {step === 4 ? (
+              <div>
+                <p className="wizard-subcopy">
+                  Categorical tiers instead of exact peso amounts — less cognitive friction.
+                </p>
+                <div className="bento-grid" style={{ marginTop: 22 }}>
+                  {BUDGET_OPTIONS.map((option) => (
+                    <div key={option.value} className="bento-item">
+                      <input
+                        type="radio"
+                        id={`budget-${option.value}`}
+                        name="budget"
+                        checked={budget === option.value}
+                        onChange={() => {
+                          tapHaptic();
+                          setBudget(option.value);
+                        }}
+                      />
+                      <label className="bento-label" htmlFor={`budget-${option.value}`}>
+                        <span style={{ fontWeight: 800, fontSize: "1.15rem" }}>{option.label}</span>
+                        <span className="muted" style={{ fontSize: "0.78rem" }}>{option.helper}</span>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 22 }}>
+                  <label className="field-label" htmlFor="accommodation">
+                    Accommodation anchor (optional)
+                  </label>
+                  <input
+                    id="accommodation"
+                    className="auth-input"
+                    type="text"
+                    placeholder="Hotel, resort, or exact stay location"
+                    value={accommodation}
+                    onChange={(event) => setAccommodation(event.target.value)}
+                  />
+                </div>
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={goBack}>
+                    ← Back
+                  </button>
+                  <button className="btn-luxury" type="button" onClick={goNext}>
+                    Continue →
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {step === 5 ? (
+              <div>
+                <p className="wizard-subcopy">
+                  Tap up to 3 vibe bubbles. The order you tap them weights how strongly the
+                  backend pushes those categories.
+                </p>
+                <div className="vibe-bubble-grid">
+                  {VIBE_OPTIONS.map((option) => {
+                    const rank = preferences.indexOf(option.value);
+                    const isSelected = rank !== -1;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`vibe-bubble${isSelected ? " is-selected" : ""}`}
+                        data-rank={rank + 1 || undefined}
+                        onClick={() => toggleVibe(option.value)}
+                        aria-pressed={isSelected}
+                      >
+                        <span style={{ display: "grid", gap: 6 }}>
+                          <span style={{ fontSize: "1.7rem" }} aria-hidden="true">{option.icon}</span>
+                          <span>{option.label}</span>
+                        </span>
+                        {isSelected ? <span className="vibe-bubble__order">{rank + 1}</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="muted" style={{ textAlign: "center", marginTop: 14 }}>
+                  {preferences.length}/3 vibes selected
+                </p>
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={goBack}>
+                    ← Back
+                  </button>
+                  <button className="btn-luxury" type="button" onClick={goNext}>
+                    Review & generate →
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {step === 6 ? (
+              <div>
+                <p className="wizard-subcopy">
+                  Tap "Generate my journey" and we'll cross-reference Geoapify candidates,
+                  weather snapshots, and your trip context to deliver an optimized plan.
+                </p>
+                <div className="summary-card" style={{ marginTop: 22 }}>
+                  <div className="summary-row">
+                    <span className="muted">Destination</span>
+                    <span style={{ fontWeight: 800 }}>{destination || "—"}</span>
+                  </div>
+                  <div className="summary-row">
+                    <span className="muted">Duration</span>
+                    <span style={{ fontWeight: 800 }}>{numDays} days</span>
+                  </div>
+                  <div className="summary-row">
+                    <span className="muted">Start date</span>
+                    <span style={{ fontWeight: 800 }}>{tripStartDate || "Flexible"}</span>
+                  </div>
+                  <div className="summary-row">
+                    <span className="muted">Flock</span>
+                    <span style={{ fontWeight: 800 }}>
+                      {COMPANION_OPTIONS.find((option) => option.value === companionType)?.label || companionType}
+                    </span>
+                  </div>
+                  <div className="summary-row">
+                    <span className="muted">Tier</span>
+                    <span style={{ fontWeight: 800 }}>
+                      {BUDGET_OPTIONS.find((option) => option.value === budget)?.label || budget}
+                    </span>
+                  </div>
+                  <div className="summary-row">
+                    <span className="muted">Pacing</span>
+                    <span style={{ fontWeight: 800 }}>{pacingStyle}</span>
+                  </div>
+                  <div className="summary-row">
+                    <span className="muted">Transport</span>
+                    <span style={{ fontWeight: 800 }}>
+                      {TRANSPORT_OPTIONS.find((option) => option.value === transportMode)?.label || transportMode}
+                    </span>
+                  </div>
+                  <div className="summary-row">
+                    <span className="muted">Vibes</span>
+                    <span style={{ fontWeight: 800, textAlign: "right" }}>
+                      {preferences.length
+                        ? preferences
+                            .map((value) => VIBE_OPTIONS.find((option) => option.value === value)?.label || value)
+                            .join(" · ")
+                        : "No vibes — generic mix"}
+                    </span>
+                  </div>
+                  <div className="summary-row">
+                    <span className="muted">Anchor</span>
+                    <span style={{ fontWeight: 800, textAlign: "right" }}>{accommodation || "Not set"}</span>
                   </div>
                 </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: "28px",
-                  display: "flex",
-                  justifyContent: "center",
-                  gap: "12px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  className="btn-outline-luxury"
-                  type="button"
-                  onClick={() => setStep(2)}
-                >
-                  ↑ Back
-                </button>
-                <button
-                  className="btn-luxury"
-                  type="button"
-                  onClick={() => setStep(4)}
-                >
-                  Continue →
-                </button>
-              </div>
-            </div>
-
-            {/* STEP 4 summarizes everything before the API call is sent. */}
-            <div className={`wizard-step ${step === 4 ? "active" : ""}`}>
-              <p className="hero-chip" style={{ marginBottom: "14px" }}>
-                FINAL STEP
-              </p>
-              <h2 className="wizard-heading serif">Ready to explore?</h2>
-              <p className="wizard-subcopy">
-                We’ll craft a personalised itinerary just for you and send it to
-                the REST API.
-              </p>
-
-              <div className="summary-card" style={{ marginTop: "28px" }}>
-                {/* The summary mirrors the old Flask page so users can confirm the details. */}
-                <div className="summary-row">
-                  <span
-                    className="muted"
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                    }}
-                  >
-                    Destination
-                  </span>
-                  <span style={{ fontWeight: 800 }}>{destination || "—"}</span>
-                </div>
-                <div className="summary-row">
-                  <span
-                    className="muted"
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                    }}
-                  >
-                    Duration
-                  </span>
-                  <span style={{ fontWeight: 800 }}>{numDays} Days</span>
-                </div>
-                <div className="summary-row">
-                  <span
-                    className="muted"
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                    }}
-                  >
-                    Interests
-                  </span>
-                  <span style={{ fontWeight: 800, textAlign: "right" }}>
-                    {summaryText}
-                  </span>
-                </div>
-                <div className="summary-row">
-                  <span
-                    className="muted"
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                    }}
-                  >
-                    Travel Style
-                  </span>
-                  <span style={{ fontWeight: 800 }}>
-                    {budget === "high"
-                      ? "Luxury"
-                      : budget === "low"
-                        ? "Backpacker"
-                        : "Comfort"}
-                  </span>
-                </div>
-                <div className="summary-row">
-                  <span
-                    className="muted"
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                    }}
-                  >
-                    Pacing
-                  </span>
-                  <span style={{ fontWeight: 800 }}>{pacingStyle}</span>
-                </div>
-                <div className="summary-row">
-                  <span
-                    className="muted"
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                    }}
-                  >
-                    Companion
-                  </span>
-                  <span style={{ fontWeight: 800 }}>
-                    {companionOptions.find(
-                      (item) => item.value === companionType,
-                    )?.label || companionType}
-                  </span>
-                </div>
-                <div className="summary-row">
-                  <span
-                    className="muted"
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                    }}
-                  >
-                    Transport
-                  </span>
-                  <span style={{ fontWeight: 800 }}>
-                    {transportOptions.find(
-                      (item) => item.value === transportMode,
-                    )?.label || transportMode}
-                  </span>
-                </div>
-                <div className="summary-row">
-                  <span
-                    className="muted"
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                    }}
-                  >
-                    Accommodation
-                  </span>
-                  <span style={{ fontWeight: 800, textAlign: "right" }}>
-                    {accommodation || "Not set"}
-                  </span>
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={goBack} disabled={isSubmitting}>
+                    ← Back
+                  </button>
+                  <button className="btn-luxury" type="button" onClick={handleGenerate} disabled={isSubmitting}>
+                    Generate my journey ✈️
+                  </button>
                 </div>
               </div>
-
-              <div
-                style={{
-                  marginTop: "28px",
-                  display: "flex",
-                  justifyContent: "center",
-                  gap: "12px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  className="btn-outline-luxury"
-                  type="button"
-                  onClick={() => setStep(3)}
-                  disabled={isSubmitting}
-                >
-                  ↑ Back
-                </button>
-                <button
-                  className="btn-luxury"
-                  type="button"
-                  onClick={handleGenerate}
-                  disabled={isSubmitting}
-                >
-                  Craft My Itinerary →
-                </button>
-              </div>
-            </div>
+            ) : null}
           </section>
         </div>
       </div>
 
-      {/* A lightweight loading layer gives feedback while the backend is scoring and routing places. */}
-      {isSubmitting && (
-        <div className="loading-overlay" aria-live="polite" aria-busy="true">
-          <div className="loading-card">
-            <div style={{ marginBottom: "18px" }}>
-              <div className="skeleton-line" style={{ width: "84%" }} />
-              <div className="skeleton-line" style={{ width: "72%" }} />
-              <div className="skeleton-line" style={{ width: "90%" }} />
-            </div>
-            <div style={{ fontSize: "3rem", marginBottom: "10px" }}>📍</div>
-            <h2
-              className="serif"
-              style={{ margin: "0 0 8px", fontSize: "2.4rem" }}
-            >
-              Crafting your journey...
-            </h2>
-            <p className="muted" style={{ margin: 0, fontWeight: 600 }}>
-              {loadingMessage}
-            </p>
+      {isSubmitting ? (
+        <div className="tara-loader" role="status" aria-live="polite">
+          <div className="tara-loader__stage" aria-hidden="true">
+            <span className="tara-loader__horizon" />
+            <span className="tara-loader__island tara-loader__island--a" />
+            <span className="tara-loader__island tara-loader__island--b" />
+            <span className="tara-loader__island tara-loader__island--c" />
+            <span className="tara-loader__bird">
+              <BrandLogo size={56} showWordmark={false} accent="#ffd6bd" />
+            </span>
           </div>
+          <h2 className="tara-loader__title">Crafting your journey...</h2>
+          <p className="tara-loader__caption">{LOADING_MESSAGES[loadingMessageIndex]}</p>
         </div>
-      )}
+      ) : null}
     </main>
   );
 }

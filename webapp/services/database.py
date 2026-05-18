@@ -42,6 +42,279 @@ def get_table_columns(table_name):
         cursor.close()
         db.close()
 
+def ensure_user_preference_columns():
+    """Add columns used to persist algorithmic tuning preferences for the user.
+
+    These columns power the Profile "Algorithmic Preference Tuning Matrix" so
+    that future Tara Na! wizard runs and ML reranker calls inherit a user's
+    explicit preferences without re-asking on every flow.
+    """
+    existing_columns = get_table_columns('users')
+    missing_columns = []
+
+    if 'default_budget' not in existing_columns:
+        missing_columns.append("ADD COLUMN default_budget VARCHAR(20) DEFAULT 'comfort'")
+    if 'companion_vector' not in existing_columns:
+        missing_columns.append("ADD COLUMN companion_vector JSON NULL")
+    if 'vibe_weights' not in existing_columns:
+        missing_columns.append("ADD COLUMN vibe_weights JSON NULL")
+    if 'biometric_enabled' not in existing_columns:
+        missing_columns.append("ADD COLUMN biometric_enabled BOOLEAN DEFAULT FALSE")
+
+    if not missing_columns:
+        return
+
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(f"ALTER TABLE users {', '.join(missing_columns)}")
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_user_profile(user_id):
+    """Return the basic profile payload for one user."""
+    ensure_user_preference_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT id, username, email, default_budget, companion_vector,
+                   vibe_weights, biometric_enabled, created_at
+            FROM users
+            WHERE id = %s
+            """,
+            (int(user_id),),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            return None
+
+        for json_key in ('companion_vector', 'vibe_weights'):
+            raw_value = profile.get(json_key)
+            if isinstance(raw_value, str):
+                try:
+                    profile[json_key] = json.loads(raw_value)
+                except (TypeError, ValueError):
+                    profile[json_key] = None
+
+        if profile.get('created_at'):
+            profile['member_since'] = profile['created_at'].strftime('%Y-%m-%d')
+
+        return profile
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_user_preferences(user_id, *, default_budget=None, companion_vector=None, vibe_weights=None, biometric_enabled=None):
+    """Persist a partial update of the user's algorithmic preferences."""
+    ensure_user_preference_columns()
+
+    assignments = []
+    params = []
+
+    if default_budget is not None:
+        assignments.append('default_budget = %s')
+        params.append(str(default_budget)[:20])
+    if companion_vector is not None:
+        assignments.append('companion_vector = %s')
+        params.append(json.dumps(companion_vector))
+    if vibe_weights is not None:
+        assignments.append('vibe_weights = %s')
+        params.append(json.dumps(vibe_weights))
+    if biometric_enabled is not None:
+        assignments.append('biometric_enabled = %s')
+        params.append(bool(biometric_enabled))
+
+    if not assignments:
+        return get_user_profile(user_id)
+
+    params.append(int(user_id))
+
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            f"UPDATE users SET {', '.join(assignments)} WHERE id = %s",
+            tuple(params),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+    return get_user_profile(user_id)
+
+
+def delete_user_account(user_id):
+    """Permanently expunge a user's data from the system.
+
+    Foreign key cascades take care of itineraries, items, feedback, and tokens
+    once the parent users row is deleted.
+    """
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute('DELETE FROM users WHERE id = %s', (int(user_id),))
+        db.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_user_profile_name(user_id, username):
+    """Update a user's username and return the new profile row."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            UPDATE users
+            SET username = %s
+            WHERE id = %s
+            """,
+            (username, int(user_id)),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+    return get_user_profile(user_id)
+
+
+def get_user_travel_stats(user_id):
+    """Return aggregate travel stats for one user."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS total_trips,
+                COALESCE(SUM(num_days), 0) AS total_days,
+                COUNT(DISTINCT destination) AS unique_destinations
+            FROM itineraries
+            WHERE user_id = %s
+            """,
+            (int(user_id),),
+        )
+        stats = cursor.fetchone() or {}
+
+        cursor.execute(
+            """
+            SELECT destination, COUNT(*) AS trip_count
+            FROM itineraries
+            WHERE user_id = %s AND destination IS NOT NULL AND destination <> ''
+            GROUP BY destination
+            ORDER BY trip_count DESC, MAX(created_at) DESC
+            LIMIT 1
+            """,
+            (int(user_id),),
+        )
+        top_destination = cursor.fetchone()
+
+        return {
+            'total_trips': int(stats.get('total_trips') or 0),
+            'total_days': int(stats.get('total_days') or 0),
+            'unique_destinations': int(stats.get('unique_destinations') or 0),
+            'top_destination': top_destination.get('destination') if top_destination else None,
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_discover_feed(tag='all', search_query='', limit=18):
+    """Return discover suggestions and trending destinations."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    safe_limit = max(1, min(int(limit or 18), 30))
+    safe_query = str(search_query or '').strip()
+    safe_tag = str(tag or 'all').strip().lower()
+
+    place_conditions = []
+    place_params = []
+
+    if safe_query:
+        like_value = f"%{safe_query}%"
+        place_conditions.append("(name LIKE %s OR city LIKE %s OR tags LIKE %s)")
+        place_params.extend([like_value, like_value, like_value])
+
+    if safe_tag == 'nature':
+        place_conditions.append("(category LIKE %s OR tags LIKE %s)")
+        place_params.extend(['%nature%', '%nature%'])
+    elif safe_tag == 'food':
+        place_conditions.append("(category LIKE %s OR tags LIKE %s)")
+        place_params.extend(['%food%', '%food%'])
+    elif safe_tag == 'beach':
+        place_conditions.append("(category LIKE %s OR tags LIKE %s)")
+        place_params.extend(['%beach%', '%beach%'])
+    elif safe_tag == 'culture':
+        place_conditions.append("(category LIKE %s OR tags LIKE %s OR tags LIKE %s)")
+        place_params.extend(['%museum%', '%culture%', '%history%'])
+    elif safe_tag == 'nightlife':
+        place_conditions.append("(category LIKE %s OR tags LIKE %s OR tags LIKE %s)")
+        place_params.extend(['%night%', '%nightlife%', '%bar%'])
+
+    where_sql = f"WHERE {' AND '.join(place_conditions)}" if place_conditions else ""
+
+    try:
+        cursor.execute(
+            f"""
+            SELECT id, name, city, category, rating, tags
+            FROM places
+            {where_sql}
+            ORDER BY id DESC, rating DESC
+            LIMIT %s
+            """,
+            tuple(place_params + [safe_limit]),
+        )
+        suggestions = cursor.fetchall()
+
+        trending_conditions = ["destination IS NOT NULL", "destination <> ''"]
+        trending_params = []
+        if safe_query:
+            like_value = f"%{safe_query}%"
+            trending_conditions.append("destination LIKE %s")
+            trending_params.append(like_value)
+
+        cursor.execute(
+            f"""
+            SELECT destination, COUNT(*) AS trip_count
+            FROM itineraries
+            WHERE {' AND '.join(trending_conditions)}
+            GROUP BY destination
+            ORDER BY trip_count DESC, MAX(created_at) DESC
+            LIMIT 5
+            """,
+            tuple(trending_params),
+        )
+        trending = cursor.fetchall()
+
+        return {
+            'suggestions': suggestions,
+            'trending': [
+                {
+                    'destination': row.get('destination'),
+                    'score': f"{int(row.get('trip_count') or 0)} saved trip"
+                    + ("s" if int(row.get('trip_count') or 0) != 1 else ""),
+                }
+                for row in trending
+            ],
+        }
+    finally:
+        cursor.close()
+        db.close()
+
 
 def _json_safe_value(value):
     if isinstance(value, Decimal):
@@ -78,6 +351,8 @@ def ensure_itinerary_metadata_columns():
         missing_columns.append('ADD COLUMN accommodation_lng DECIMAL(10, 7)')
     if 'status' not in existing_columns:
         missing_columns.append("ADD COLUMN status VARCHAR(20) DEFAULT 'Active'")
+    if 'trip_start_date' not in existing_columns:
+        missing_columns.append('ADD COLUMN trip_start_date DATE NULL')
 
     if not missing_columns:
         return
@@ -394,6 +669,7 @@ def save_itinerary(
     accommodation_lat=None,
     accommodation_lng=None,
     status='Active',
+    trip_start_date=None,
 ):
     """Save a trip and all its day items to the DB, returning the itinerary ID."""
     ensure_itinerary_metadata_columns()
@@ -410,6 +686,7 @@ def save_itinerary(
         'accommodation_lat': accommodation_lat,
         'accommodation_lng': accommodation_lng,
         'status': status or 'Active',
+        'trip_start_date': trip_start_date,
     }
 
     try:
@@ -417,8 +694,8 @@ def save_itinerary(
             cursor.execute(
                 """
                 INSERT INTO itineraries
-                    (user_id, trip_name, destination, budget, num_days, preferences, pacing_style, companion_type, transport_mode, accommodation_lat, accommodation_lng, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (user_id, trip_name, destination, budget, num_days, preferences, pacing_style, companion_type, transport_mode, accommodation_lat, accommodation_lng, status, trip_start_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     user_id,
@@ -433,6 +710,7 @@ def save_itinerary(
                     itinerary_context['accommodation_lat'],
                     itinerary_context['accommodation_lng'],
                     itinerary_context['status'],
+                    itinerary_context['trip_start_date'],
                 ),
             )
         else:
@@ -484,6 +762,100 @@ def save_itinerary(
                         place['sequence_order'] = sequence_order
         db.commit()
         return itinerary_id
+    finally:
+        cursor.close()
+        db.close()
+
+
+def delete_itinerary_for_user(user_id, itinerary_id):
+    """Permanently delete one itinerary owned by the given user.
+
+    Returns the number of rows deleted (0 if the itinerary does not exist or
+    does not belong to the user, 1 on success).  ON DELETE CASCADE on the
+    itinerary_items and trip_feedback foreign keys keeps relational integrity
+    automatically.
+    """
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            DELETE FROM itineraries
+            WHERE id = %s AND user_id = %s
+            """,
+            (int(itinerary_id), int(user_id)),
+        )
+        db.commit()
+        return cursor.rowcount
+    finally:
+        cursor.close()
+        db.close()
+
+
+def duplicate_itinerary_for_user(user_id, itinerary_id):
+    """Copy an itinerary (and its items) into a brand-new row for the same user.
+
+    This powers the My Trips "Duplicate / Reuse" quick action.  The new row
+    starts as a Draft with no trip_start_date so the user can re-plan freely.
+    """
+    overview = get_itinerary_overview(itinerary_id)
+    if not overview:
+        return None
+
+    itinerary = overview['itinerary']
+    if int(itinerary.get('user_id')) != int(user_id):
+        return None
+
+    items = overview.get('items', [])
+    grouped = {}
+    for item in items:
+        day_key = str(item.get('day_number'))
+        grouped.setdefault(day_key, []).append({
+            'id': item.get('place_id'),
+            'recommended_minutes': item.get('estimated_duration', 60),
+        })
+
+    preferences = itinerary.get('preferences')
+    if isinstance(preferences, str):
+        try:
+            preferences = json.loads(preferences)
+        except (TypeError, ValueError):
+            preferences = []
+
+    return save_itinerary(
+        user_id,
+        itinerary.get('destination'),
+        grouped,
+        num_days=itinerary.get('num_days'),
+        budget=itinerary.get('budget'),
+        preferences=preferences or [],
+        pacing_style=itinerary.get('pacing_style') or 'Moderate',
+        companion_type=itinerary.get('companion_type') or 'Solo',
+        transport_mode=itinerary.get('transport_mode') or 'Public',
+        accommodation_lat=itinerary.get('accommodation_lat'),
+        accommodation_lng=itinerary.get('accommodation_lng'),
+        status='Draft',
+        trip_start_date=None,
+    )
+
+
+def update_itinerary_start_date(user_id, itinerary_id, trip_start_date):
+    """Update the start date of one user's itinerary."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            UPDATE itineraries
+            SET trip_start_date = %s
+            WHERE id = %s AND user_id = %s
+            """,
+            (trip_start_date, int(itinerary_id), int(user_id)),
+        )
+        db.commit()
+        return cursor.rowcount > 0
     finally:
         cursor.close()
         db.close()
@@ -603,6 +975,7 @@ def get_itinerary_item_context(itinerary_id, item_id):
 
 def get_itinerary_overview(itinerary_id):
     """Return itinerary metadata and all saved items in day order."""
+    ensure_itinerary_metadata_columns()
     db = get_db()
     cursor = db.cursor(dictionary=True)
 
@@ -622,7 +995,8 @@ def get_itinerary_overview(itinerary_id):
                 transport_mode,
                 accommodation_lat,
                 accommodation_lng,
-                status
+                status,
+                trip_start_date
             FROM itineraries
             WHERE id = %s
             """,

@@ -4,17 +4,65 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/pwa-icon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#4a3a8a" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c1644" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Tara!" />
     <meta
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
     />
-    <title>Ano Tara? Travel Planner</title>
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="Plan personalized Philippine itineraries with Ano Tara — discover places, generate trips, and travel offline." />
+    <title>Tara! — Ano Tara Travel Planner</title>
+    <style>
+      /* Inline first-paint splash so the home-screen tap never flashes white
+         before React's <LaunchSplash /> mounts. */
+      html, body { background: #fef4ed; margin: 0; }
+      .pre-paint-splash {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 30% 10%, rgba(255, 213, 195, 0.5), transparent 50%),
+          radial-gradient(circle at 80% 90%, rgba(217, 200, 255, 0.5), transparent 50%),
+          linear-gradient(135deg, #fef4ed 0%, #f6efff 45%, #eaf6ff 100%);
+        color: #4a3a8a;
+        font-family: "Cormorant Garamond", Georgia, serif;
+        font-size: 2.4rem;
+        z-index: 1000;
+      }
+      .pre-paint-splash::after {
+        content: "Tara!";
+        background: linear-gradient(135deg, #4a3a8a 0%, #c44f8a 60%, #ff8a72 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        font-weight: 700;
+        animation: prePaintFloat 1s ease infinite alternate;
+      }
+      @keyframes prePaintFloat {
+        from { transform: translateY(0); }
+        to { transform: translateY(-6px); }
+      }
+    </style>
   </head>
   <body>
+    <div class="pre-paint-splash" id="pre-paint-splash" aria-hidden="true"></div>
     <div id="root"></div>
+    <script>
+      // Remove the inline splash once React owns the DOM so it never lingers.
+      window.addEventListener("load", function () {
+        var splash = document.getElementById("pre-paint-splash");
+        if (splash) {
+          splash.style.transition = "opacity 320ms ease";
+          splash.style.opacity = "0";
+          window.setTimeout(function () { splash.remove(); }, 360);
+        }
+      });
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

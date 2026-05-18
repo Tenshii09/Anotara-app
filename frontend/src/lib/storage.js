@@ -1,4 +1,6 @@
 import {
+  DISCOVER_RECENT_SEARCHES_KEY,
+  PROFILE_STORAGE_KEY,
   TOKEN_STORAGE_KEY,
   TRIP_STORAGE_KEY,
   WIZARD_STORAGE_KEY,
@@ -77,4 +79,43 @@ export function clearStoredToken() {
   }
 
   window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+export function saveUserProfile(profile) {
+  writeJSON(PROFILE_STORAGE_KEY, profile);
+}
+
+export function loadUserProfile() {
+  return readJSON(PROFILE_STORAGE_KEY, null);
+}
+
+export function clearUserProfile() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+}
+
+export function loadDiscoverRecentSearches() {
+  const searches = readJSON(DISCOVER_RECENT_SEARCHES_KEY, []);
+  return Array.isArray(searches) ? searches : [];
+}
+
+export function saveDiscoverSearch(searchTerm) {
+  const value = String(searchTerm || "").trim();
+  if (!value) {
+    return;
+  }
+
+  const existing = loadDiscoverRecentSearches();
+  const deduped = [value, ...existing.filter((item) => item.toLowerCase() !== value.toLowerCase())];
+  writeJSON(DISCOVER_RECENT_SEARCHES_KEY, deduped.slice(0, 8));
+}
+
+export function clearDiscoverRecentSearches() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.removeItem(DISCOVER_RECENT_SEARCHES_KEY);
 }

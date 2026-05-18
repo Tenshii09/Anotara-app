@@ -1,33 +1,39 @@
 import { useNavigate, useLocation } from "react-router-dom";
-import React from "react";
+
+import { tapHaptic } from "../../lib/haptics";
 import "./BottomNav.css";
+
+const TABS = [
+  { label: "Home", path: "/dashboard", icon: "🏠" },
+  { label: "Trips", path: "/my-trips", icon: "🧳" },
+  { label: "Tara Na!", path: "/generate", icon: "✈️", isCenter: true },
+  { label: "Discover", path: "/discover", icon: "🧭" },
+  { label: "Profile", path: "/profile", icon: "👤" },
+];
 
 export default function BottomNav() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const tabs = [
-    { label: "Dashboard", path: "/dashboard", icon: "🏠" },
-    { label: "My Trips", path: "/my-trips", icon: "🗺️" },
-    { label: "Trip Generator", path: "/generate", icon: "✈️", isCenter: true },
-    { label: "Discover", path: "/discover", icon: "🔍" },
-    { label: "Profile", path: "/profile", icon: "👤" },
-  ];
-
   return (
-    <nav className="bottom-nav">
-      {tabs.map((tab) => {
+    <nav className="bottom-nav" aria-label="Primary">
+      {TABS.map((tab) => {
         const isActive = location.pathname.startsWith(tab.path);
-
         return (
           <button
             key={tab.path}
+            type="button"
             className={`bottom-nav-btn ${tab.isCenter ? "center-btn" : ""} ${
               isActive ? "active" : ""
             }`}
-            onClick={() => navigate(tab.path)}
+            onClick={() => {
+              tapHaptic();
+              navigate(tab.path);
+            }}
+            aria-current={isActive ? "page" : undefined}
+            aria-label={tab.label}
           >
-            <span className="icon">{tab.icon}</span>
+            <span className="icon" aria-hidden="true">{tab.icon}</span>
             {!tab.isCenter && <span className="label">{tab.label}</span>}
           </button>
         );

@@ -1,10 +1,12 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import AuthPage from "./components/AuthPage";
 import ItineraryPage from "./components/ItineraryPage";
 import TravelWizard from "./components/TravelWizard";
 import MyTripsPage from "./components/MyTripsPage";
 import BottomNav from "./components/common/BottomNav";
+import OfflineIndicator from "./components/common/OfflineIndicator";
 import DashboardPage from "./components/DashboardPage";
 import DiscoverPage from "./components/DiscoverPage";
 import ProfilePage from "./components/ProfilePage";
@@ -28,10 +30,52 @@ function AnimatedBackground() {
   );
 }
 
+/**
+ * One-shot launch splash for the PWA.  It paints over the app while React
+ * mounts so the user never sees a flash of blank pixels when they tap the
+ * home-screen icon, then fades away cleanly on its own.
+ */
+function LaunchSplash() {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setVisible(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <div className="app-splash" role="status" aria-label="Loading Ano Tara">
+      <div className="app-splash__inner">
+        <span style={{ fontSize: "3rem" }} aria-hidden="true">✈️</span>
+        <h1 className="app-splash__title">Tara!</h1>
+        <p className="muted" style={{ margin: 0 }}>Your Philippine journey is loading…</p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Hides the floating bottom nav on routes that demand a distraction-free,
+ * full-screen treatment (auth, the trip generator wizard, etc.).
+ */
+function RouteAwareBottomNav() {
+  const location = useLocation();
+  const hiddenPrefixes = ["/login", "/register", "/generate"];
+  const pathname = location.pathname;
+  const shouldHide =
+    pathname === "/" || hiddenPrefixes.some((prefix) => pathname.startsWith(prefix));
+  if (shouldHide) return null;
+  return <BottomNav />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AnimatedBackground />
+      <LaunchSplash />
+      <OfflineIndicator />
       {/*
         The bottom padding reserves space for the floating glass nav so the
         last card on each route is never clipped by it.
@@ -48,14 +92,13 @@ export default function App() {
           <Route path="/itinerary/:itineraryId" element={<ItineraryPage />} />
           <Route path="/generate" element={<TravelWizard />} />
 
-          {/* Discover and Profile placeholders */}
           <Route path="/discover" element={<DiscoverPage />} />
           <Route path="/profile" element={<ProfilePage />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
-      <BottomNav />
+      <RouteAwareBottomNav />
     </BrowserRouter>
   );
 }

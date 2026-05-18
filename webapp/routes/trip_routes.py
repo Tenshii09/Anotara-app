@@ -4,14 +4,20 @@ This blueprint turns submitted trip preferences into itinerary data and saves
 generated trips back to the database.
 """
 # TODO: Add error handling for geocoding failures, no places found, and DB issues.
+from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from webapp.services.database import (
+    delete_itinerary_for_user,
+    duplicate_itinerary_for_user,
+    get_discover_feed,
     get_db,
+    ensure_itinerary_metadata_columns,
     get_itinerary_item_context,
     get_itinerary_overview,
+    get_user_travel_stats,
     get_weather_alert_history,
     get_indoor_place_alternatives,
     save_itinerary,
@@ -20,6 +26,7 @@ from webapp.services.database import (
     save_places_to_db,
     delete_push_token,
     swap_itinerary_item,
+    update_itinerary_start_date,
     update_itinerary_item_lock,
     update_itinerary_item_order,
 )
@@ -34,6 +41,30 @@ from webapp.services.trip_planning import (
 )
 
 trip_bp = Blueprint('trip', __name__)
+
+
+@trip_bp.route('/api/dashboard/summary', methods=['GET'])
+@jwt_required()
+def api_dashboard_summary():
+    """Return aggregated dashboard stats for the current user."""
+    current_user_id = get_jwt_identity()
+    stats = get_user_travel_stats(current_user_id)
+    return jsonify(stats), 200
+
+
+@trip_bp.route('/api/discover/feed', methods=['GET'])
+@jwt_required()
+def api_discover_feed():
+    """Return discover suggestions and trending destinations."""
+    tag = request.args.get('tag', 'all')
+    search_query = request.args.get('q', '')
+    limit = request.args.get('limit', 18)
+
+    try:
+        feed = get_discover_feed(tag=tag, search_query=search_query, limit=limit)
+        return jsonify(feed), 200
+    except ValueError:
+        return jsonify({'error': 'Invalid discover feed parameters'}), 400
 
 # The /api/itinerary route is for generating a preview without saving, while /api/generate saves the itinerary to the DB and returns an ID for future reference.    
 @trip_bp.route('/api/itinerary', methods=['POST'])
@@ -50,6 +81,15 @@ def api_itinerary():
     companion_type = data.get('companion_type', 'Solo')
     transport_mode = data.get('transport_mode', 'Public')
     accommodation = data.get('accommodation', '')
+    trip_start_date = data.get('trip_start_date')
+
+    if trip_start_date is not None and str(trip_start_date).strip():
+        try:
+            trip_start_date = datetime.strptime(str(trip_start_date).strip(), '%Y-%m-%d').date().isoformat()
+        except ValueError:
+            return jsonify({'error': 'trip_start_date must be YYYY-MM-DD'}), 400
+    else:
+        trip_start_date = None
 
     dest_coords = geocode_mapbox(destination)
     accommodation_coords = geocode_mapbox(accommodation) if accommodation else None
@@ -173,6 +213,15 @@ def api_generate():
     companion_type = data.get('companion_type', 'Solo')
     transport_mode = data.get('transport_mode', 'Public')
     accommodation = data.get('accommodation', '')
+    trip_start_date = data.get('trip_start_date')
+
+    if trip_start_date is not None and str(trip_start_date).strip():
+        try:
+            trip_start_date = datetime.strptime(str(trip_start_date).strip(), '%Y-%m-%d').date().isoformat()
+        except ValueError:
+            return jsonify({'error': 'trip_start_date must be YYYY-MM-DD'}), 400
+    else:
+        trip_start_date = None
 
     dest_coords = geocode_mapbox(destination)
     if dest_coords and not is_in_philippines(dest_coords['lat'], dest_coords['lon']):
@@ -205,12 +254,14 @@ def api_generate():
         transport_mode=transport_mode,
         accommodation_lat=(accommodation_coords or {}).get('lat'),
         accommodation_lng=(accommodation_coords or {}).get('lon'),
+        trip_start_date=trip_start_date,
     )
 
     return jsonify({
         'itinerary': itinerary,
         'itinerary_id': itinerary_id,
         'dest_coords': dest_coords,
+        'trip_start_date': trip_start_date,
     }), 200
 
 
@@ -252,6 +303,53 @@ def api_reorder_itinerary_items(itinerary_id):
         return jsonify({'message': 'Itinerary order updated.'}), 200
     except Exception as error:
         return jsonify({'error': 'Could not reorder itinerary items'}), 500
+
+
+@trip_bp.route('/api/itineraries/<int:itinerary_id>', methods=['DELETE'])
+@jwt_required()
+def api_delete_itinerary(itinerary_id):
+    """Permanently delete an itinerary owned by the current user."""
+    current_user_id = get_jwt_identity()
+    deleted = delete_itinerary_for_user(current_user_id, itinerary_id)
+    if not deleted:
+        return jsonify({'error': 'Itinerary not found'}), 404
+    return jsonify({'message': 'Itinerary deleted.'}), 200
+
+
+@trip_bp.route('/api/itineraries/<int:itinerary_id>/duplicate', methods=['POST'])
+@jwt_required()
+def api_duplicate_itinerary(itinerary_id):
+    """Copy an itinerary into a fresh Draft row for the current user."""
+    current_user_id = get_jwt_identity()
+    new_id = duplicate_itinerary_for_user(current_user_id, itinerary_id)
+    if not new_id:
+        return jsonify({'error': 'Itinerary not found'}), 404
+    return jsonify({'message': 'Itinerary duplicated.', 'itinerary_id': new_id}), 200
+
+
+@trip_bp.route('/api/itineraries/<int:itinerary_id>/start-date', methods=['PATCH'])
+@jwt_required()
+def api_update_itinerary_start_date(itinerary_id):
+    """Set or clear the trip start date for one itinerary."""
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    trip_start_date = data.get('trip_start_date')
+
+    if trip_start_date is not None and str(trip_start_date).strip():
+        try:
+            from datetime import datetime
+            parsed = datetime.strptime(str(trip_start_date).strip(), '%Y-%m-%d').date()
+            trip_start_date = parsed.isoformat()
+        except ValueError:
+            return jsonify({'error': 'trip_start_date must be YYYY-MM-DD'}), 400
+    else:
+        trip_start_date = None
+
+    updated = update_itinerary_start_date(current_user_id, itinerary_id, trip_start_date)
+    if not updated:
+        return jsonify({'error': 'Itinerary not found'}), 404
+
+    return jsonify({'message': 'Trip start date updated.', 'trip_start_date': trip_start_date}), 200
 
 
 @trip_bp.route('/api/itineraries/<int:itinerary_id>/items/<int:item_id>/swap', methods=['POST'])
@@ -346,6 +444,7 @@ def api_delete_push_token():
 @jwt_required()
 def get_saved_itineraries():
     current_user_id = get_jwt_identity()
+    ensure_itinerary_metadata_columns()
 
     db = get_db()
     cursor = db.cursor(dictionary=True)
@@ -358,6 +457,9 @@ def get_saved_itineraries():
                 destination,
                 budget,
                 num_days AS days,
+                preferences,
+                status,
+                trip_start_date,
                 created_at
             FROM itineraries
             WHERE user_id = %s
@@ -371,6 +473,8 @@ def get_saved_itineraries():
         for trip in itineraries:
             if trip.get("created_at"):
                 trip["created_at"] = trip["created_at"].strftime("%Y-%m-%d")
+            if trip.get("trip_start_date"):
+                trip["trip_start_date"] = trip["trip_start_date"].strftime("%Y-%m-%d")
 
         return jsonify(itineraries), 200
 
@@ -442,6 +546,8 @@ def get_saved_itinerary_details(itinerary_id):
             "accommodation_lat": float(trip["accommodation_lat"]) if trip.get("accommodation_lat") is not None else None,
             "accommodation_lng": float(trip["accommodation_lng"]) if trip.get("accommodation_lng") is not None else None,
             "status": trip.get("status"),
+            "trip_start_date": trip.get("trip_start_date").strftime("%Y-%m-%d")
+            if trip.get("trip_start_date") else None,
             "itinerary": itinerary,
             "dest_coords": {
                 "lat": float(trip["accommodation_lat"]) if trip.get("accommodation_lat") is not None else None,

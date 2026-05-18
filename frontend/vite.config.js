@@ -14,15 +14,17 @@ export default defineConfig({
       injectRegister: "auto",
       includeAssets: ["favicon.svg", "pwa-icon.svg", "pwa-maskable.svg"],
       manifest: {
-        name: "Ano Tara? Travel Planner",
-        short_name: "Ano Tara",
+        name: "Tara! — Ano Tara Travel Planner",
+        short_name: "Tara!",
         description:
-          "A Philippine travel planner with smart itinerary generation and offline support.",
-        theme_color: "#0f172a",
-        background_color: "#f7f3ea",
+          "Plan personalized Philippine itineraries with smart generation, offline maps, and ML-curated discovery.",
+        theme_color: "#4a3a8a",
+        background_color: "#fef4ed",
         display: "standalone",
+        orientation: "portrait",
         scope: "/",
-        start_url: "/",
+        start_url: "/dashboard",
+        categories: ["travel", "lifestyle", "navigation"],
         icons: [
           {
             src: "/pwa-icon.svg",
@@ -37,9 +39,29 @@ export default defineConfig({
             purpose: "maskable",
           },
         ],
+        shortcuts: [
+          {
+            name: "Generate trip",
+            short_name: "Tara Na!",
+            description: "Launch the trip generator",
+            url: "/generate",
+            icons: [{ src: "/pwa-icon.svg", sizes: "any" }],
+          },
+          {
+            name: "My trips",
+            short_name: "My Trips",
+            description: "Open the trip vault",
+            url: "/my-trips",
+            icons: [{ src: "/pwa-icon.svg", sizes: "any" }],
+          },
+        ],
       },
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,ico,png,jpg,jpeg,webp}"],
+        // Mapbox-gl alone is well over the default 2 MiB cap. Bump the limit
+        // so the Service Worker can still precache the full app shell for
+        // genuine offline use in the provinces.
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
     }),
   ],

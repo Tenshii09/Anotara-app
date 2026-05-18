@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { API_BASE_URL, TOKEN_STORAGE_KEY } from "../lib/config";
+import { saveUserProfile } from "../lib/storage";
 
 // These cards explain the frontend migration to users and also serve as a
 // quick summary of how the new React + REST architecture maps to the old UI.
@@ -71,6 +72,9 @@ export default function AuthPage({ initialMode = "login" }) {
 
       // Store the JWT token in localStorage so later requests can authenticate.
       localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+      saveUserProfile({
+        name: data.username || identifier || username || "Traveler",
+      });
       navigate("/dashboard");
     } catch (error) {
       // Any network or backend failure ends up here.
