@@ -36,6 +36,15 @@ Map and itinerary remain synchronized.
 Coordinates updated dynamically when switching between saved trips.
 6. Recommendation Explanations
 Each place includes explanations, approximate distance, and recommended stay duration.
+6a. AI Pitch Generator
+After the local ML reranker returns its top 3 places, the frontend can call
+POST /api/itinerary/pitch with those 3 places + the user's travel style
+(Comfort, Couple, Backpacker, Family, etc.). The backend calls Google's
+Gemini API (gemini-2.0-flash) with response_mime_type=application/json and
+a strict response_schema, then returns a clean JSON payload:
+    { pitch: str, travel_style: str, place_names: [str], source: "gemini" | "fallback" }
+If GEMINI_API_KEY is unset the service degrades gracefully with a local
+fallback sentence so the rest of the app keeps working offline.
 7. Feedback Loop
 Users mark places as “best pick” or “not ideal.”
 Feedback is stored in the backend for ML training.
@@ -72,6 +81,7 @@ Flask REST API
 Handles auth, trip generation, feedback, itinerary storage
 Push notifications via Firebase
 Machine learning reranker
+train_model.py trains a RandomForestClassifier from anotara_real_api_dataset.csv, saves the model/feature columns/place catalog, and exposes get_top_places(user_profile) for top-3 place recommendations.
 Data Layer
 MySQL stores:
 Users
@@ -88,6 +98,7 @@ app.py – initializes Flask, JWT, CORS, and blueprints
 webapp/routes/auth_routes.py – POST /api/register, POST /api/login
 webapp/routes/trip_routes.py – all trip endpoints including /api/itineraries and /api/itineraries/<id>
 webapp/services/trip_planning.py – geocoding, place fetching, scoring, route-aware ranking, final itinerary
+webapp/services/pitch_generator.py – calls Gemini to produce a 1-3 sentence pitch for top-3 places + travel style
 webapp/services/database.py – DB connection, save trips/feedback, schema checks
 Frontend Structure
 Components
@@ -160,6 +171,7 @@ webapp/routes/auth_routes.py
 webapp/routes/trip_routes.py
 webapp/services/database.py
 webapp/services/trip_planning.py
+webapp/services/pitch_generator.py
 frontend/src/components/AuthPage.jsx
 frontend/src/components/TravelWizard.jsx
 frontend/src/components/MyTripsPage.jsx

@@ -11,10 +11,32 @@ import ProfilePage from "./components/ProfilePage";
 
 import "./App.css";
 
+/**
+ * Renders the fixed, animated fluid-pastel background that sits behind
+ * every route. The orbs are GPU-accelerated radial gradients defined in
+ * App.css. Decorative-only — hidden from assistive tech.
+ */
+function AnimatedBackground() {
+  return (
+    <div className="app-bg" aria-hidden="true">
+      <span className="app-bg__orb app-bg__orb--pink" />
+      <span className="app-bg__orb app-bg__orb--lavender" />
+      <span className="app-bg__orb app-bg__orb--sky" />
+      <span className="app-bg__orb app-bg__orb--mint" />
+      <span className="app-bg__orb app-bg__orb--peach" />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <div style={{ paddingBottom: "70px" }}> {/* space for bottom nav */}
+      <AnimatedBackground />
+      {/*
+        The bottom padding reserves space for the floating glass nav so the
+        last card on each route is never clipped by it.
+      */}
+      <div style={{ paddingBottom: "96px" }}>
         <Routes>
           <Route path="/" element={<AuthPage initialMode="login" />} />
           <Route path="/login" element={<AuthPage initialMode="login" />} />

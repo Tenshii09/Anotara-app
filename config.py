@@ -20,6 +20,7 @@ class Config:
     # API Keys
     GEOAPIFY_KEY = os.environ.get('GEOAPIFY_KEY')
     MAPBOX_TOKEN = os.environ.get('MAPBOX_TOKEN')
+    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
     FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', '')
     FIREBASE_SERVICE_ACCOUNT_JSON = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON', '')
     FIREBASE_SERVICE_ACCOUNT_PATH = os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH', '')

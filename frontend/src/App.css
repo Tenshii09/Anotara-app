@@ -1,29 +1,69 @@
 /*
-  App-wide presentation layer for the React frontend.
-  The CSS is intentionally grouped by feature area so the auth screen, wizard,
-  and itinerary page each have a clear visual section.
-*/
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap");
+  Anotara — premium glassmorphic UI system.
 
+  The visual language is built on three layers:
+    1. A fixed, animated fluid-pastel background (.app-bg + orbs).
+    2. A frosted glass surface system (.glass-card and friends).
+    3. An editorial typographic pairing — Cormorant Garamond (display serif)
+       and Inter (UI sans).
+
+  Class names are preserved so the existing JSX in AuthPage, TravelWizard,
+  ItineraryPage, etc. continues to work unchanged.
+*/
+
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap");
+
+/* ------------------------------------------------------------------ */
+/* Design tokens                                                      */
+/* ------------------------------------------------------------------ */
 :root {
-  --bg-a: #f7efe7;
-  --bg-b: #e7f5f2;
-  --bg-c: #f0f3ff;
-  --text: #111827;
-  --muted: #6b7280;
-  --surface: rgba(255, 255, 255, 0.72);
-  --surface-strong: rgba(255, 255, 255, 0.9);
-  --border: rgba(17, 24, 39, 0.08);
-  --shadow: 0 30px 80px rgba(15, 23, 42, 0.12);
-  --shadow-soft: 0 12px 30px rgba(15, 23, 42, 0.08);
-  --accent: #111827;
-  --accent-alt: #0f766e;
-  --accent-soft: rgba(15, 23, 42, 0.08);
-  --radius-xl: 28px;
-  --radius-lg: 22px;
-  --radius-md: 16px;
+  /* Pastel palette — millennial pink, lavender, sky blue, mint, peach. */
+  --pastel-pink: #fcd5e3;
+  --pastel-lavender: #d9c8ff;
+  --pastel-sky: #c4dffb;
+  --pastel-mint: #c8f0db;
+  --pastel-peach: #ffd6bd;
+  --pastel-cream: #fff7ef;
+
+  /* Surfaces & borders for the glass system. */
+  --glass-bg: rgba(255, 255, 255, 0.45);
+  --glass-bg-strong: rgba(255, 255, 255, 0.62);
+  --glass-bg-soft: rgba(255, 255, 255, 0.32);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-border-strong: rgba(255, 255, 255, 0.78);
+
+  /* Depth — soft, premium drop shadows tuned for pastel backgrounds. */
+  --shadow-floating: 0 30px 70px -20px rgba(78, 60, 110, 0.28),
+    0 12px 32px -12px rgba(78, 60, 110, 0.18);
+  --shadow-resting: 0 18px 40px -22px rgba(78, 60, 110, 0.22),
+    0 6px 18px -10px rgba(78, 60, 110, 0.14);
+  --shadow-hover: 0 44px 110px -30px rgba(78, 60, 110, 0.36),
+    0 18px 48px -16px rgba(78, 60, 110, 0.24);
+  --shadow-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+
+  /* Type. */
+  --font-serif: "Cormorant Garamond", "Playfair Display", Georgia, serif;
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* Text — high-contrast over pastels. */
+  --text: #1b1730;
+  --text-soft: #3a3450;
+  --muted: #6a6285;
+  --accent: #4a3a8a;
+  --accent-alt: #c44f8a;
+  --accent-soft: rgba(74, 58, 138, 0.12);
+
+  /* Radii. */
+  --radius-xl: 32px;
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-sm: 14px;
 }
 
+/* ------------------------------------------------------------------ */
+/* Base reset & document                                              */
+/* ------------------------------------------------------------------ */
 * {
   box-sizing: border-box;
 }
@@ -36,18 +76,18 @@ body,
 
 body {
   margin: 0;
-  font-family: "Inter", sans-serif;
+  font-family: var(--font-sans);
   color: var(--text);
-  background:
-    radial-gradient(
-      circle at top left,
-      rgba(255, 255, 255, 0.85),
-      transparent 32%
-    ),
-    linear-gradient(135deg, var(--bg-a), var(--bg-b) 48%, var(--bg-c));
-  background-attachment: fixed;
+  /*
+    The cream base sits underneath the animated orbs so the page never
+    flashes pure white before the gradient paints.
+  */
+  background-color: var(--pastel-cream);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  letter-spacing: -0.005em;
+  overflow-x: hidden;
 }
 
 button,
@@ -55,18 +95,221 @@ input,
 textarea,
 select {
   font: inherit;
+  color: inherit;
 }
 
 a {
   color: inherit;
 }
 
-.serif {
-  font-family: "Playfair Display", serif;
+/* ------------------------------------------------------------------ */
+/* Animated fluid-pastel background                                   */
+/* ------------------------------------------------------------------ */
+/*
+  .app-bg is rendered once in App.jsx and stays fixed behind every route.
+  Each .app-bg__orb is a giant blurred radial gradient. We animate the
+  orbs with transform/opacity only (no `filter`, no `background-position`)
+  so the GPU compositor can run the loop at 60fps without repainting.
+*/
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      ellipse at 20% 0%,
+      rgba(255, 247, 239, 0.7),
+      transparent 55%
+    ),
+    linear-gradient(135deg, #fef4ed 0%, #f6efff 45%, #eaf6ff 100%);
 }
 
+.app-bg::after {
+  /* Subtle film grain via a transparent SVG noise. Improves perceived
+     smoothness and hides any residual banding on cheap displays. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.04 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  opacity: 0.6;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+.app-bg__orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.85;
+  will-change: transform;
+  /* The orbs need to slightly bleed past the viewport so the edges of the
+     blur are never visible as a hard circle. */
+  transform: translate3d(0, 0, 0);
+}
+
+.app-bg__orb--pink {
+  width: 65vw;
+  height: 65vw;
+  left: -18vw;
+  top: -14vw;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--pastel-pink) 0%,
+    rgba(252, 213, 227, 0) 70%
+  );
+  animation: orb-drift-a 32s ease-in-out infinite alternate;
+}
+
+.app-bg__orb--lavender {
+  width: 55vw;
+  height: 55vw;
+  right: -14vw;
+  top: -10vw;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--pastel-lavender) 0%,
+    rgba(217, 200, 255, 0) 70%
+  );
+  animation: orb-drift-b 38s ease-in-out infinite alternate;
+}
+
+.app-bg__orb--sky {
+  width: 60vw;
+  height: 60vw;
+  right: -10vw;
+  bottom: -18vw;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--pastel-sky) 0%,
+    rgba(196, 223, 251, 0) 70%
+  );
+  animation: orb-drift-c 44s ease-in-out infinite alternate;
+}
+
+.app-bg__orb--mint {
+  width: 50vw;
+  height: 50vw;
+  left: -8vw;
+  bottom: -12vw;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--pastel-mint) 0%,
+    rgba(200, 240, 219, 0) 70%
+  );
+  animation: orb-drift-d 36s ease-in-out infinite alternate;
+}
+
+.app-bg__orb--peach {
+  width: 45vw;
+  height: 45vw;
+  left: 25vw;
+  top: 30vh;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--pastel-peach) 0%,
+    rgba(255, 214, 189, 0) 70%
+  );
+  animation: orb-drift-e 40s ease-in-out infinite alternate;
+}
+
+@keyframes orb-drift-a {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(12vw, 8vh, 0) scale(1.12);
+  }
+  100% {
+    transform: translate3d(6vw, 18vh, 0) scale(0.95);
+  }
+}
+
+@keyframes orb-drift-b {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-10vw, 14vh, 0) scale(1.1);
+  }
+  100% {
+    transform: translate3d(-4vw, 6vh, 0) scale(0.92);
+  }
+}
+
+@keyframes orb-drift-c {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-14vw, -10vh, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(-6vw, -18vh, 0) scale(0.96);
+  }
+}
+
+@keyframes orb-drift-d {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(10vw, -8vh, 0) scale(1.14);
+  }
+  100% {
+    transform: translate3d(4vw, -16vh, 0) scale(0.9);
+  }
+}
+
+@keyframes orb-drift-e {
+  0% {
+    transform: translate3d(-50%, -50%, 0) scale(0.95);
+  }
+  50% {
+    transform: translate3d(-30%, -65%, 0) scale(1.18);
+  }
+  100% {
+    transform: translate3d(-65%, -38%, 0) scale(1);
+  }
+}
+
+/* Accessibility — pause motion for users who prefer it. */
+@media (prefers-reduced-motion: reduce) {
+  .app-bg__orb {
+    animation: none !important;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Typography                                                         */
+/* ------------------------------------------------------------------ */
+h1,
+h2,
+h3,
+.serif {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  color: var(--text);
+}
+
+h1.serif,
+.serif {
+  font-feature-settings: "ss01", "liga";
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ */
+/* Page shells                                                        */
+/* ------------------------------------------------------------------ */
 .app-page {
   min-height: 100vh;
+  position: relative;
+  z-index: 1;
 }
 
 .auth-page,
@@ -82,50 +325,123 @@ a {
   margin: 0 auto;
 }
 
+/* ------------------------------------------------------------------ */
+/* Glass surface system                                               */
+/* ------------------------------------------------------------------ */
+/*
+  .glass-card is the foundation. Sidebar, map panel, wizard card, auth
+  card, place cards and floating chips all inherit from this look.
+*/
 .glass-card {
-  background: var(--surface);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
+  position: relative;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    var(--shadow-floating),
+    var(--shadow-inset-highlight);
+  transition:
+    transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 320ms ease,
+    border-color 320ms ease,
+    -webkit-backdrop-filter 320ms ease,
+    backdrop-filter 320ms ease;
 }
 
+/* Razor-thin highlight along the top edge — gives the glass dimension. */
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.85),
+    rgba(255, 255, 255, 0.05) 35%,
+    rgba(255, 255, 255, 0) 70%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                            */
+/* ------------------------------------------------------------------ */
 .btn-luxury,
 .btn-outline-luxury {
+  position: relative;
   border: 0;
   border-radius: 999px;
   padding: 14px 28px;
-  font-weight: 700;
+  font-weight: 600;
+  font-size: 0.95rem;
   letter-spacing: 0.01em;
   cursor: pointer;
   transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    background 180ms ease,
-    color 180ms ease;
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms ease,
+    background 220ms ease,
+    color 220ms ease,
+    border-color 220ms ease;
 }
 
 .btn-luxury {
-  color: white;
-  background: linear-gradient(135deg, #111827, #1f2937);
-  box-shadow: 0 16px 30px rgba(17, 24, 39, 0.25);
+  color: #fff;
+  background: linear-gradient(135deg, #4a3a8a 0%, #c44f8a 60%, #ff8a72 100%);
+  box-shadow:
+    0 18px 40px -14px rgba(74, 58, 138, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
-.btn-luxury:hover,
-.btn-outline-luxury:hover {
+.btn-luxury:hover {
   transform: translateY(-2px);
+  box-shadow:
+    0 26px 60px -16px rgba(74, 58, 138, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 .btn-luxury:disabled {
-  opacity: 0.65;
+  opacity: 0.55;
   cursor: not-allowed;
   transform: none;
 }
 
 .btn-outline-luxury {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(17, 24, 39, 0.12);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-resting);
+}
+
+.btn-outline-luxury:hover {
+  transform: translateY(-2px);
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-border-strong);
+  box-shadow: var(--shadow-floating);
+}
+
+/* ------------------------------------------------------------------ */
+/* Chips, pills, badges                                               */
+/* ------------------------------------------------------------------ */
+.hero-chip,
+.step-badge,
+.badge-pill,
+.top-action-link {
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  box-shadow: var(--shadow-resting);
 }
 
 .hero-chip {
@@ -134,65 +450,139 @@ a {
   gap: 8px;
   padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow-soft);
-  color: var(--muted);
+  color: var(--text-soft);
   font-weight: 600;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
 }
 
+.step-badge {
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--glass-bg-soft);
+  border-color: var(--glass-border);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+.top-action-link {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms ease,
+    background 220ms ease,
+    border-color 220ms ease;
+}
+
+.top-action-link:hover {
+  transform: translateY(-1px);
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-border-strong);
+  box-shadow: var(--shadow-floating);
+}
+
+.top-action-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Auth page                                                          */
+/* ------------------------------------------------------------------ */
 .auth-grid {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
-  gap: 28px;
+  gap: 32px;
   align-items: center;
-  padding: 32px 0;
+  padding: 48px 0;
 }
 
 .auth-intro {
-  padding: 32px;
+  padding: 24px 8px;
 }
 
 .auth-title {
-  font-size: clamp(3rem, 6vw, 5.2rem);
-  line-height: 0.96;
-  margin: 20px 0 18px;
+  font-size: clamp(3rem, 6vw, 5.4rem);
+  line-height: 1;
+  margin: 24px 0 20px;
+  font-weight: 600;
 }
 
 .auth-copy {
-  color: var(--muted);
-  font-size: 1.05rem;
-  line-height: 1.7;
+  color: var(--text-soft);
+  font-size: 1.06rem;
+  line-height: 1.75;
   max-width: 54ch;
 }
 
 .auth-highlight-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 32px;
+  gap: 16px;
+  margin-top: 36px;
 }
 
 .auth-highlight {
+  position: relative;
   border-radius: var(--radius-lg);
-  padding: 18px;
-  background: rgba(255, 255, 255, 0.68);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow-soft);
+  padding: 20px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--shadow-resting),
+    var(--shadow-inset-highlight);
+  transition:
+    transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 320ms ease;
+}
+
+.auth-highlight:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    var(--shadow-floating),
+    var(--shadow-inset-highlight);
 }
 
 .auth-card {
-  border-radius: 34px;
-  padding: 34px;
+  border-radius: var(--radius-xl);
+  padding: 40px;
 }
 
+/* ------------------------------------------------------------------ */
+/* Form fields                                                        */
+/* ------------------------------------------------------------------ */
 .field-label {
   display: block;
   margin-bottom: 8px;
-  font-size: 0.82rem;
-  letter-spacing: 0.12em;
+  font-size: 0.74rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted);
   font-weight: 700;
@@ -201,23 +591,30 @@ a {
 .auth-input,
 .wizard-input {
   width: 100%;
-  border-radius: 16px;
-  border: 1px solid rgba(17, 24, 39, 0.09);
-  background: rgba(255, 255, 255, 0.76);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
   color: var(--text);
-  padding: 14px 16px;
+  padding: 14px 18px;
   outline: none;
   transition:
-    border-color 180ms ease,
-    background 180ms ease,
-    box-shadow 180ms ease;
+    border-color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.auth-input::placeholder,
+.wizard-input::placeholder {
+  color: var(--muted);
 }
 
 .auth-input:focus,
 .wizard-input:focus {
-  border-color: rgba(17, 24, 39, 0.24);
-  box-shadow: 0 0 0 4px rgba(17, 24, 39, 0.05);
-  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(74, 58, 138, 0.45);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 0 0 4px rgba(74, 58, 138, 0.12);
 }
 
 .auth-switch {
@@ -228,11 +625,14 @@ a {
   font-weight: 700;
 }
 
+/* ------------------------------------------------------------------ */
+/* Wizard                                                             */
+/* ------------------------------------------------------------------ */
 .wizard-wrap {
   min-height: 100vh;
   display: flex;
   align-items: center;
-  padding: 96px 0 40px;
+  padding: 110px 0 56px;
 }
 
 .wizard-topbar,
@@ -252,26 +652,14 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   pointer-events: auto;
-}
-
-.step-badge {
-  padding: 9px 18px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.74);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow-soft);
-  font-size: 0.75rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-weight: 800;
 }
 
 .wizard-card {
   width: 100%;
-  border-radius: 34px;
-  padding: 34px;
+  border-radius: var(--radius-xl);
+  padding: 40px;
 }
 
 .wizard-step {
@@ -280,7 +668,7 @@ a {
 
 .wizard-step.active {
   display: block;
-  animation: fadeInUp 260ms ease;
+  animation: fadeInUp 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .wizard-step.completed {
@@ -288,39 +676,46 @@ a {
 }
 
 .wizard-heading {
-  font-size: clamp(2.3rem, 5vw, 4rem);
-  line-height: 1;
-  margin: 0 0 10px;
+  font-size: clamp(2.4rem, 5vw, 4.2rem);
+  line-height: 1.02;
+  margin: 0 0 14px;
+  font-weight: 600;
 }
 
 .wizard-subcopy {
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.7;
+  color: var(--text-soft);
+  font-size: 1.02rem;
+  line-height: 1.75;
 }
 
 .input-massive {
   width: 100%;
-  font-size: clamp(1.6rem, 4vw, 2.6rem);
-  font-family: "Playfair Display", serif;
-  font-weight: 700;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-family: var(--font-serif);
+  font-weight: 600;
   text-align: center;
   border-radius: 0;
   border: 0;
-  border-bottom: 2px solid rgba(17, 24, 39, 0.16);
+  border-bottom: 1px solid rgba(74, 58, 138, 0.2);
   background: transparent;
   padding: 18px 0;
   outline: none;
+  transition: border-color 220ms ease;
 }
 
 .input-massive:focus {
-  border-color: rgba(17, 24, 39, 0.5);
+  border-color: rgba(74, 58, 138, 0.55);
 }
 
+/* Bento — preference selector grid. */
 .bento-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 14px;
+}
+
+.bento-item {
+  position: relative;
 }
 
 .bento-item input {
@@ -334,39 +729,59 @@ a {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 96px;
+  gap: 8px;
+  min-height: 104px;
   padding: 16px 14px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow-soft);
+  border-radius: var(--radius-lg);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--shadow-resting),
+    var(--shadow-inset-highlight);
   cursor: pointer;
   transition:
-    transform 180ms ease,
-    border-color 180ms ease,
-    background 180ms ease;
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease;
   text-align: center;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .bento-label:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-border-strong);
+  box-shadow: var(--shadow-floating);
 }
 
 .bento-item input:checked + .bento-label {
-  border-color: rgba(17, 24, 39, 0.36);
-  background: white;
-  box-shadow: 0 18px 36px rgba(17, 24, 39, 0.11);
+  border-color: rgba(74, 58, 138, 0.45);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.75),
+    rgba(217, 200, 255, 0.55)
+  );
+  box-shadow:
+    0 20px 44px -16px rgba(74, 58, 138, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .summary-card {
-  max-width: 460px;
+  max-width: 480px;
   margin: 0 auto;
-  border-radius: 28px;
-  padding: 22px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow-soft);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--shadow-floating),
+    var(--shadow-inset-highlight);
 }
 
 .summary-row {
@@ -374,20 +789,24 @@ a {
   justify-content: space-between;
   gap: 18px;
   align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px dashed rgba(17, 24, 39, 0.08);
+  padding: 10px 0;
+  border-bottom: 1px dashed rgba(74, 58, 138, 0.16);
 }
 
 .summary-row:last-child {
   border-bottom: 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Loading overlay & skeleton                                         */
+/* ------------------------------------------------------------------ */
 .loading-overlay {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: rgba(247, 239, 231, 0.72);
-  backdrop-filter: blur(28px) saturate(160%);
+  background: rgba(255, 247, 239, 0.55);
+  -webkit-backdrop-filter: blur(32px) saturate(170%);
+  backdrop-filter: blur(32px) saturate(170%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -396,11 +815,13 @@ a {
 
 .loading-card {
   width: min(520px, calc(100vw - 32px));
-  padding: 28px;
-  border-radius: 30px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow);
+  padding: 32px;
+  border-radius: var(--radius-xl);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow:
+    var(--shadow-hover),
+    var(--shadow-inset-highlight);
 }
 
 .skeleton-line {
@@ -408,105 +829,213 @@ a {
   border-radius: 999px;
   background: linear-gradient(
     90deg,
-    rgba(17, 24, 39, 0.06),
-    rgba(17, 24, 39, 0.1),
-    rgba(17, 24, 39, 0.06)
+    rgba(74, 58, 138, 0.08),
+    rgba(74, 58, 138, 0.18),
+    rgba(74, 58, 138, 0.08)
   );
   background-size: 220% 100%;
-  animation: shimmer 1.4s ease infinite;
+  animation: shimmer 1.6s ease infinite;
   margin-bottom: 12px;
 }
 
+/* ------------------------------------------------------------------ */
+/* Itinerary page                                                     */
+/* ------------------------------------------------------------------ */
 .itinerary-shell {
-  padding: 92px 0 32px;
+  padding: 100px 0 40px;
 }
 
 .itinerary-layout {
   display: grid;
   grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.2fr);
-  gap: 20px;
+  gap: 24px;
   align-items: stretch;
 }
 
 .itinerary-sidebar,
 .itinerary-map-panel {
-  border-radius: 32px;
-  background: var(--surface);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow);
+  position: relative;
+  border-radius: var(--radius-xl);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--shadow-floating),
+    var(--shadow-inset-highlight);
   overflow: hidden;
 }
 
+.itinerary-sidebar::before,
+.itinerary-map-panel::before {
+  /* Match the glass-card top highlight on the dedicated panels too. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.9),
+    rgba(255, 255, 255, 0.05) 40%,
+    rgba(255, 255, 255, 0) 75%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .itinerary-sidebar {
-  padding: 24px;
+  padding: 28px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(74, 58, 138, 0.25) transparent;
+}
+
+.itinerary-sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.itinerary-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(74, 58, 138, 0.25);
+  border-radius: 999px;
 }
 
 .itinerary-map-panel {
   min-height: 78vh;
+  /*
+    Tiny inset padding so the Mapbox canvas sits *inside* the glass frame
+    like a window, not flush to the edge. The map keeps its own rounded
+    corners via .itinerary-map below.
+  */
+  padding: 8px;
 }
 
 .itinerary-map {
   width: 100%;
-  height: 78vh;
+  height: calc(78vh - 16px);
+  border-radius: calc(var(--radius-xl) - 10px);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.itinerary-map-panel .mapboxgl-map {
+  border-radius: calc(var(--radius-xl) - 10px);
 }
 
 .itinerary-title {
-  font-size: clamp(2.5rem, 5vw, 4rem);
-  margin: 10px 0 4px;
-  line-height: 1;
-}
-
-.muted {
-  color: var(--muted);
+  font-size: clamp(2.6rem, 5vw, 4.2rem);
+  margin: 14px 0 6px;
+  line-height: 1.02;
+  font-weight: 600;
 }
 
 .pill-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin: 16px 0 18px;
-}
-
-.badge-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(17, 24, 39, 0.06);
-  font-size: 0.8rem;
-  font-weight: 700;
+  margin: 18px 0 20px;
 }
 
 .itinerary-day {
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid rgba(17, 24, 39, 0.08);
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(74, 58, 138, 0.12);
 }
 
 .itinerary-day h3 {
-  margin: 0 0 12px;
-  font-size: 1.1rem;
+  margin: 0 0 14px;
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
+/* ------------------------------------------------------------------ */
+/* Place cards — the signature glass item with hover lift             */
+/* ------------------------------------------------------------------ */
 .place-card {
-  border-radius: 18px;
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow-soft);
+  position: relative;
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--shadow-resting),
+    var(--shadow-inset-highlight);
   margin-bottom: 12px;
+  transition:
+    transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 320ms ease,
+    background 320ms ease,
+    -webkit-backdrop-filter 320ms ease,
+    backdrop-filter 320ms ease;
+}
+
+.place-card-clickable {
+  cursor: pointer;
+}
+
+.place-card-clickable:hover {
+  transform: translateY(-3px);
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(34px) saturate(190%);
+  backdrop-filter: blur(34px) saturate(190%);
+  border-color: var(--glass-border-strong);
+  box-shadow:
+    var(--shadow-hover),
+    var(--shadow-inset-highlight);
+}
+
+.place-card-clickable:focus-visible {
+  outline: none;
+  border-color: rgba(74, 58, 138, 0.5);
+  box-shadow:
+    0 0 0 4px rgba(74, 58, 138, 0.18),
+    var(--shadow-floating);
+}
+
+.place-card-clickable.is-focused {
+  border-color: rgba(196, 79, 138, 0.45);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.72),
+    rgba(252, 213, 227, 0.55)
+  );
+  box-shadow:
+    0 24px 56px -18px rgba(196, 79, 138, 0.35),
+    var(--shadow-inset-highlight);
+}
+
+.place-card-hint {
+  margin-top: 10px;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(74, 58, 138, 0.72);
+  font-weight: 700;
 }
 
 .place-name {
-  font-weight: 800;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 1.18rem;
+  letter-spacing: -0.005em;
   margin-bottom: 6px;
+  color: var(--text);
 }
 
 .place-meta {
-  color: var(--muted);
-  font-size: 0.84rem;
+  color: var(--text-soft);
+  font-size: 0.86rem;
+  line-height: 1.55;
 }
 
 .map-status {
@@ -514,45 +1043,47 @@ a {
   color: var(--muted);
 }
 
-.itinerary-map-panel .mapboxgl-map {
-  border-radius: 32px;
-}
-
-.top-action-link {
-  pointer-events: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: var(--shadow-soft);
-  text-decoration: none;
-  font-weight: 700;
-}
-
+/* ------------------------------------------------------------------ */
+/* Status / error banners                                             */
+/* ------------------------------------------------------------------ */
 .error-banner {
   margin-top: 16px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(220, 38, 38, 0.08);
-  color: #991b1b;
-  border: 1px solid rgba(220, 38, 38, 0.16);
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 230, 230, 0.7),
+    rgba(255, 255, 255, 0.55)
+  );
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  color: #8a1f3a;
+  border: 1px solid rgba(196, 79, 90, 0.28);
   font-weight: 600;
 }
 
+/* ------------------------------------------------------------------ */
+/* Map markers & popup                                                */
+/* ------------------------------------------------------------------ */
 .map-marker {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 999px;
-  border: 3px solid white;
-  color: white;
+  border: 3px solid #fff;
+  color: #fff;
   font-size: 12px;
   font-weight: 800;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.24);
+  box-shadow:
+    0 12px 28px rgba(20, 20, 50, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.map-marker:hover {
+  transform: scale(1.08);
 }
 
 .map-tag {
@@ -560,28 +1091,57 @@ a {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  padding: 6px 10px;
-  color: white;
+  padding: 6px 12px;
+  color: #fff;
   font-size: 0.72rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
+  box-shadow: 0 8px 20px rgba(20, 20, 50, 0.22);
 }
 
 .mapboxgl-popup-content {
-  border-radius: 16px !important;
-  padding: 12px 14px !important;
-  box-shadow: var(--shadow-soft) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 14px 16px !important;
+  background: var(--glass-bg-strong) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid var(--glass-border-strong) !important;
+  box-shadow: var(--shadow-floating) !important;
+  color: var(--text);
+}
+
+.mapboxgl-popup-tip {
+  border-top-color: rgba(255, 255, 255, 0.62) !important;
 }
 
 .mapboxgl-popup-close-button {
   font-size: 18px;
   padding: 4px 8px 0 0;
+  color: var(--text-soft);
 }
 
+/* Mapbox built-in controls — soften so they don't feel out of place. */
+.mapboxgl-ctrl-group {
+  border-radius: var(--radius-sm) !important;
+  background: var(--glass-bg-strong) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--shadow-resting) !important;
+  overflow: hidden;
+}
+
+.mapboxgl-ctrl-group button {
+  background-color: transparent !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Animations                                                         */
+/* ------------------------------------------------------------------ */
 @keyframes fadeInUp {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
@@ -598,14 +1158,34 @@ a {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .wizard-step.active {
+    animation: none;
+  }
+  .skeleton-line {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                         */
+/* ------------------------------------------------------------------ */
 @media (max-width: 1080px) {
   .auth-grid,
   .itinerary-layout {
     grid-template-columns: 1fr;
   }
 
+  .itinerary-sidebar {
+    max-height: none;
+  }
+
   .itinerary-map {
-    height: 60vh;
+    height: calc(62vh - 16px);
+  }
+
+  .itinerary-map-panel {
+    min-height: 62vh;
   }
 }
 
@@ -614,12 +1194,12 @@ a {
   .auth-card,
   .wizard-card,
   .itinerary-sidebar {
-    padding: 22px;
+    padding: 24px;
   }
 
   .wizard-wrap,
   .itinerary-shell {
-    padding-top: 78px;
+    padding-top: 90px;
   }
 
   .wizard-topbar-inner,
@@ -634,6 +1214,24 @@ a {
   }
 
   .itinerary-map {
-    height: 52vh;
+    height: calc(54vh - 16px);
+  }
+
+  .itinerary-map-panel {
+    min-height: 54vh;
+  }
+
+  /*
+    Heavy backdrop-filters can be expensive on low-end mobile GPUs.
+    Drop the blur radius a touch so scrolling stays buttery.
+  */
+  .glass-card,
+  .itinerary-sidebar,
+  .itinerary-map-panel,
+  .place-card,
+  .wizard-card,
+  .auth-card {
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    backdrop-filter: blur(20px) saturate(170%);
   }
 }

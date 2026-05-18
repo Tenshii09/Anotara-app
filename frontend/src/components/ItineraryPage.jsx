@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import ItineraryMap from "./ItineraryMap";
@@ -200,6 +200,40 @@ export default function ItineraryPage() {
   const [isLoadingSavedTrip, setIsLoadingSavedTrip] = useState(Boolean(itineraryId));
   const [loadError, setLoadError] = useState("");
 
+  /**
+   * Imperative handle exposed by ItineraryMap. Used to fly the camera to a
+   * specific stop when the user clicks a sidebar card.
+   */
+  const mapHandleRef = useRef(null);
+
+  /**
+   * Tracks which place card the user most recently focused so we can
+   * highlight it visually.
+   */
+  const [focusedPlaceKey, setFocusedPlaceKey] = useState(null);
+
+  /**
+   * Pans the map camera to the given place. Called from each itinerary card
+   * onClick handler. Coordinates may live under either lat/lon or
+   * latitude/longitude depending on the source, so we accept both.
+   */
+  const focusPlaceOnMap = useCallback((place, placeKey) => {
+    const latitude = Number(place?.latitude ?? place?.lat);
+    const longitude = Number(place?.longitude ?? place?.lon ?? place?.lng);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return;
+    }
+
+    setFocusedPlaceKey(placeKey ?? null);
+
+    mapHandleRef.current?.flyTo({
+      latitude,
+      longitude,
+      zoom: 15,
+    });
+  }, []);
+
   const [feedbackState, setFeedbackState] = useState({});
   const [feedbackError, setFeedbackError] = useState("");
   const [swappingItemId, setSwappingItemId] = useState(null);
@@ -329,6 +363,14 @@ export default function ItineraryPage() {
       setActiveDay(sortedDays[0]);
     }
   }, [activeDay, sortedDays]);
+
+  /**
+   * Drop any "focused card" highlight whenever the visible day changes so
+   * the indicator never points at a card the user can no longer see.
+   */
+  useEffect(() => {
+    setFocusedPlaceKey(null);
+  }, [activeDay]);
 
   /**
    * Enable device push alerts using Firebase Cloud Messaging.
@@ -1145,11 +1187,36 @@ export default function ItineraryPage() {
 
                   {places.map((place, index) => {
                     const placeId = place.id || place.place_id;
+                    const placeKey = `${dayNumber}-${place.item_id || placeId || index}`;
+                    const isFocused = focusedPlaceKey === placeKey;
+
+                    // Helper used by inner action buttons so they don't also
+                    // trigger the card-level "click to fly" handler.
+                    const cardActionClick = (handler) => (event) => {
+                      event.stopPropagation();
+                      handler();
+                    };
+
+                    const handleCardActivate = () => {
+                      focusPlaceOnMap(place, placeKey);
+                    };
+
+                    const handleCardKeyDown = (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        focusPlaceOnMap(place, placeKey);
+                      }
+                    };
 
                     return (
                       <article
-                        key={`${dayNumber}-${place.item_id || placeId || index}`}
-                        className="place-card"
+                        key={placeKey}
+                        className={`place-card place-card-clickable${isFocused ? " is-focused" : ""}`}
+                        onClick={handleCardActivate}
+                        onKeyDown={handleCardKeyDown}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={isFocused}
                       >
                         <div className="place-name">
                           {index + 1}. {place.name}
@@ -1182,6 +1249,10 @@ export default function ItineraryPage() {
                           </div>
                         )}
 
+                        <div className="place-meta place-card-hint">
+                          Click to show on map
+                        </div>
+
                         {(trip.itineraryId && placeId) || place.item_id ? (
                           <div
                             style={{
@@ -1195,7 +1266,9 @@ export default function ItineraryPage() {
                               <button
                                 className="top-action-link"
                                 type="button"
-                                onClick={() => handleMovePlace(dayNumber, index, -1)}
+                                onClick={cardActionClick(() =>
+                                  handleMovePlace(dayNumber, index, -1),
+                                )}
                               >
                                 Move Up
                               </button>
@@ -1205,7 +1278,9 @@ export default function ItineraryPage() {
                               <button
                                 className="top-action-link"
                                 type="button"
-                                onClick={() => handleMovePlace(dayNumber, index, 1)}
+                                onClick={cardActionClick(() =>
+                                  handleMovePlace(dayNumber, index, 1),
+                                )}
                               >
                                 Move Down
                               </button>
@@ -1214,7 +1289,9 @@ export default function ItineraryPage() {
                             <button
                               className="top-action-link"
                               type="button"
-                              onClick={() => handleSwapPlace(dayNumber, index)}
+                              onClick={cardActionClick(() =>
+                                handleSwapPlace(dayNumber, index),
+                              )}
                               disabled={swappingItemId === place.item_id}
                             >
                               {swappingItemId === place.item_id ? "Swapping..." : "Swap"}
@@ -1223,7 +1300,9 @@ export default function ItineraryPage() {
                             <button
                               className="top-action-link"
                               type="button"
-                              onClick={() => handleToggleLock(dayNumber, index)}
+                              onClick={cardActionClick(() =>
+                                handleToggleLock(dayNumber, index),
+                              )}
                             >
                               {place.is_locked ? "Unlock" : "Lock"}
                             </button>
@@ -1231,7 +1310,9 @@ export default function ItineraryPage() {
                             <button
                               className="top-action-link"
                               type="button"
-                              onClick={() => handlePlaceFeedback(placeId, "like")}
+                              onClick={cardActionClick(() =>
+                                handlePlaceFeedback(placeId, "like"),
+                              )}
                               disabled={feedbackState[placeId] === "liked"}
                             >
                               {feedbackState[placeId] === "liked"
@@ -1242,7 +1323,9 @@ export default function ItineraryPage() {
                             <button
                               className="top-action-link"
                               type="button"
-                              onClick={() => handlePlaceFeedback(placeId, "dislike")}
+                              onClick={cardActionClick(() =>
+                                handlePlaceFeedback(placeId, "dislike"),
+                              )}
                               disabled={feedbackState[placeId] === "disliked"}
                             >
                               {feedbackState[placeId] === "disliked"
@@ -1261,7 +1344,11 @@ export default function ItineraryPage() {
 
           <section className="itinerary-map-panel">
             <ItineraryMap
-              key={`${trip.itineraryId || trip.id || trip.destination}-${activeDay}`}
+              // Remount only when the whole trip changes, not on every day
+              // switch. This keeps the Mapbox instance alive so flyTo() can
+              // smoothly pan between stops as the user clicks cards.
+              key={trip.itineraryId || trip.id || trip.destination}
+              ref={mapHandleRef}
               itinerary={localItinerary}
               destCoords={trip.destCoords}
               activeDay={activeDay}

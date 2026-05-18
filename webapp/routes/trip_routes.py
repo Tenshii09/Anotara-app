@@ -24,6 +24,8 @@ from webapp.services.database import (
     update_itinerary_item_order,
 )
 from webapp.services.weather_monitor import build_weather_suggestion
+from webapp.services.pitch_generator import generate_itinerary_pitch
+from webapp.services.llm_itinerary import generate_llm_itinerary
 from webapp.services.trip_planning import (
     build_itinerary,
     fetch_places,
@@ -70,6 +72,89 @@ def api_itinerary():
         'itinerary': itinerary,
         'dest_coords': dest_coords,
     }), 200
+
+
+# Generates a short marketing-style pitch for the user's top 3 recommended places.
+# Kept as its own endpoint so the frontend can render places instantly and
+# fetch the AI pitch in a second, non-blocking request.
+@trip_bp.route('/api/itinerary/pitch', methods=['POST'])
+@jwt_required()
+def api_itinerary_pitch():
+    """Return a 1-3 sentence pitch for 3 places + a travel style.
+
+    Expected JSON body:
+        {
+            "places":       [ {place obj}, {place obj}, {place obj} ],
+            "travel_style": "Comfort" | "Couple" | "Backpacker" | ...
+        }
+
+    Response (clean JSON, ready for the React frontend):
+        {
+            "pitch":        "...",
+            "travel_style": "Comfort",
+            "place_names":  ["A", "B", "C"],
+            "source":       "gemini"
+        }
+    """
+    data = request.get_json() or {}
+    places = data.get('places', [])
+    travel_style = data.get('travel_style', '')
+
+    if not isinstance(places, list) or not places:
+        return jsonify({'error': 'places must be a non-empty list'}), 400
+
+    try:
+        result = generate_itinerary_pitch(places, travel_style)
+        return jsonify(result), 200
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    except RuntimeError as error:
+        return jsonify({'error': str(error)}), 502
+
+
+# LLM-powered itinerary generation. Distinct from the ML-driven /api/itinerary
+# preview because the response is sourced entirely from Gemini under strict JSON
+# mode, then validated server-side before being returned to the frontend.
+@trip_bp.route('/api/itinerary/llm', methods=['POST'])
+@jwt_required()
+def api_itinerary_llm():
+    """Generate a personalized itinerary from form data using an LLM.
+
+    Expected JSON body (matches the TravelWizard form):
+        {
+            "destination":    "Palawan",
+            "num_days":       3,                 # or "days"
+            "preferences":    ["food", "beach"], # or "interests"
+            "budget":         "Comfort",
+            "pacing_style":   "Moderate",
+            "companion_type": "Solo",
+            "transport_mode": "Public"
+        }
+
+    Response (clean JSON the React frontend renders directly):
+        {
+            "destination": "...",
+            "days": 3,
+            "summary": "...",
+            "itinerary": {
+                "1": [ {location}, ... ],
+                "2": [ ... ],
+                "3": [ ... ]
+            },
+            "pacing_style": "Moderate",
+            "budget": "Comfort",
+            "source": "gemini"
+        }
+    """
+    form_data = request.get_json() or {}
+
+    try:
+        result = generate_llm_itinerary(form_data)
+        return jsonify(result), 200
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    except RuntimeError as error:
+        return jsonify({'error': str(error)}), 502
 
 
 # This endpoint is separate from the preview route to allow the frontend to confirm before saving the generated itinerary to the DB.

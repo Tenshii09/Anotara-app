@@ -1,5 +1,9 @@
-/* Global browser reset and base font loading for the React app. */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap");
+/*
+  Bare-minimum base layer. The premium UI system, including the font stack,
+  pastel palette, and animated background, lives in App.css and is imported
+  once App mounts. Keeping this file thin avoids duplicate @font-face loads
+  and prevents any flash-of-unstyled content during initial paint.
+*/
 
 html {
   scroll-behavior: smooth;
@@ -7,8 +11,16 @@ html {
 
 body {
   margin: 0;
+  background-color: #fff7ef;
 }
 
 #root {
   min-height: 100vh;
+  isolation: isolate;
 }
+
+/*
+  Ensure the fixed animated background painted by .app-bg in App.jsx is
+  never clipped by an ancestor's overflow/transform — placing it on its
+  own stacking context here keeps it stable across route transitions.
+*/
