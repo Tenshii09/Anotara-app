@@ -6,7 +6,7 @@ Anotara is a Philippine travel-planning system that generates personalized itine
 
 The product goal is not just to list nearby places. It acts like a travel companion that selects the best stops, keeps the day route practical, explains why each stop matters, and learns from user feedback.
 
-The current frontend follows the "Aero-Glass" mobile-first design system: a continuous-line bird brand glyph, sticky branded header, glassmorphic surfaces, Explorer Level gamification ring, an inescapable central "Tara Na!" generation FAB, and full PWA offline support.
+The current frontend follows the "Aero-Glass" mobile-first design system: a continuous-line bird brand glyph, sticky branded header, glassmorphic surfaces, Explorer Level gamification ring, an inescapable central "Tara Na!" generation FAB, light/dark theme persistence, and full PWA offline support.
 
 Core Product Features
 
@@ -22,14 +22,18 @@ Core Product Features
   - DELETE /api/account (multi-stage destructive delete protocol requiring the phrase "delete my account")
 
 2. Guided Trip Wizard (Tara Na!)
-- Six-phase React wizard styled as a full-screen modal that takes over the viewport (the bottom nav is hidden on /generate).
-- Phase 1 — Destination: massive serif input with Surprise-Me random selector tied to the PH destination list.
-- Phase 2 — Temporal Horizon: day counts (2/3/5/7/10) + optional start date, plus a non-blocking typhoon-corridor warning when the date falls in Jun–Nov for high-risk provinces.
-- Phase 3 — The Flock: visual companion cards (Solo, Couple, Family/Kids, Friends, Seniors) + pacing + transport selectors.
-- Phase 4 — Resource Tier: categorical budget pills (Backpacker / Comfort / Luxury) + optional accommodation anchor.
-- Phase 5 — Vibe Weighting: up to three "vibe bubbles" (food, beach, nature, heritage, nightlife). Selection order is preserved and visually scales the bubble — the order maps to backend weight priority.
-- Phase 6 — Generative Incubation: branded loader (soaring bird animation across stylized Philippine islands) that cycles through dynamic backend-progress copy while /api/generate is awaited.
+- Nine-phase React wizard styled as a full-screen modal that takes over the viewport (the bottom nav is hidden on /generate).
+- Phase 1 — The Flock: choose solo planning or open a multiplayer voting lobby that friends can join by code.
+- Phase 2 — Destination: massive serif input with Surprise-Me random selector tied to the PH destination list.
+- Phase 3 — Temporal Horizon: day counts (2/3/5/7/10) + optional start date, plus a non-blocking typhoon-corridor warning when the date falls in Jun-Nov for high-risk provinces.
+- Phase 4 — Companions: visual companion cards (Solo, Couple, Family/Kids, Friends, Seniors).
+- Phase 5 — Pacing & Transport: PacingSlider + TransportPicker controls calibrate activity density and transit assumptions.
+- Phase 6 — Resource Tier: categorical budget pills (Backpacker / Comfort / Luxury) + optional accommodation anchor.
+- Phase 7 — Vibe Weighting: up to three "vibe bubbles" (food, beach, nature, heritage, nightlife). Selection order is preserved and visually scales the bubble — the order maps to backend weight priority.
+- Phase 8 — Dealbreakers: hard constraints captured before generation so unsafe or unwanted activities can be filtered out by downstream planning.
+- Phase 9 — Generative Incubation: branded loader (soaring bird animation across stylized Philippine islands) that cycles through dynamic backend-progress copy while /api/generate is awaited.
 - Draft state is persisted to localStorage on every keystroke so progress survives reloads or navigation.
+- Voting lobby resolutions are written back into the same wizard state, so the solo /api/generate path remains the final generation path.
 
 3. Personalized Itinerary Generation
 - Backend geocodes the destination via Mapbox.
@@ -57,7 +61,14 @@ Core Product Features
 - Users mark places as "best pick" or "not ideal".
 - Feedback is stored for ML training.
 
-8. Saved Trips & My Trips Vault
+8. The Flock: Friends, Collaboration, and Voting
+- Profile includes a Friends & collaborators hub for searching users, sending friend requests, accepting/declining incoming requests, and removing friends.
+- Tara Na! supports pre-generation voting rooms. Hosts create a session code, participants join, vote on destination, trip length, pacing, transport, budget, vibes, and dealbreakers, then the host resolves majority answers into the wizard draft.
+- Itinerary pages show a FlockCluster of owner/collaborators with online presence. Presence is refreshed through a lightweight heartbeat rather than websockets.
+- Owners can invite friends as itinerary collaborators from the in-trip InviteCompanionSheet.
+- Trip activity events are persisted and polled to power collaborative toast notifications such as reordered days, swapped stops, and memory additions.
+
+9. Saved Trips & My Trips Vault
 - Backend stores generated itineraries.
 - Frontend keeps the last trip in localStorage and can fetch saved trips.
 - /my-trips ("My Journeys" / "Trip Vault") renders a sticky segmented controller with four lifecycle tabs (Upcoming / Active / Past / Drafts) and real-time count badges.
@@ -70,12 +81,20 @@ Core Product Features
 - Sort & filter pill supports Newest/Oldest, Travel-date soonest, Destination A–Z, and Budget low→high orderings.
 - Intelligent empty states per tab render a CTA back to the central Tara Na! flow.
 
-9. Device Push Notifications
+10. Interactive Itinerary Workspace
+- /itinerary renders a granular day selector, a time-blocked vertical timeline, and the Mapbox view in sync.
+- Timeline cards support map focus, day reordering, stop lock/unlock, stop swap, "best pick" / "not ideal" feedback, and start-time adjustment through a bottom sheet.
+- Travel-time blocks are computed in frontend/src/lib/timeBlocks.js and reused by both the timeline and PDF export.
+- Interactive Memory Log allows collaborators to attach note/photo memories to saved itinerary items.
+- Apex Hotel Recommendation Engine returns a cached hotel/basecamp suggestion per day near the final stop, with refresh support and booking search link.
+- Printable Souvenir PDF export builds a self-contained A4 HTML document in a hidden iframe, including timeline blocks, metadata, and hotel anchors, then opens the browser print flow.
+
+11. Device Push Notifications
 - Firebase Cloud Messaging sends weather alerts to registered devices.
 - Frontend registers the FCM token after permission.
 - Backend stores tokens and dispatches alerts.
 
-10. Dashboard / Home Experience (Aero-Glass)
+12. Dashboard / Home Experience (Aero-Glass)
 - Sticky branded global header: continuous-line bird glyph + "Tara!" wordmark, time-aware greeting, Explorer Level avatar ring with derived level chip (Novice Flier → Elite Wanderer), pulsing notification bell with red-dot badge.
 - Search trigger pops a full-screen Omni-Search overlay containing recent searches, trending vibe tags, quick regions (Luzon/Visayas/Mindanao/Metro Manila), and a live filtered destination list.
 - Mood filter pills (Nature, Food, Beach, Culture, Nightlife) reshape downstream lists.
@@ -83,12 +102,12 @@ Core Product Features
 - Live Monitor banner is hidden by default and only drops in when smart-suggestion endpoints surface a weather alert — featuring an "Apply Smart Fix" CTA that pings the ML reranker through /itinerary/:id.
 - Active trip progress bar, Quick Glance trip carousel with lifecycle chips, image-style Latest Discoveries carousel, Trending Destinations social-proof grid, Travel Stats gamification card (provinces explored fraction, days planned, next countdown), and a "For You" feed with tap-to-reveal "Why this?" reason badges.
 
-11. Discover Tab
+13. Discover Tab
 - Dual-state view controller toggles between a Spatial map (stylized Philippine board with algorithmic smart pins whose size + color reflect ML relevance) and a Thematic feed (image-style cards organized in semantic rows: Trending with your flock, Curated by vibe, Off the beaten path).
 - Floating Omni-Filter command matrix lets users stack Region + Vibe + Weather filters with a single tap.
 - "Anchor & Fly" Bottom Sheet modal: tapping any pin or feed card halts browsing without leaving the page, surfaces logistics chips and a hero block, and presents a single "Build a journey around this" CTA that prefills the wizard via saveWizardDraft and routes to /generate.
 
-12. Profile Tab (Digital Twin Command Center)
+14. Profile Tab (Digital Twin Command Center)
 - Identity header: Explorer ring avatar, dynamic level label, member-since timestamp, email.
 - Inline editable display name (PATCH /api/profile).
 - Algorithmic Preference Tuning Matrix:
@@ -96,10 +115,12 @@ Core Product Features
   - Companion Persona Vector — multi-select chips (Solo, Couple, Family/Kids, Friends, Seniors, Corporate).
   - Experiential Vibe Tuning Array — sliders for Culinary, Beach, Nature, Heritage, Nightlife. Debounced POSTs to /profile/preferences.
 - Security & hardware integration row with biometric authentication toggle (persisted) + active-session indicator.
+- Appearance card persists Light/Dark color mode to localStorage and applies it through documentElement data-theme/color-scheme.
+- The Flock card manages friends, pending requests, outgoing requests, and user search from the profile surface.
 - PWA Memory & Cloud Sync Hub: storage allocation bar fed by navigator.storage.estimate(), Purge Local Cache (clears caches API entries), and Force Cloud Sync (re-pulls itineraries + summary).
 - Travel summary card, Help/Privacy/Terms/Logout rows, and a destructive Delete Account protocol that requires typing "delete my account" verbatim and confirms through a Bottom Sheet before calling DELETE /api/account.
 
-13. PWA Launch / Offline UX
+15. PWA Launch / Offline UX
 - index.html now renders an inline pre-paint splash (gradient + "Tara!" wordmark) that fades out on window load — no white flash when launching from the home-screen icon.
 - React renders an additional LaunchSplash that fades after 1.5 seconds to mask the JS hydration window.
 - OfflineIndicator drops in from the top of the viewport only when navigator reports offline, and disappears on reconnect.
@@ -116,7 +137,7 @@ Frontend Layer
   - AuthPage
   - DashboardPage (Aero-Glass home)
   - MyTripsPage (Trip Vault with lifecycle segmentation)
-  - TravelWizard (Tara Na! 6-phase modal)
+  - TravelWizard (Tara Na! 9-phase modal with optional voting lobby)
   - DiscoverPage (Spatial map / Thematic feed + Anchor & Fly)
   - ProfilePage (Digital Twin command center)
   - ItineraryPage (per-trip itinerary + map)
@@ -124,12 +145,32 @@ Frontend Layer
   - BottomNav.jsx — floating glass nav with center Tara Na! FAB; auto-hides on auth + generator routes.
   - BrandLogo.jsx — bird-in-flight glyph + Tara! wordmark.
   - Avatar.jsx — Explorer Level conic-gradient ring + level chip.
+  - Icon.jsx — centralized inline icon set for the feature surfaces.
+  - PageSkeleton.jsx — route-specific loading skeletons for saved itinerary fetches and heavy views.
+  - FlockCluster.jsx — collaborator avatar stack with online state.
+  - InviteCompanionSheet.jsx — friend search/request/collaborator invite bottom sheet.
   - SearchOverlay.jsx — full-screen Omni-Search.
   - BottomSheet.jsx — Anchor & Fly / confirmation modal pattern.
   - OfflineIndicator.jsx — drop-down PWA offline banner.
+- Itinerary-specific components in frontend/src/components/itinerary/:
+  - DaySelector.jsx — segmented day navigation for the itinerary workspace.
+  - VerticalTimeline.jsx — time-blocked stop rail with action chips.
+  - TimeAdjustSheet.jsx — bottom-sheet start-time adjustment UI.
+  - MemoryLogSheet.jsx — photo/note memory capture for itinerary items.
+  - HotelCard.jsx — per-day Apex hotel recommendation surface.
+- Wizard-specific components in frontend/src/components/wizard/:
+  - VotingLobby.jsx — multiplayer pre-generation voting room.
+  - PacingSlider.jsx — visual pacing selector.
+  - TransportPicker.jsx — transport mode selector.
+  - DealbreakersGrid.jsx — hard-constraint selector.
 - lib/apiClient.js — centralized fetch wrapper with normalized error messages.
 - lib/tripsApi.js — trip-focused helpers (getSavedItineraries, getDashboardSummary, getDiscoverFeed, getSmartSuggestion, updateTripStartDate, deleteItinerary, duplicateItinerary).
 - lib/profileApi.js — profile and preferences helpers (getProfile, updateProfile, updateProfilePreferences, deleteAccount).
+- lib/socialApi.js — friends, collaborators, vote sessions, memories, and hotel helper calls.
+- lib/timeBlocks.js — shared schedule/time-block computations for timeline + PDF export.
+- lib/pdfExport.js — self-contained printable itinerary/PDF export via browser print.
+- lib/theme.js — light/dark theme detection, application, and persistence.
+- lib/modalActivity.js — global modal surface activity registry.
 - lib/haptics.js — Web Vibration API micro-haptics (tap / success / warning).
 - lib/storage.js — wizard/trip/profile/discover-search localStorage helpers.
 
@@ -159,17 +200,45 @@ Backend Layer
   - GET /api/itineraries / GET /api/itineraries/<id>
   - DELETE /api/itineraries/<id> (new — used by My Trips quick action)
   - POST /api/itineraries/<id>/duplicate (new — clones a trip into a Draft for the user)
+- webapp/routes/social_routes.py
+  - GET /api/friends/search
+  - GET /api/friends
+  - POST /api/friends/requests
+  - PATCH /api/friends/requests/<friendship_id>
+  - DELETE /api/friends/<friend_id>
+  - GET / POST /api/itineraries/<id>/collaborators
+  - DELETE /api/itineraries/<id>/collaborators/<user_id>
+  - POST /api/itineraries/<id>/presence
+  - GET / POST /api/itineraries/<id>/activity
+  - POST /api/vote-sessions, POST /api/vote-sessions/join
+  - GET /api/vote-sessions/<id>, POST /api/vote-sessions/<id>/vote, /advance, /resolve
+  - GET /api/itineraries/<id>/items/<item_id>/memories
+  - GET /api/itineraries/<id>/memories
+  - POST /api/itineraries/<id>/items/<item_id>/memories
+  - DELETE /api/memories/<memory_id>
+  - GET /api/itineraries/<id>/hotels/<day_number>
 - webapp/services/database.py adds:
   - ensure_user_preference_columns() — defensively adds default_budget, companion_vector, vibe_weights, biometric_enabled, created_at usage to users.
   - update_user_preferences(user_id, …)
   - delete_user_account(user_id)
   - delete_itinerary_for_user(user_id, itinerary_id)
   - duplicate_itinerary_for_user(user_id, itinerary_id) — re-creates the trip and its items in a brand-new Draft row.
+- webapp/services/social.py owns all collaboration persistence:
+  - ensure_social_schema() — idempotently creates the social/collaboration tables.
+  - Friend search/request/list/remove helpers.
+  - Itinerary access checks, collaborator management, presence heartbeat, and activity log writes.
+  - Voting session create/join/vote/advance/resolve aggregation.
+  - Memory log add/list/delete helpers.
+  - Hotel recommendation cache generation and refresh.
 
 Data Layer
 - MySQL schema:
   - users (now: default_budget, companion_vector, vibe_weights, biometric_enabled in addition to baseline columns)
   - places, itineraries (with trip_start_date), itinerary_items, trip_feedback, weather_alerts, push_tokens
+  - friendships, trip_collaborators, trip_activity
+  - vote_sessions, vote_session_participants, vote_session_responses
+  - itinerary_item_memories
+  - hotel_recommendations
 - All preference and itinerary writes are parameterized; cascading deletes preserve relational integrity.
 
 External Services
@@ -183,17 +252,35 @@ Data Flow (Updated)
 Authentication: standard JWT issuance unchanged.
 
 Trip Creation:
-1. Wizard collects 6 phases of preferences (including optional trip_start_date and up to 3 ranked vibes).
-2. POST /api/generate persists the trip + items, applies ML reranker, and returns the itinerary plus dest_coords.
-3. Frontend stores the trip in localStorage and navigates to /itinerary.
+1. Wizard collects 9 phases of preferences (solo/flock mode, optional trip_start_date, up to 3 ranked vibes, and dealbreakers).
+2. If flock mode is used, the voting lobby resolves group answers into the same wizard state.
+3. POST /api/generate persists the trip + items, applies ML reranker, and returns the itinerary plus dest_coords.
+4. Frontend stores the trip in localStorage and navigates to /itinerary.
+
+Voting Room:
+1. Host creates a vote session via POST /api/vote-sessions and shares the generated code/link.
+2. Participants join via POST /api/vote-sessions/join and poll GET /api/vote-sessions/<id> every few seconds.
+3. Participants submit per-question votes; host advances steps and resolves the session.
+4. Backend aggregates majority decisions into resolved_payload; frontend applies it to the wizard draft.
 
 My Trips:
 1. Frontend fetches /api/itineraries, derives lifecycle states client-side (today vs trip_start_date + num_days).
 2. Quick actions call DELETE /api/itineraries/<id>, POST /api/itineraries/<id>/duplicate, or PATCH /api/itineraries/<id>/start-date.
 
+Itinerary Collaboration:
+1. Opening a saved itinerary fetches owner/collaborator state and starts a 25-second presence heartbeat.
+2. The page polls activity every 6 seconds and shows collaborator toasts for remote actions.
+3. Owners invite friends as collaborators; collaborators can access itinerary-scoped social endpoints through can_access_itinerary().
+4. Reorder, swap, lock, feedback, memory, and hotel interactions update local UI first where safe, then persist through the API.
+
 Profile Preferences:
 1. Mounting fetches /api/profile (now returns default_budget, companion_vector, vibe_weights, biometric_enabled, member_since).
 2. Tuning controls debounce-PATCH /api/profile/preferences so the ML reranker reflects new weights instantly.
+
+Appearance:
+1. App boot applies getInitialTheme() from localStorage or system preference.
+2. Profile color-mode toggle persists "light" or "dark" under anotara:theme.
+3. CSS theme variables read documentElement[data-theme] and documentElement.style.colorScheme.
 
 Account Deletion:
 1. User opens destructive protocol bottom sheet.
@@ -205,8 +292,20 @@ Database Schema Highlights
 - users has default_budget, companion_vector (JSON), vibe_weights (JSON), biometric_enabled.
 - trip_feedback uses rating_type ("Best Pick" / "Not Ideal").
 - weather_alerts and push_tokens tables back the live monitor + FCM features.
+- friendships stores pending/accepted friend relationships with requester/addressee ownership.
+- trip_collaborators grants itinerary access and stores role/last_seen_at for presence.
+- trip_activity stores JSON activity payloads used by collaborative toast notifications.
+- vote_sessions, vote_session_participants, and vote_session_responses back the Tara Na! voting lobby.
+- itinerary_item_memories stores note/photo memories as text/base64 payloads attached to itinerary items.
+- hotel_recommendations caches one hotel/basecamp recommendation per itinerary/day.
 
 Recent Changelog
+- Added The Flock social layer: friends, pending requests, itinerary collaborators, presence heartbeats, and activity polling.
+- Added Tara Na! pre-generation voting rooms with join codes, live polling, per-question votes, host step advancement, and resolved wizard payloads.
+- Upgraded /itinerary into an interactive workspace with DaySelector, VerticalTimeline, TimeAdjustSheet, MemoryLogSheet, HotelCard, collaborator avatars, and PDF export.
+- Added social_routes.py + social.py with idempotent ensure_social_schema() and the MySQL tables for friendships, collaborators, activity logs, vote sessions, memories, and hotel recommendation caching.
+- Added a Profile color-mode toggle with persisted light/dark theme support through frontend/src/lib/theme.js and CSS data-theme variables.
+- Added PageSkeleton, Icon, FlockCluster, InviteCompanionSheet, wizard-specific controls, and itinerary-specific components.
 - Added BrandLogo, Avatar (Explorer Level ring), BottomSheet, SearchOverlay, and OfflineIndicator shared primitives.
 - Redesigned Dashboard, My Trips, Trip Generator wizard, Discover, and Profile to follow the Aero-Glass spec end-to-end while preserving every existing flow.
 - Hid the bottom nav on /generate so the wizard becomes a true full-screen modal.
@@ -217,12 +316,19 @@ Recent Changelog
 - Added a Web Vibration micro-haptics layer used across primary interactions.
 
 Current Limitations
+- Collaboration is near-real-time polling/heartbeat based; websocket conflict resolution is not implemented yet.
+- Memory photos are stored as LONGTEXT/base64 payloads; production object storage would be better for large media.
+- Hotel recommendations are curated from the local places catalog and cached per day; they are not yet backed by a live hotel availability API.
+- PDF export relies on the browser print dialog rather than a server-rendered/headless PDF pipeline.
 - The Spatial map view on Discover is a stylized smart-pin rendering rather than a full Mapbox/Geoapify experience (the live Mapbox screen remains on /itinerary).
 - Biometric toggle is a persisted preference flag; the WebAuthn handshake is wired into the API contract but not yet bound to authentication actions.
 - ML reranker stays a reranker for now — feedback loops continue to feed it over time.
 - Travel-time between stops is not estimated explicitly.
 
 Suggested Next Improvements
+- Replace polling collaboration with websocket/SSE channels for presence, activity, and voting updates.
+- Move photo memories to object storage and keep only metadata/URLs in MySQL.
+- Connect Apex Hotel Recommendation to a live accommodation provider with price/availability checks.
 - Code-split the Mapbox bundle behind a dynamic import on /itinerary to shrink first paint.
 - Bind biometric toggle to WebAuthn registration + assertion before mutating-itinerary requests.
 - Promote the Smart Suggestion CTA into a one-tap rerank action that runs server-side without a navigation.
@@ -235,10 +341,12 @@ Repository Map (Updated)
 - train_model.py
 - webapp/routes/auth_routes.py
 - webapp/routes/trip_routes.py
+- webapp/routes/social_routes.py
 - webapp/services/database.py
 - webapp/services/trip_planning.py
 - webapp/services/pitch_generator.py
 - webapp/services/llm_itinerary.py
+- webapp/services/social.py
 - webapp/services/weather_monitor.py
 - frontend/src/components/AuthPage.jsx
 - frontend/src/components/DashboardPage.jsx
@@ -251,12 +359,30 @@ Repository Map (Updated)
 - frontend/src/components/common/BottomNav.{jsx,css}
 - frontend/src/components/common/BrandLogo.jsx
 - frontend/src/components/common/Avatar.jsx
+- frontend/src/components/common/Icon.jsx
+- frontend/src/components/common/PageSkeleton.jsx
+- frontend/src/components/common/FlockCluster.jsx
+- frontend/src/components/common/InviteCompanionSheet.jsx
 - frontend/src/components/common/BottomSheet.jsx
 - frontend/src/components/common/SearchOverlay.jsx
 - frontend/src/components/common/OfflineIndicator.jsx
+- frontend/src/components/itinerary/DaySelector.jsx
+- frontend/src/components/itinerary/VerticalTimeline.jsx
+- frontend/src/components/itinerary/TimeAdjustSheet.jsx
+- frontend/src/components/itinerary/MemoryLogSheet.jsx
+- frontend/src/components/itinerary/HotelCard.jsx
+- frontend/src/components/wizard/VotingLobby.jsx
+- frontend/src/components/wizard/PacingSlider.jsx
+- frontend/src/components/wizard/TransportPicker.jsx
+- frontend/src/components/wizard/DealbreakersGrid.jsx
 - frontend/src/lib/apiClient.js
 - frontend/src/lib/tripsApi.js
 - frontend/src/lib/profileApi.js
+- frontend/src/lib/socialApi.js
+- frontend/src/lib/timeBlocks.js
+- frontend/src/lib/pdfExport.js
+- frontend/src/lib/theme.js
+- frontend/src/lib/modalActivity.js
 - frontend/src/lib/haptics.js
 - frontend/src/lib/storage.js
 - frontend/src/lib/config.js
@@ -267,4 +393,4 @@ Repository Map (Updated)
 
 Summary
 
-The Anotara app now ships with a fully redesigned, mobile-first Aero-Glass experience across Dashboard, My Trips, Tara Na!, Discover, and Profile. Every flow is functional end-to-end, backed by parameterized MySQL queries and the centralized API layer. The PWA degrades gracefully when offline, surfaces a branded splash on launch, and bottoms the design system on a single set of shared primitives so future surfaces can be assembled quickly.
+The Anotara app now ships with a fully redesigned, mobile-first Aero-Glass experience across Dashboard, My Trips, Tara Na!, Discover, Profile, and the itinerary workspace. Every core flow is functional end-to-end, backed by parameterized MySQL queries, centralized API helpers, and dedicated service-layer modules. The latest collaboration layer adds friends, voting rooms, itinerary collaborators, activity toasts, memories, hotel suggestions, printable exports, and persisted light/dark theming while preserving the PWA's graceful offline behavior and branded launch experience.
