@@ -9,6 +9,7 @@ from config import Config
 from webapp.extensions import bcrypt, jwt
 from webapp.routes.auth_routes import auth_bp
 from webapp.routes.trip_routes import trip_bp
+from webapp.routes.social_routes import social_bp
 from webapp.services.trip_planning import ml_columns, ml_model
 from webapp.services.weather_monitor import run_weather_monitor
 
@@ -21,6 +22,7 @@ jwt.init_app(app)
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(trip_bp)
+app.register_blueprint(social_bp)
 
 # This command allows running the weather monitor from the command line with `flask weather-monitor`.
 @app.cli.command('weather-monitor')

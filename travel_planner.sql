@@ -73,3 +73,118 @@ CREATE TABLE IF NOT EXISTS trip_feedback (
     FOREIGN KEY (user_id)      REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (place_id)     REFERENCES places(id) ON DELETE CASCADE
 );
+
+-- ------------------------------------------------------------------
+-- The Flock: social + collaboration + voting + memory + hotel tables
+-- ------------------------------------------------------------------
+
+-- Bidirectional friend graph (status: pending / accepted / blocked)
+CREATE TABLE IF NOT EXISTS friendships (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    requester_id  INT NOT NULL,
+    addressee_id  INT NOT NULL,
+    status        VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_friend_pair (requester_id, addressee_id),
+    FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Per-itinerary collaborators (owner is implicit via itineraries.user_id)
+CREATE TABLE IF NOT EXISTS trip_collaborators (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    itinerary_id  INT NOT NULL,
+    user_id       INT NOT NULL,
+    role          VARCHAR(20) NOT NULL DEFAULT 'editor',
+    invited_by    INT,
+    accepted_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_collab_pair (itinerary_id, user_id),
+    FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Activity log used by the live "Maria removed Willy's Rock" toasts
+CREATE TABLE IF NOT EXISTS trip_activity (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    itinerary_id  INT NOT NULL,
+    user_id       INT NOT NULL,
+    action        VARCHAR(40) NOT NULL,
+    payload       JSON,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Tara Na! pre-generation voting room
+CREATE TABLE IF NOT EXISTS vote_sessions (
+    id               INT AUTO_INCREMENT PRIMARY KEY,
+    host_id          INT NOT NULL,
+    session_code     VARCHAR(12) NOT NULL UNIQUE,
+    status           VARCHAR(20) NOT NULL DEFAULT 'lobby',
+    current_step     INT NOT NULL DEFAULT 1,
+    expires_at       DATETIME NULL,
+    resolved_payload JSON NULL,
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (host_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS vote_session_participants (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    session_id   INT NOT NULL,
+    user_id      INT NOT NULL,
+    joined_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_participant (session_id, user_id),
+    FOREIGN KEY (session_id) REFERENCES vote_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS vote_session_responses (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    session_id   INT NOT NULL,
+    user_id      INT NOT NULL,
+    question_key VARCHAR(40) NOT NULL,
+    response     JSON,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_vote_response (session_id, user_id, question_key),
+    FOREIGN KEY (session_id) REFERENCES vote_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Interactive Memory Log — photos + notes per itinerary block
+CREATE TABLE IF NOT EXISTS itinerary_item_memories (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    itinerary_id  INT NOT NULL,
+    item_id       INT NOT NULL,
+    user_id       INT NOT NULL,
+    kind          VARCHAR(20) NOT NULL,
+    note          TEXT,
+    image_data    LONGTEXT,
+    mime_type     VARCHAR(40),
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Apex Hotel Recommendation Engine cache
+CREATE TABLE IF NOT EXISTS hotel_recommendations (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    itinerary_id   INT NOT NULL,
+    day_number     INT NOT NULL,
+    name           VARCHAR(180) NOT NULL,
+    pitch          TEXT,
+    rating         DECIMAL(3,1) DEFAULT 0,
+    price_band     VARCHAR(20) DEFAULT 'comfort',
+    est_price_php  INT DEFAULT 0,
+    latitude       DECIMAL(10, 7),
+    longitude      DECIMAL(10, 7),
+    booking_url    VARCHAR(400),
+    thumbnail_url  VARCHAR(400),
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_hotel_per_day (itinerary_id, day_number),
+    FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE
+);

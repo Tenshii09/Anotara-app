@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { API_BASE_URL, TOKEN_STORAGE_KEY } from "../lib/config";
 import {
@@ -11,24 +11,30 @@ import {
 import { tapHaptic, successHaptic, warningHaptic } from "../lib/haptics";
 import { PH_DESTINATIONS } from "../data/phDestinations";
 import BrandLogo from "./common/BrandLogo";
+import Icon from "./common/Icon";
+import PacingSlider from "./wizard/PacingSlider";
+import TransportPicker from "./wizard/TransportPicker";
+import DealbreakersGrid from "./wizard/DealbreakersGrid";
+import VotingLobby from "./wizard/VotingLobby";
 
-// Each wizard step deliberately scoped to one decision so the user stays in
-// flow.  Step order: Destination → Dates → Companions → Budget → Vibes → Generate.
 const STEPS = [
-  { id: 1, kicker: "Phase 1 · Destination", title: "Where are we flying to?" },
-  { id: 2, kicker: "Phase 2 · Temporal Horizon", title: "When are you flying?" },
-  { id: 3, kicker: "Phase 3 · The Flock", title: "Who is flying with you?" },
-  { id: 4, kicker: "Phase 4 · Resource Tier", title: "Pick your travel tier" },
-  { id: 5, kicker: "Phase 5 · Vibe Weighting", title: "What's your perfect vibe?" },
-  { id: 6, kicker: "Phase 6 · Generative Incubation", title: "Ready for take-off" },
+  { id: 1, kicker: "Phase 1 · The Flock", title: "Plan solo or with a flock?" },
+  { id: 2, kicker: "Phase 2 · Destination", title: "Where are we flying to?" },
+  { id: 3, kicker: "Phase 3 · Temporal Horizon", title: "When are you flying?" },
+  { id: 4, kicker: "Phase 4 · Companions", title: "Who is flying with you?" },
+  { id: 5, kicker: "Phase 5 · Pacing & Transport", title: "Set the trip's energy" },
+  { id: 6, kicker: "Phase 6 · Resource Tier", title: "Pick your travel tier" },
+  { id: 7, kicker: "Phase 7 · Vibe Weighting", title: "What's your perfect vibe?" },
+  { id: 8, kicker: "Phase 8 · Dealbreakers", title: "Any hard constraints?" },
+  { id: 9, kicker: "Phase 9 · Generative Incubation", title: "Ready for take-off" },
 ];
 
 const COMPANION_OPTIONS = [
-  { value: "Solo", label: "Solo", icon: "🧳" },
-  { value: "Couple", label: "Couple", icon: "💞" },
-  { value: "Family_Kids", label: "Family / Kids", icon: "👨‍👩‍👧" },
-  { value: "Friends", label: "Friends", icon: "🎉" },
-  { value: "Seniors", label: "Seniors", icon: "🌿" },
+  { value: "Solo", label: "Solo", icon: "user" },
+  { value: "Couple", label: "Couple", icon: "heart" },
+  { value: "Family_Kids", label: "Family / Kids", icon: "users" },
+  { value: "Friends", label: "Friends", icon: "users" },
+  { value: "Seniors", label: "Seniors", icon: "leaf" },
 ];
 
 const BUDGET_OPTIONS = [
@@ -37,25 +43,12 @@ const BUDGET_OPTIONS = [
   { value: "high", label: "Luxury", helper: "Premium resorts & private tours" },
 ];
 
-const PACING_OPTIONS = [
-  { value: "Relaxed", label: "Relaxed" },
-  { value: "Moderate", label: "Moderate" },
-  { value: "Packed", label: "Packed" },
-];
-
-const TRANSPORT_OPTIONS = [
-  { value: "Public", label: "Public transit" },
-  { value: "Private_Car", label: "Private car" },
-  { value: "Motorcycle", label: "Motorcycle" },
-  { value: "Walking", label: "Walking" },
-];
-
 const VIBE_OPTIONS = [
-  { value: "food", label: "Food", icon: "🍜" },
-  { value: "beach", label: "Beach", icon: "🌊" },
-  { value: "nature", label: "Nature", icon: "⛰️" },
-  { value: "museums", label: "Heritage", icon: "🏛️" },
-  { value: "nightlife", label: "Nightlife", icon: "🌙" },
+  { value: "food", label: "Food", icon: "fork" },
+  { value: "beach", label: "Beach", icon: "image" },
+  { value: "nature", label: "Nature", icon: "leaf" },
+  { value: "museums", label: "Heritage", icon: "shield" },
+  { value: "nightlife", label: "Nightlife", icon: "vibe" },
 ];
 
 const LOADING_MESSAGES = [
@@ -66,9 +59,6 @@ const LOADING_MESSAGES = [
   "Finalizing your perfect journey...",
 ];
 
-// Provinces known to sit in the western Pacific typhoon corridor between
-// June and November.  Used purely for an inline, non-blocking heuristic warning
-// so the user can adjust before generating — not an authoritative weather call.
 const HIGH_TYPHOON_PROVINCES = new Set(
   [
     "albay",
@@ -110,14 +100,31 @@ function getInitialDraft() {
     transportMode: draft.transportMode || "Public",
     accommodation: draft.accommodation || "",
     tripStartDate: draft.tripStartDate || "",
+    dealbreakers: Array.isArray(draft.dealbreakers) ? draft.dealbreakers : [],
   };
+}
+
+function decodeJwtPayload(token) {
+  if (!token || typeof token !== "string" || token.split(".").length !== 3) return null;
+  try {
+    const payload = token.split(".")[1];
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
 }
 
 export default function TravelWizard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const initial = useMemo(() => getInitialDraft(), []);
   const [step, setStep] = useState(1);
 
+  const [planMode, setPlanMode] = useState(() =>
+    searchParams.get("lobby") ? "flock" : "solo",
+  );
   const [destination, setDestination] = useState(initial.destination);
   const [numDays, setNumDays] = useState(initial.numDays);
   const [preferences, setPreferences] = useState(initial.preferences);
@@ -127,9 +134,13 @@ export default function TravelWizard() {
   const [transportMode, setTransportMode] = useState(initial.transportMode);
   const [accommodation, setAccommodation] = useState(initial.accommodation);
   const [tripStartDate, setTripStartDate] = useState(initial.tripStartDate);
+  const [dealbreakers, setDealbreakers] = useState(initial.dealbreakers);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+
+  const tokenPayload = useMemo(() => decodeJwtPayload(localStorage.getItem(TOKEN_STORAGE_KEY)), []);
+  const currentUserId = tokenPayload?.sub ? Number(tokenPayload.sub) : null;
 
   useEffect(() => {
     saveWizardDraft({
@@ -142,6 +153,7 @@ export default function TravelWizard() {
       transportMode,
       accommodation,
       tripStartDate,
+      dealbreakers,
     });
   }, [
     destination,
@@ -153,6 +165,7 @@ export default function TravelWizard() {
     transportMode,
     accommodation,
     tripStartDate,
+    dealbreakers,
   ]);
 
   useEffect(() => {
@@ -188,8 +201,22 @@ export default function TravelWizard() {
     setDestination(random);
   }
 
+  function applyResolvedLobby(resolved) {
+    if (!resolved || typeof resolved !== "object") return;
+    if (resolved.destination) setDestination(resolved.destination);
+    if (resolved.numDays) setNumDays(Number(resolved.numDays));
+    if (resolved.pacing_style) setPacingStyle(resolved.pacing_style);
+    if (resolved.transport_mode) setTransportMode(resolved.transport_mode);
+    if (resolved.budget) setBudget(resolved.budget);
+    if (Array.isArray(resolved.preferences)) setPreferences(resolved.preferences);
+    if (Array.isArray(resolved.dealbreakers)) setDealbreakers(resolved.dealbreakers);
+    setPlanMode("solo");
+    setStep(STEPS.length);
+    successHaptic();
+  }
+
   function goNext() {
-    if (step === 1 && !destination.trim()) {
+    if (step === 2 && !destination.trim()) {
       setError("Please choose a destination first.");
       return;
     }
@@ -208,7 +235,7 @@ export default function TravelWizard() {
 
     if (!destination.trim()) {
       setError("Please choose a destination first.");
-      setStep(1);
+      setStep(2);
       return;
     }
 
@@ -238,6 +265,7 @@ export default function TravelWizard() {
           transport_mode: transportMode,
           accommodation,
           trip_start_date: tripStartDate || null,
+          dealbreakers,
         }),
       });
 
@@ -270,6 +298,7 @@ export default function TravelWizard() {
         transportMode,
         accommodation,
         tripStartDate: tripStartDate || null,
+        dealbreakers,
       };
 
       saveTripData(trip);
@@ -287,7 +316,7 @@ export default function TravelWizard() {
       <div className="wizard-topbar">
         <div className="wizard-topbar-inner">
           <button type="button" className="top-action-link" onClick={() => navigate("/dashboard")}>
-            ✕ Exit planner
+            <Icon name="close" size={16} /> Exit planner
           </button>
           <BrandLogo size={26} />
           <div className="step-badge">
@@ -313,7 +342,67 @@ export default function TravelWizard() {
             {step === 1 ? (
               <div>
                 <p className="wizard-subcopy" style={{ maxWidth: "56ch" }}>
-                  Type any province or city — or tap "Surprise Me!" to let the ML model pick a
+                  You can either build this plan solo or open a Tara Na! voting lobby and let your
+                  friends weigh in on destination, pacing, vibes, and dealbreakers in real time.
+                </p>
+
+                <div className="wizard-plan-mode" style={{ marginTop: 22 }}>
+                  <button
+                    type="button"
+                    className={`wizard-plan-mode__card${planMode === "solo" ? " is-active" : ""}`}
+                    onClick={() => {
+                      tapHaptic();
+                      setPlanMode("solo");
+                    }}
+                  >
+                    <Icon name="user" size={28} tone={planMode === "solo" ? "accent" : "default"} />
+                    <h3 className="serif">Plan solo</h3>
+                    <p className="muted">Just you. Fastest path to a generated itinerary.</p>
+                  </button>
+                  <button
+                    type="button"
+                    className={`wizard-plan-mode__card${planMode === "flock" ? " is-active" : ""}`}
+                    onClick={() => {
+                      tapHaptic();
+                      setPlanMode("flock");
+                    }}
+                  >
+                    <Icon name="users" size={28} tone={planMode === "flock" ? "accent" : "default"} />
+                    <h3 className="serif">Plan with a flock</h3>
+                    <p className="muted">
+                      Spin up a voting lobby, share a code with friends, and let majority rule.
+                    </p>
+                  </button>
+                </div>
+
+                {planMode === "flock" ? (
+                  <VotingLobby
+                    currentUserId={currentUserId}
+                    onClose={() => setPlanMode("solo")}
+                    onResolved={(resolved) => applyResolvedLobby(resolved)}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      marginTop: 28,
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button className="btn-luxury" type="button" onClick={goNext}>
+                      Continue <Icon name="arrowRight" size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {step === 2 ? (
+              <div>
+                <p className="wizard-subcopy" style={{ maxWidth: "56ch" }}>
+                  Type any province or city — or tap "Surprise me" to let the ML model pick a
                   high-confidence destination from your travel history.
                 </p>
                 <div style={{ marginTop: 22 }}>
@@ -337,17 +426,20 @@ export default function TravelWizard() {
                   </datalist>
                 </div>
                 <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={goBack}>
+                    <Icon name="arrowLeft" size={16} /> Back
+                  </button>
                   <button className="btn-outline-luxury" type="button" onClick={handleSurpriseMe}>
-                    ✨ Surprise me
+                    <Icon name="sparkles" size={16} /> Surprise me
                   </button>
                   <button className="btn-luxury" type="button" onClick={goNext}>
-                    Continue →
+                    Continue <Icon name="arrowRight" size={16} />
                   </button>
                 </div>
               </div>
             ) : null}
 
-            {step === 2 ? (
+            {step === 3 ? (
               <div>
                 <p className="wizard-subcopy">
                   Pick a duration and an optional start date. We will quietly cross-check the
@@ -387,7 +479,9 @@ export default function TravelWizard() {
                 {typhoonWarning ? (
                   <article className="smart-suggestion-banner" style={{ marginTop: 18 }}>
                     <div>
-                      <h4>Heads up — typhoon corridor</h4>
+                      <h4>
+                        <Icon name="alert" size={16} /> Heads up — typhoon corridor
+                      </h4>
                       <p>
                         Your dates fall inside the western-Pacific typhoon corridor for{" "}
                         {destination}. Consider shifting a few weeks or padding indoor stops.
@@ -397,16 +491,16 @@ export default function TravelWizard() {
                 ) : null}
                 <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
                   <button className="btn-outline-luxury" type="button" onClick={goBack}>
-                    ← Back
+                    <Icon name="arrowLeft" size={16} /> Back
                   </button>
                   <button className="btn-luxury" type="button" onClick={goNext}>
-                    Continue →
+                    Continue <Icon name="arrowRight" size={16} />
                   </button>
                 </div>
               </div>
             ) : null}
 
-            {step === 3 ? (
+            {step === 4 ? (
               <div>
                 <p className="wizard-subcopy">
                   Who you travel with calibrates the safety matrix — we won't suggest a steep
@@ -423,51 +517,56 @@ export default function TravelWizard() {
                         setCompanionType(option.value);
                       }}
                     >
-                      <span className="companion-card__icon" aria-hidden="true">{option.icon}</span>
+                      <span className="companion-card__icon" aria-hidden="true">
+                        <Icon name={option.icon} size={28} tone={companionType === option.value ? "accent" : "default"} />
+                      </span>
                       <span className="companion-card__label">{option.label}</span>
                     </button>
                   ))}
                 </div>
-                <div style={{ marginTop: 22, display: "grid", gap: 12 }}>
-                  <div>
-                    <label className="field-label" htmlFor="pacingStyle">Pacing style</label>
-                    <select
-                      id="pacingStyle"
-                      className="auth-input"
-                      value={pacingStyle}
-                      onChange={(event) => setPacingStyle(event.target.value)}
-                    >
-                      {PACING_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label" htmlFor="transportMode">Transport mode</label>
-                    <select
-                      id="transportMode"
-                      className="auth-input"
-                      value={transportMode}
-                      onChange={(event) => setTransportMode(event.target.value)}
-                    >
-                      {TRANSPORT_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
                 <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
                   <button className="btn-outline-luxury" type="button" onClick={goBack}>
-                    ← Back
+                    <Icon name="arrowLeft" size={16} /> Back
                   </button>
                   <button className="btn-luxury" type="button" onClick={goNext}>
-                    Continue →
+                    Continue <Icon name="arrowRight" size={16} />
                   </button>
                 </div>
               </div>
             ) : null}
 
-            {step === 4 ? (
+            {step === 5 ? (
+              <div>
+                <p className="wizard-subcopy">
+                  Calibrate the trip's energy and how the flock will move around. Both decisions
+                  influence how strict the time-blocked schedule becomes.
+                </p>
+                <div style={{ marginTop: 22 }}>
+                  <label className="field-label">Pacing energy</label>
+                  <PacingSlider value={pacingStyle} onChange={setPacingStyle} />
+                </div>
+                <div style={{ marginTop: 22 }}>
+                  <label className="field-label">Transport mode</label>
+                  <TransportPicker value={transportMode} onChange={setTransportMode} />
+                </div>
+                {transportMode === "Public" ? (
+                  <p className="muted" style={{ marginTop: 12, fontSize: "0.88rem" }}>
+                    <Icon name="info" size={14} /> Public commute selected — we automatically pad
+                    transit buffers and avoid stacking too many stops per day.
+                  </p>
+                ) : null}
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={goBack}>
+                    <Icon name="arrowLeft" size={16} /> Back
+                  </button>
+                  <button className="btn-luxury" type="button" onClick={goNext}>
+                    Continue <Icon name="arrowRight" size={16} />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {step === 6 ? (
               <div>
                 <p className="wizard-subcopy">
                   Categorical tiers instead of exact peso amounts — less cognitive friction.
@@ -507,16 +606,16 @@ export default function TravelWizard() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
                   <button className="btn-outline-luxury" type="button" onClick={goBack}>
-                    ← Back
+                    <Icon name="arrowLeft" size={16} /> Back
                   </button>
                   <button className="btn-luxury" type="button" onClick={goNext}>
-                    Continue →
+                    Continue <Icon name="arrowRight" size={16} />
                   </button>
                 </div>
               </div>
             ) : null}
 
-            {step === 5 ? (
+            {step === 7 ? (
               <div>
                 <p className="wizard-subcopy">
                   Tap up to 3 vibe bubbles. The order you tap them weights how strongly the
@@ -535,8 +634,8 @@ export default function TravelWizard() {
                         onClick={() => toggleVibe(option.value)}
                         aria-pressed={isSelected}
                       >
-                        <span style={{ display: "grid", gap: 6 }}>
-                          <span style={{ fontSize: "1.7rem" }} aria-hidden="true">{option.icon}</span>
+                        <span style={{ display: "grid", gap: 6, justifyItems: "center" }}>
+                          <Icon name={option.icon} size={28} tone={isSelected ? "accent" : "default"} />
                           <span>{option.label}</span>
                         </span>
                         {isSelected ? <span className="vibe-bubble__order">{rank + 1}</span> : null}
@@ -549,16 +648,40 @@ export default function TravelWizard() {
                 </p>
                 <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
                   <button className="btn-outline-luxury" type="button" onClick={goBack}>
-                    ← Back
+                    <Icon name="arrowLeft" size={16} /> Back
                   </button>
                   <button className="btn-luxury" type="button" onClick={goNext}>
-                    Review & generate →
+                    Continue <Icon name="arrowRight" size={16} />
                   </button>
                 </div>
               </div>
             ) : null}
 
-            {step === 6 ? (
+            {step === 8 ? (
+              <div>
+                <p className="wizard-subcopy">
+                  Any hard constraints? Toggle as many as apply — these become AI dealbreakers.
+                </p>
+                <div style={{ marginTop: 18 }}>
+                  <DealbreakersGrid value={dealbreakers} onChange={setDealbreakers} />
+                </div>
+                <p className="muted" style={{ marginTop: 14, fontSize: "0.88rem" }}>
+                  {dealbreakers.length === 0
+                    ? "No dealbreakers — we'll suggest the broadest possible itinerary."
+                    : `${dealbreakers.length} constraint${dealbreakers.length === 1 ? "" : "s"} locked in.`}
+                </p>
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
+                  <button className="btn-outline-luxury" type="button" onClick={goBack}>
+                    <Icon name="arrowLeft" size={16} /> Back
+                  </button>
+                  <button className="btn-luxury" type="button" onClick={goNext}>
+                    Review & generate <Icon name="arrowRight" size={16} />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {step === 9 ? (
               <div>
                 <p className="wizard-subcopy">
                   Tap "Generate my journey" and we'll cross-reference Geoapify candidates,
@@ -595,9 +718,7 @@ export default function TravelWizard() {
                   </div>
                   <div className="summary-row">
                     <span className="muted">Transport</span>
-                    <span style={{ fontWeight: 800 }}>
-                      {TRANSPORT_OPTIONS.find((option) => option.value === transportMode)?.label || transportMode}
-                    </span>
+                    <span style={{ fontWeight: 800 }}>{transportMode}</span>
                   </div>
                   <div className="summary-row">
                     <span className="muted">Vibes</span>
@@ -610,16 +731,22 @@ export default function TravelWizard() {
                     </span>
                   </div>
                   <div className="summary-row">
+                    <span className="muted">Dealbreakers</span>
+                    <span style={{ fontWeight: 800, textAlign: "right" }}>
+                      {dealbreakers.length ? dealbreakers.join(" · ") : "None"}
+                    </span>
+                  </div>
+                  <div className="summary-row">
                     <span className="muted">Anchor</span>
                     <span style={{ fontWeight: 800, textAlign: "right" }}>{accommodation || "Not set"}</span>
                   </div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "center", marginTop: 28, gap: 12, flexWrap: "wrap" }}>
                   <button className="btn-outline-luxury" type="button" onClick={goBack} disabled={isSubmitting}>
-                    ← Back
+                    <Icon name="arrowLeft" size={16} /> Back
                   </button>
                   <button className="btn-luxury" type="button" onClick={handleGenerate} disabled={isSubmitting}>
-                    Generate my journey ✈️
+                    <Icon name="plane" size={16} /> Generate my journey
                   </button>
                 </div>
               </div>

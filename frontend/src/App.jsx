@@ -6,6 +6,7 @@ import ItineraryPage from "./components/ItineraryPage";
 import TravelWizard from "./components/TravelWizard";
 import MyTripsPage from "./components/MyTripsPage";
 import BottomNav from "./components/common/BottomNav";
+import BrandLogo from "./components/common/BrandLogo";
 import OfflineIndicator from "./components/common/OfflineIndicator";
 import DashboardPage from "./components/DashboardPage";
 import DiscoverPage from "./components/DiscoverPage";
@@ -48,7 +49,7 @@ function LaunchSplash() {
   return (
     <div className="app-splash" role="status" aria-label="Loading Ano Tara">
       <div className="app-splash__inner">
-        <span style={{ fontSize: "3rem" }} aria-hidden="true">✈️</span>
+        <BrandLogo size={56} showWordmark={false} />
         <h1 className="app-splash__title">Tara!</h1>
         <p className="muted" style={{ margin: 0 }}>Your Philippine journey is loading…</p>
       </div>

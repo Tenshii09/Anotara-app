@@ -76,7 +76,7 @@ export default function AuthPage({ initialMode = "login" }) {
         name: data.username || identifier || username || "Traveler",
       });
       navigate("/dashboard");
-    } catch (error) {
+    } catch {
       // Any network or backend failure ends up here.
       setMessage("Connection error.");
     }

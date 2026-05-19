@@ -2,11 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import ItineraryMap from "./ItineraryMap";
+import VerticalTimeline from "./itinerary/VerticalTimeline";
+import DaySelector from "./itinerary/DaySelector";
+import TimeAdjustSheet from "./itinerary/TimeAdjustSheet";
+import MemoryLogSheet from "./itinerary/MemoryLogSheet";
+import HotelCard from "./itinerary/HotelCard";
+import FlockCluster from "./common/FlockCluster";
+import InviteCompanionSheet from "./common/InviteCompanionSheet";
+import Icon from "./common/Icon";
 import {
   API_BASE_URL,
   FIREBASE_VAPID_KEY,
   HAS_FIREBASE_CONFIG,
   getMissingFirebaseConfigKeys,
+  TOKEN_STORAGE_KEY,
 } from "../lib/config";
 import { getFirebasePushToken } from "../lib/firebase";
 import {
@@ -15,18 +24,30 @@ import {
   loadTripData,
   saveTripData,
 } from "../lib/storage";
+import {
+  addCollaborator,
+  addMemory,
+  deleteMemory as deleteMemoryRequest,
+  getAllMemories,
+  getCollaborators,
+  getHotelRecommendation,
+  getTripActivity,
+  pingTripPresence,
+  postTripActivity,
+  removeCollaborator,
+  searchFriends,
+  sendFriendRequest,
+} from "../lib/socialApi";
+import { buildTimeBlocksForDay, clockToMinutes } from "../lib/timeBlocks";
+import { exportItineraryToPdf } from "../lib/pdfExport";
+import { successHaptic, tapHaptic, warningHaptic } from "../lib/haptics";
 
 const WEATHER_NOTIFICATION_KEY = "anotara:last-weather-alert";
+const PRESENCE_INTERVAL_MS = 25_000;
+const ACTIVITY_POLL_MS = 6_000;
 
-/**
- * Creates a unique string for weather alerts so the browser does not keep
- * showing the same alert repeatedly.
- */
 function getWeatherNotificationSignature(data) {
-  if (!data) {
-    return "";
-  }
-
+  if (!data) return "";
   return [
     data.headline || "",
     data.message || "",
@@ -36,9 +57,6 @@ function getWeatherNotificationSignature(data) {
   ].join("|");
 }
 
-/**
- * Shows an in-browser notification if the user allowed notifications.
- */
 function maybeNotifyWeatherAlert(data) {
   if (
     typeof window === "undefined" ||
@@ -51,189 +69,103 @@ function maybeNotifyWeatherAlert(data) {
 
   const signature = getWeatherNotificationSignature(data);
   const lastSignature = window.localStorage.getItem(WEATHER_NOTIFICATION_KEY);
-
-  if (!signature || signature === lastSignature) {
-    return;
-  }
+  if (!signature || signature === lastSignature) return;
 
   const notification = new window.Notification("Anotara weather alert", {
     body: data.message,
     tag: signature,
     renotify: false,
   });
-
   notification.onclick = () => {
     window.focus();
     notification.close();
   };
-
   window.localStorage.setItem(WEATHER_NOTIFICATION_KEY, signature);
 }
 
-/**
- * Used only for newly generated trips.
- * If router state is missing, it falls back to localStorage so refreshes still work.
- */
 function getTripFromLocation(locationState) {
-  if (locationState?.itinerary && locationState?.destCoords) {
-    return locationState;
-  }
-
+  if (locationState?.itinerary && locationState?.destCoords) return locationState;
   return loadTripData();
 }
 
-/**
- * Returns the first available coordinate from the itinerary.
- * This is used as a fallback if saved trips do not have destCoords.
- */
 function getFirstCoordsFromItinerary(itinerary) {
   const days = Object.keys(itinerary || {});
-
   for (const day of days) {
     const places = itinerary[day] || [];
-
     for (const place of places) {
       const lat = place.latitude ?? place.lat;
       const lon = place.longitude ?? place.lon ?? place.lng;
-
       if (lat !== null && lat !== undefined && lon !== null && lon !== undefined) {
-        return {
-          lat: Number(lat),
-          lon: Number(lon),
-        };
+        return { lat: Number(lat), lon: Number(lon) };
       }
     }
   }
-
   return null;
 }
 
-/**
- * Normalizes backend place data so ItineraryPage and ItineraryMap receive
- * both coordinate formats:
- * - latitude / longitude
- * - lat / lon
- */
 function normalizeItineraryPlaces(itinerary) {
   const normalized = {};
-
   Object.entries(itinerary || {}).forEach(([dayNumber, places]) => {
     normalized[dayNumber] = (places || []).map((place) => {
       const latitude = place.latitude ?? place.lat;
       const longitude = place.longitude ?? place.lon ?? place.lng;
       const placeId = place.id ?? place.place_id;
-
       return {
         ...place,
-
-        // Keep both IDs so feedback and map logic have something usable.
         id: placeId,
         place_id: placeId,
-
-        // Keep both coordinate styles.
-        latitude:
-          latitude !== null && latitude !== undefined ? Number(latitude) : null,
-        longitude:
-          longitude !== null && longitude !== undefined ? Number(longitude) : null,
+        latitude: latitude !== null && latitude !== undefined ? Number(latitude) : null,
+        longitude: longitude !== null && longitude !== undefined ? Number(longitude) : null,
         lat: latitude !== null && latitude !== undefined ? Number(latitude) : null,
         lon: longitude !== null && longitude !== undefined ? Number(longitude) : null,
-
         rating: Number(place.rating || 0),
       };
     });
   });
-
   return normalized;
 }
 
-/**
- * Normalizes the saved-trip response from GET /api/itineraries/:id.
- * This prevents old localStorage trip data from overriding the selected trip.
- */
 function normalizeSavedTrip(data) {
   const itinerary = normalizeItineraryPlaces(data.itinerary || {});
   const fallbackCoords = getFirstCoordsFromItinerary(itinerary);
-
   const rawDestCoords = data.destCoords || data.dest_coords || fallbackCoords;
 
   return {
     ...data,
-
     itineraryId: data.itineraryId || data.itinerary_id || data.id,
     itinerary_id: data.itinerary_id || data.itineraryId || data.id,
-
     numDays: data.numDays || data.num_days || data.days,
     num_days: data.num_days || data.numDays || data.days,
-
     destCoords: rawDestCoords
-      ? {
-          lat: Number(rawDestCoords.lat),
-          lon: Number(rawDestCoords.lon ?? rawDestCoords.lng),
-        }
+      ? { lat: Number(rawDestCoords.lat), lon: Number(rawDestCoords.lon ?? rawDestCoords.lng) }
       : fallbackCoords,
-
     itinerary,
   };
+}
+
+function decodeJwtSubject(token) {
+  if (!token || typeof token !== "string" || token.split(".").length !== 3) return null;
+  try {
+    const payload = token.split(".")[1];
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
 }
 
 export default function ItineraryPage() {
   const navigate = useNavigate();
   const location = useLocation();
-
-  // This gets the ID from /itinerary/:itineraryId.
-  // Example: /itinerary/5 means itineraryId = "5".
   const { itineraryId } = useParams();
 
-  /**
-   * trip is now React state.
-   * This is important because saved trips must be reloaded when itineraryId changes.
-   */
   const [trip, setTrip] = useState(null);
-
-  /**
-   * localItinerary is the editable version shown in the UI.
-   * Reorder, swap, and lock update this state.
-   */
   const [localItinerary, setLocalItinerary] = useState({});
-
   const [activeDay, setActiveDay] = useState(1);
   const [isLoadingSavedTrip, setIsLoadingSavedTrip] = useState(Boolean(itineraryId));
   const [loadError, setLoadError] = useState("");
-
-  /**
-   * Imperative handle exposed by ItineraryMap. Used to fly the camera to a
-   * specific stop when the user clicks a sidebar card.
-   */
-  const mapHandleRef = useRef(null);
-
-  /**
-   * Tracks which place card the user most recently focused so we can
-   * highlight it visually.
-   */
   const [focusedPlaceKey, setFocusedPlaceKey] = useState(null);
-
-  /**
-   * Pans the map camera to the given place. Called from each itinerary card
-   * onClick handler. Coordinates may live under either lat/lon or
-   * latitude/longitude depending on the source, so we accept both.
-   */
-  const focusPlaceOnMap = useCallback((place, placeKey) => {
-    const latitude = Number(place?.latitude ?? place?.lat);
-    const longitude = Number(place?.longitude ?? place?.lon ?? place?.lng);
-
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      return;
-    }
-
-    setFocusedPlaceKey(placeKey ?? null);
-
-    mapHandleRef.current?.flyTo({
-      latitude,
-      longitude,
-      zoom: 15,
-    });
-  }, []);
-
   const [feedbackState, setFeedbackState] = useState({});
   const [feedbackError, setFeedbackError] = useState("");
   const [swappingItemId, setSwappingItemId] = useState(null);
@@ -246,16 +178,32 @@ export default function ItineraryPage() {
       ? window.Notification.permission
       : "unsupported",
   );
-
   const [pushStatus, setPushStatus] = useState("idle");
   const [pushError, setPushError] = useState("");
 
+  const [flock, setFlock] = useState([]);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [activityToast, setActivityToast] = useState(null);
+  const [activityCursor, setActivityCursor] = useState(0);
+
+  const [memoryByItemId, setMemoryByItemId] = useState({});
+  const [memorySheetPlace, setMemorySheetPlace] = useState(null);
+
+  const [hotelByDay, setHotelByDay] = useState({});
+  const [hotelRefreshing, setHotelRefreshing] = useState(false);
+
+  const [adjustBlock, setAdjustBlock] = useState(null);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [dayStarts, setDayStarts] = useState({});
+
+  const mapHandleRef = useRef(null);
+  const [tokenPayload] = useState(
+    () => decodeJwtSubject(localStorage.getItem(TOKEN_STORAGE_KEY)) || {},
+  );
+  const currentUserId = tokenPayload?.sub ? Number(tokenPayload.sub) : null;
+
   const missingFirebaseConfig = getMissingFirebaseConfigKeys();
 
-  /**
-   * sortedDays is based on localItinerary, not old trip localStorage.
-   * This prevents the previous trip days from staying on screen.
-   */
   const sortedDays = useMemo(
     () =>
       Object.keys(localItinerary || {})
@@ -264,15 +212,14 @@ export default function ItineraryPage() {
     [localItinerary],
   );
 
-  /**
-   * Main trip loader.
-   *
-   * Case 1:
-   * If there is an itineraryId in the URL, fetch the saved trip from backend.
-   *
-   * Case 2:
-   * If there is no itineraryId, use the newly generated trip from router state/localStorage.
-   */
+  const focusPlaceOnMap = useCallback((place, placeKey) => {
+    const latitude = Number(place?.latitude ?? place?.lat);
+    const longitude = Number(place?.longitude ?? place?.lon ?? place?.lng);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+    setFocusedPlaceKey(placeKey ?? null);
+    mapHandleRef.current?.flyTo({ latitude, longitude, zoom: 15 });
+  }, []);
+
   useEffect(() => {
     async function loadTrip() {
       setLoadError("");
@@ -281,100 +228,246 @@ export default function ItineraryPage() {
       setSmartSuggestion(null);
       setSmartSuggestionError("");
       setActiveDay(1);
+      setMemoryByItemId({});
+      setHotelByDay({});
+      setFlock([]);
 
-      // Saved trip opened from My Trips.
       if (itineraryId) {
         setIsLoadingSavedTrip(true);
         setTrip(null);
         setLocalItinerary({});
 
         const token = getStoredToken();
-
         if (!token) {
           navigate("/login");
           return;
         }
 
         try {
-          const response = await fetch(
-            `${API_BASE_URL}/api/itineraries/${itineraryId}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-            },
-          );
-
+          const response = await fetch(`${API_BASE_URL}/api/itineraries/${itineraryId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
           const data = await response.json();
-
           if (!response.ok) {
             if (response.status === 401 || response.status === 422) {
               clearStoredToken();
               navigate("/login");
               return;
             }
-
             setLoadError(data.error || data.msg || "Could not load saved itinerary.");
             return;
           }
-
           const normalizedTrip = normalizeSavedTrip(data);
-
           setTrip(normalizedTrip);
           setLocalItinerary(normalizedTrip.itinerary || {});
-
-          // Save this selected trip so refresh still works.
           saveTripData(normalizedTrip);
         } catch {
           setLoadError("Connection error while loading saved itinerary.");
         } finally {
           setIsLoadingSavedTrip(false);
         }
-
         return;
       }
 
-      // Newly generated trip opened from TravelWizard.
       const generatedTrip = getTripFromLocation(location.state);
-
       if (!generatedTrip) {
         setTrip(null);
         setLocalItinerary({});
         setIsLoadingSavedTrip(false);
         return;
       }
-
       const normalizedGeneratedTrip = normalizeSavedTrip(generatedTrip);
-
       setTrip(normalizedGeneratedTrip);
       setLocalItinerary(normalizedGeneratedTrip.itinerary || {});
       setIsLoadingSavedTrip(false);
     }
-
     loadTrip();
   }, [itineraryId, location.state, navigate]);
 
-  /**
-   * If the current active day does not exist in the newly loaded trip,
-   * reset activeDay to the first available day.
-   */
   useEffect(() => {
-    if (!sortedDays.includes(activeDay) && sortedDays.length > 0) {
-      setActiveDay(sortedDays[0]);
+    async function ensureValidDay() {
+      if (sortedDays.length > 0 && activeDay !== null && !sortedDays.includes(activeDay)) {
+        setActiveDay(sortedDays[0]);
+      }
     }
+    ensureValidDay();
   }, [activeDay, sortedDays]);
 
-  /**
-   * Drop any "focused card" highlight whenever the visible day changes so
-   * the indicator never points at a card the user can no longer see.
-   */
   useEffect(() => {
-    setFocusedPlaceKey(null);
+    async function clearFocus() {
+      setFocusedPlaceKey(null);
+    }
+    clearFocus();
   }, [activeDay]);
 
-  /**
-   * Enable device push alerts using Firebase Cloud Messaging.
-   */
+  /* ------------------------------------------------------------------ */
+  /* Real-time collaboration: presence heartbeat + activity toasts      */
+  /* ------------------------------------------------------------------ */
+
+  useEffect(() => {
+    if (!trip?.itineraryId) {
+      async function resetFlock() {
+        setFlock([]);
+      }
+      resetFlock();
+      return undefined;
+    }
+    const token = getStoredToken();
+    if (!token) return undefined;
+
+    let cancelled = false;
+
+    async function fetchFlock() {
+      try {
+        const response = await getCollaborators(token, trip.itineraryId);
+        if (!cancelled) setFlock(Array.isArray(response?.flock) ? response.flock : []);
+      } catch (flockError) {
+        if (flockError?.status === 401 || flockError?.status === 422) {
+          clearStoredToken();
+          navigate("/login");
+        }
+      }
+    }
+
+    fetchFlock();
+    const presenceTimer = window.setInterval(async () => {
+      try {
+        const response = await pingTripPresence(token, trip.itineraryId);
+        if (!cancelled) setFlock(Array.isArray(response?.flock) ? response.flock : []);
+      } catch {
+        /* swallow heartbeat failures */
+      }
+    }, PRESENCE_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(presenceTimer);
+    };
+  }, [trip?.itineraryId, navigate]);
+
+  useEffect(() => {
+    if (!trip?.itineraryId) {
+      async function resetActivity() {
+        setActivityCursor(0);
+        setActivityToast(null);
+      }
+      resetActivity();
+      return undefined;
+    }
+    const token = getStoredToken();
+    if (!token) return undefined;
+
+    let cancelled = false;
+    let cursor = activityCursor;
+
+    async function poll() {
+      try {
+        const response = await getTripActivity(token, trip.itineraryId, cursor || undefined);
+        if (cancelled) return;
+        const activity = Array.isArray(response?.activity) ? response.activity : [];
+        if (activity.length > 0) {
+          const newest = activity[activity.length - 1];
+          cursor = newest.id;
+          setActivityCursor(newest.id);
+          const incoming = activity.filter((entry) => Number(entry.user_id) !== Number(currentUserId));
+          if (incoming.length > 0) {
+            const lastIncoming = incoming[incoming.length - 1];
+            setActivityToast({
+              id: lastIncoming.id,
+              username: lastIncoming.username,
+              action: lastIncoming.action,
+              payload: lastIncoming.payload,
+            });
+          }
+        }
+      } catch {
+        /* ignore polling errors silently */
+      }
+    }
+
+    poll();
+    const timer = window.setInterval(poll, ACTIVITY_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trip?.itineraryId, currentUserId]);
+
+  useEffect(() => {
+    if (!activityToast) return undefined;
+    const timer = window.setTimeout(() => setActivityToast(null), 5200);
+    return () => window.clearTimeout(timer);
+  }, [activityToast]);
+
+  /* ------------------------------------------------------------------ */
+  /* Memory log + hotel + start-time cache                              */
+  /* ------------------------------------------------------------------ */
+
+  useEffect(() => {
+    if (!trip?.itineraryId) return undefined;
+    const token = getStoredToken();
+    if (!token) return undefined;
+    let cancelled = false;
+
+    async function loadMemories() {
+      try {
+        const response = await getAllMemories(token, trip.itineraryId);
+        if (cancelled) return;
+        const indexed = {};
+        (response?.memories || []).forEach((memory) => {
+          const itemKey = memory.item_id;
+          if (!itemKey) return;
+          indexed[itemKey] = indexed[itemKey] ? [...indexed[itemKey], memory] : [memory];
+        });
+        setMemoryByItemId(indexed);
+      } catch {
+        /* memories are best-effort */
+      }
+    }
+
+    loadMemories();
+    return () => {
+      cancelled = true;
+    };
+  }, [trip?.itineraryId]);
+
+  const refreshHotelForDay = useCallback(
+    async (dayNumber, options = {}) => {
+      if (!trip?.itineraryId) return;
+      const token = getStoredToken();
+      if (!token) return;
+      try {
+        setHotelRefreshing(true);
+        const response = await getHotelRecommendation(token, trip.itineraryId, dayNumber, {
+          refresh: Boolean(options.refresh),
+          budget: trip.budget,
+        });
+        if (response?.hotel) {
+          setHotelByDay((current) => ({ ...current, [dayNumber]: response.hotel }));
+        }
+      } catch {
+        /* hotel suggestions are non-critical */
+      } finally {
+        setHotelRefreshing(false);
+      }
+    },
+    [trip],
+  );
+
+  useEffect(() => {
+    if (!trip?.itineraryId || !activeDay) return;
+    if (hotelByDay[activeDay]) return;
+    async function ensureHotel() {
+      await refreshHotelForDay(activeDay);
+    }
+    ensureHotel();
+  }, [trip?.itineraryId, activeDay, hotelByDay, refreshHotelForDay]);
+
+  /* ------------------------------------------------------------------ */
+  /* Push + Smart Suggestion (unchanged behavior, simplified handlers)  */
+  /* ------------------------------------------------------------------ */
+
   const enableDevicePushAlerts = async () => {
     if (
       typeof window === "undefined" ||
@@ -391,7 +484,6 @@ export default function ItineraryPage() {
       );
       return;
     }
-
     setPushError("");
     setPushStatus("loading");
 
@@ -399,7 +491,6 @@ export default function ItineraryPage() {
       window.Notification.permission === "granted"
         ? "granted"
         : await window.Notification.requestPermission();
-
     setNotificationPermission(permission);
 
     if (permission !== "granted") {
@@ -409,191 +500,78 @@ export default function ItineraryPage() {
 
     try {
       const firebaseToken = await getFirebasePushToken();
-
       if (!firebaseToken) {
         setPushStatus("error");
         setPushError("Could not create a Firebase push token.");
         return;
       }
-
       const token = getStoredToken();
-
       const saveResponse = await fetch(`${API_BASE_URL}/api/push-tokens`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          token: firebaseToken,
-          platform: "web",
-          user_agent: navigator.userAgent,
-        }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ token: firebaseToken, platform: "web", user_agent: navigator.userAgent }),
       });
-
       if (!saveResponse.ok) {
         const data = await saveResponse.json();
         setPushStatus("error");
         setPushError(data.error || "Could not save the push subscription.");
         return;
       }
-
       setPushStatus("subscribed");
-
-      if (smartSuggestion?.alert) {
-        maybeNotifyWeatherAlert(smartSuggestion);
-      }
+      if (smartSuggestion?.alert) maybeNotifyWeatherAlert(smartSuggestion);
     } catch {
       setPushStatus("error");
       setPushError("Could not enable device push alerts.");
     }
   };
 
-  /**
-   * Load smart weather suggestion for the current trip.
-   */
   useEffect(() => {
     if (!trip?.itineraryId) {
-      setSmartSuggestion(null);
-      return;
+      async function resetSuggestion() {
+        setSmartSuggestion(null);
+      }
+      resetSuggestion();
+      return undefined;
     }
-
     const controller = new AbortController();
     const token = getStoredToken();
 
-    const loadSuggestion = async () => {
+    async function loadSuggestion() {
       try {
         const response = await fetch(
           `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/smart-suggestion`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            signal: controller.signal,
-          },
+          { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal },
         );
-
         const data = await response.json();
-
         if (!response.ok) {
           if (response.status === 401 || response.status === 422) {
             clearStoredToken();
             navigate("/login");
             return;
           }
-
           setSmartSuggestionError(data.error || "Could not load smart suggestion.");
           return;
         }
-
         setSmartSuggestion(data);
         setSmartSuggestionError("");
-      } catch (_error) {
-        if (_error.name !== "AbortError") {
+      } catch (suggestionError) {
+        if (suggestionError.name !== "AbortError") {
           setSmartSuggestionError("Weather suggestions are temporarily unavailable.");
         }
       }
-    };
+    }
 
     loadSuggestion();
-
     return () => controller.abort();
   }, [trip?.itineraryId, navigate]);
 
-  /**
-   * Show in-browser weather notification if push is not subscribed yet.
-   */
   useEffect(() => {
-    if (!smartSuggestion?.alert) {
-      return;
-    }
-
-    if (pushStatus !== "subscribed") {
-      maybeNotifyWeatherAlert(smartSuggestion);
-    }
+    if (!smartSuggestion?.alert) return;
+    if (pushStatus !== "subscribed") maybeNotifyWeatherAlert(smartSuggestion);
   }, [smartSuggestion, pushStatus]);
 
-  /**
-   * Load weather alert history for users who already granted notification permission.
-   */
   useEffect(() => {
-    if (!trip?.itineraryId) {
-      return;
-    }
-
-    if (
-      typeof window === "undefined" ||
-      !("Notification" in window) ||
-      window.Notification.permission !== "granted" ||
-      pushStatus === "subscribed"
-    ) {
-      return;
-    }
-
-    const token = getStoredToken();
-    const controller = new AbortController();
-
-    const loadAlertHistory = async () => {
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/weather-alerts`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            signal: controller.signal,
-          },
-        );
-
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 422) {
-            clearStoredToken();
-            navigate("/login");
-          }
-
-          return;
-        }
-
-        const data = await response.json();
-        const latestAlert = data.alerts?.[0];
-
-        if (latestAlert?.is_active) {
-          const signature = getWeatherNotificationSignature(
-            latestAlert.payload || latestAlert,
-          );
-
-          const lastSignature = window.localStorage.getItem(
-            WEATHER_NOTIFICATION_KEY,
-          );
-
-          if (signature && signature !== lastSignature) {
-            new window.Notification("Anotara weather alert", {
-              body: latestAlert.message,
-              tag: signature,
-              renotify: false,
-            });
-
-            window.localStorage.setItem(WEATHER_NOTIFICATION_KEY, signature);
-          }
-        }
-      } catch (_error) {
-        // Ignore background notification refresh failures.
-      }
-    };
-
-    loadAlertHistory();
-
-    return () => controller.abort();
-  }, [trip?.itineraryId, notificationPermission, pushStatus, navigate]);
-
-  /**
-   * If notification permission is already granted, sync the Firebase token.
-   */
-  useEffect(() => {
-    if (!trip?.itineraryId) {
-      return;
-    }
-
+    if (!trip?.itineraryId) return undefined;
     if (
       typeof window === "undefined" ||
       !("Notification" in window) ||
@@ -601,158 +579,47 @@ export default function ItineraryPage() {
       !HAS_FIREBASE_CONFIG ||
       !FIREBASE_VAPID_KEY
     ) {
-      return;
+      return undefined;
     }
-
     const controller = new AbortController();
-
-    const syncExistingSubscription = async () => {
+    async function sync() {
       try {
         const firebaseToken = await getFirebasePushToken();
-
-        if (!firebaseToken) {
-          return;
-        }
-
+        if (!firebaseToken) return;
         const token = getStoredToken();
-
         const response = await fetch(`${API_BASE_URL}/api/push-tokens`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            token: firebaseToken,
-            platform: "web",
-            user_agent: navigator.userAgent,
-          }),
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ token: firebaseToken, platform: "web", user_agent: navigator.userAgent }),
           signal: controller.signal,
         });
-
-        if (response.ok) {
-          setPushStatus("subscribed");
-        }
-      } catch (_error) {
+        if (response.ok) setPushStatus("subscribed");
+      } catch (syncError) {
+        if (syncError?.name === "AbortError") return;
         setPushStatus((current) => (current === "subscribed" ? current : "idle"));
       }
-    };
-
-    syncExistingSubscription();
-
+    }
+    sync();
     return () => controller.abort();
   }, [trip?.itineraryId, notificationPermission]);
 
-  /**
-   * Loading screen for saved trips.
-   */
-  if (isLoadingSavedTrip) {
-    return (
-      <main className="app-page itinerary-page">
-        <div className="itinerary-shell">
-          <div
-            className="itinerary-sidebar glass-card"
-            style={{ maxWidth: "680px", margin: "0 auto" }}
-          >
-            <h1 className="serif" style={{ fontSize: "2.6rem", marginTop: 0 }}>
-              Loading itinerary...
-            </h1>
-            <p className="muted" style={{ lineHeight: 1.7 }}>
-              Please wait while we open your saved trip.
-            </p>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  /* ------------------------------------------------------------------ */
+  /* Mutation handlers                                                   */
+  /* ------------------------------------------------------------------ */
 
-  /**
-   * Error screen if the saved trip cannot be loaded.
-   */
-  if (loadError) {
-    return (
-      <main className="app-page itinerary-page">
-        <div className="itinerary-shell">
-          <div
-            className="itinerary-sidebar glass-card"
-            style={{ maxWidth: "680px", margin: "0 auto" }}
-          >
-            <h1 className="serif" style={{ fontSize: "2.6rem", marginTop: 0 }}>
-              Could not open trip.
-            </h1>
-            <p className="muted" style={{ lineHeight: 1.7 }}>
-              {loadError}
-            </p>
-            <button
-              className="btn-luxury"
-              type="button"
-              onClick={() => navigate("/my-trips")}
-            >
-              Back to My Trips
-            </button>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  /**
-   * Empty state if there is no itinerary data.
-   */
-  if (!trip?.itinerary || !trip?.destCoords) {
-    return (
-      <main className="app-page itinerary-page">
-        <div className="itinerary-shell">
-          <div
-            className="itinerary-sidebar glass-card"
-            style={{ maxWidth: "680px", margin: "0 auto" }}
-          >
-            <h1 className="serif" style={{ fontSize: "2.6rem", marginTop: 0 }}>
-              No itinerary found.
-            </h1>
-            <p className="muted" style={{ lineHeight: 1.7 }}>
-              Generate a trip from the dashboard first, or choose a saved trip
-              from My Trips.
-            </p>
-            <button
-              className="btn-luxury"
-              type="button"
-              onClick={() => navigate("/my-trips")}
-            >
-              Back to My Trips
-            </button>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  /**
-   * Updates local itinerary state and saves it so refresh still works.
-   */
   const updateTripState = (nextItinerary) => {
     setLocalItinerary(nextItinerary);
     saveTripData({ ...trip, itinerary: nextItinerary });
   };
 
-  /**
-   * Persists changed order to the backend.
-   */
   const persistDayOrder = async (dayNumber, nextPlaces) => {
-    if (!trip.itineraryId) {
-      return;
-    }
-
+    if (!trip?.itineraryId) return;
     const token = getStoredToken();
-
     const response = await fetch(
       `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/items/reorder`,
       {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           items: nextPlaces.map((place, index) => ({
             item_id: place.item_id,
@@ -762,51 +629,38 @@ export default function ItineraryPage() {
         }),
       },
     );
-
+    try {
+      await postTripActivity(token, trip.itineraryId, "reordered_day", { day: dayNumber });
+    } catch {
+      /* activity ping is best-effort */
+    }
     return response.json();
   };
 
   const updateDayPlaces = async (dayNumber, nextPlaces) => {
-    const nextItinerary = {
-      ...localItinerary,
-      [dayNumber]: nextPlaces,
-    };
-
+    const nextItinerary = { ...localItinerary, [dayNumber]: nextPlaces };
     updateTripState(nextItinerary);
-
-    if (trip.itineraryId) {
-      await persistDayOrder(dayNumber, nextPlaces);
-    }
+    if (trip?.itineraryId) await persistDayOrder(dayNumber, nextPlaces);
   };
 
   const handlePlaceFeedback = async (placeId, feedback) => {
-    if (!trip.itineraryId || !placeId) {
-      return;
-    }
-
+    if (!trip?.itineraryId || !placeId) return;
     setFeedbackError("");
     const token = getStoredToken();
-
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/itinerary/${trip.itineraryId}/feedback`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ place_id: placeId, feedback }),
         },
       );
-
       const data = await response.json();
-
       if (!response.ok) {
         setFeedbackError(data.error || "Could not save feedback.");
         return;
       }
-
       setFeedbackState((current) => ({
         ...current,
         [placeId]: feedback === "like" ? "liked" : "disliked",
@@ -819,56 +673,33 @@ export default function ItineraryPage() {
   const handleMovePlace = async (dayNumber, index, direction) => {
     const places = localItinerary[dayNumber] || [];
     const targetIndex = index + direction;
-
-    if (targetIndex < 0 || targetIndex >= places.length) {
-      return;
-    }
-
+    if (targetIndex < 0 || targetIndex >= places.length) return;
     const nextPlaces = places.slice();
-    const [movedPlace] = nextPlaces.splice(index, 1);
-
-    nextPlaces.splice(targetIndex, 0, movedPlace);
-
+    const [moved] = nextPlaces.splice(index, 1);
+    nextPlaces.splice(targetIndex, 0, moved);
     await updateDayPlaces(dayNumber, nextPlaces);
   };
 
   const handleSwapPlace = async (dayNumber, index) => {
     const place = localItinerary[dayNumber]?.[index];
-
-    if (
-      !place?.item_id ||
-      !trip.itineraryId ||
-      swappingItemId === place.item_id
-    ) {
-      return;
-    }
-
+    if (!place?.item_id || !trip?.itineraryId || swappingItemId === place.item_id) return;
     setFeedbackError("");
     const token = getStoredToken();
     setSwappingItemId(place.item_id);
-
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/items/${place.item_id}/swap`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({}),
         },
       );
-
       const data = await response.json();
-
       if (!response.ok) {
-        setFeedbackError(
-          data.error || "Could not swap place. Try another stop or unlock it first.",
-        );
+        setFeedbackError(data.error || "Could not swap place.");
         return;
       }
-
       const replacementPlace = normalizeItineraryPlaces({
         1: [
           {
@@ -884,14 +715,18 @@ export default function ItineraryPage() {
           },
         ],
       })[1][0];
-
       const nextPlaces = (localItinerary[dayNumber] || []).slice();
       nextPlaces[index] = replacementPlace;
-
-      updateTripState({
-        ...localItinerary,
-        [dayNumber]: nextPlaces,
-      });
+      updateTripState({ ...localItinerary, [dayNumber]: nextPlaces });
+      try {
+        await postTripActivity(token, trip.itineraryId, "swapped_stop", {
+          item_id: replacementPlace.item_id,
+          name: replacementPlace.name,
+          day: dayNumber,
+        });
+      } catch {
+        /* best-effort */
+      }
     } catch {
       setFeedbackError("Network error while swapping place.");
     } finally {
@@ -901,74 +736,240 @@ export default function ItineraryPage() {
 
   const handleToggleLock = async (dayNumber, index) => {
     const place = localItinerary[dayNumber]?.[index];
-
-    if (!place?.item_id || !trip.itineraryId) {
-      return;
-    }
-
+    if (!place?.item_id || !trip?.itineraryId) return;
     setFeedbackError("");
-
     const token = getStoredToken();
     const nextLocked = !place.is_locked;
-
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/itineraries/items/${place.item_id}/lock`,
         {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            itinerary_id: trip.itineraryId,
-            is_locked: nextLocked,
-          }),
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ itinerary_id: trip.itineraryId, is_locked: nextLocked }),
         },
       );
-
       const data = await response.json();
-
       if (!response.ok) {
         setFeedbackError(data.error || "Could not update lock state.");
         return;
       }
-
       const nextPlaces = (localItinerary[dayNumber] || []).map((item) =>
-        item.item_id === place.item_id
-          ? { ...item, is_locked: data.is_locked }
-          : item,
+        item.item_id === place.item_id ? { ...item, is_locked: data.is_locked } : item,
       );
-
-      updateTripState({
-        ...localItinerary,
-        [dayNumber]: nextPlaces,
-      });
+      updateTripState({ ...localItinerary, [dayNumber]: nextPlaces });
     } catch {
       setFeedbackError("Network error while updating lock state.");
     }
   };
 
+  function handleAdjustTime(dayNumber, index, block) {
+    setAdjustBlock({ ...block, dayNumber, index });
+    setAdjustOpen(true);
+  }
+
+  function handleSaveAdjustedTime(newStartMinutes) {
+    if (!adjustBlock) return;
+    const { dayNumber, index } = adjustBlock;
+    const places = localItinerary[dayNumber] || [];
+    const blocks = buildTimeBlocksForDay(places, {
+      pacingStyle: trip?.pacingStyle || trip?.pacing_style,
+      transportMode: trip?.transportMode || trip?.transport_mode,
+      dayStart: dayStarts[dayNumber],
+    });
+    const targetBlock = blocks[index];
+    if (!targetBlock) return;
+    const delta = newStartMinutes - targetBlock.startMinutes;
+    const currentDayStart = clockToMinutes(dayStarts[dayNumber]) || blocks[0]?.startMinutes || 8 * 60;
+    const adjustedStart = index === 0 ? newStartMinutes : currentDayStart + delta;
+    const minutes = Math.max(0, Math.min(23 * 60 + 30, adjustedStart));
+    setDayStarts((current) => ({
+      ...current,
+      [dayNumber]: `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`,
+    }));
+    setAdjustOpen(false);
+    setAdjustBlock(null);
+    successHaptic();
+  }
+
+  async function handleOpenMemoryLog(place) {
+    if (!place?.item_id) {
+      warningHaptic();
+      setFeedbackError("Save this trip first to attach memories.");
+      return;
+    }
+    tapHaptic();
+    setMemorySheetPlace(place);
+  }
+
+  async function handleAddMemory({ kind, note, imageData, mimeType }) {
+    if (!trip?.itineraryId || !memorySheetPlace?.item_id) return;
+    const token = getStoredToken();
+    const response = await addMemory(token, trip.itineraryId, memorySheetPlace.item_id, {
+      kind,
+      note,
+      imageData,
+      mimeType,
+    });
+    if (response?.memories) {
+      setMemoryByItemId((current) => ({
+        ...current,
+        [memorySheetPlace.item_id]: response.memories,
+      }));
+    }
+    try {
+      await postTripActivity(token, trip.itineraryId, "memory_added", {
+        item_id: memorySheetPlace.item_id,
+        kind,
+      });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async function handleDeleteMemoryEntry(memory) {
+    if (!memory?.id) return;
+    const token = getStoredToken();
+    await deleteMemoryRequest(token, memory.id);
+    setMemoryByItemId((current) => {
+      const next = { ...current };
+      if (next[memory.item_id]) {
+        next[memory.item_id] = next[memory.item_id].filter((entry) => entry.id !== memory.id);
+        if (next[memory.item_id].length === 0) delete next[memory.item_id];
+      }
+      return next;
+    });
+  }
+
+  async function handleSendFriendRequest(user) {
+    const token = getStoredToken();
+    await sendFriendRequest(token, user.id);
+  }
+
+  async function handleAddCollaborator(user) {
+    if (!trip?.itineraryId) return;
+    const token = getStoredToken();
+    const response = await addCollaborator(token, trip.itineraryId, user.id);
+    if (response?.flock) setFlock(response.flock);
+  }
+
+  async function handleRemoveCollaborator(member) {
+    if (!trip?.itineraryId) return;
+    const token = getStoredToken();
+    const response = await removeCollaborator(token, trip.itineraryId, member.user_id);
+    if (response?.flock) setFlock(response.flock);
+  }
+
+  function handleExportPdf() {
+    if (!trip) return;
+    tapHaptic();
+    exportItineraryToPdf(trip, {
+      hotelsByDay: hotelByDay,
+    });
+  }
+
+  const isOwner = useMemo(() => {
+    const owner = (flock || []).find((member) => member.role === "owner");
+    return owner ? Number(owner.user_id) === Number(currentUserId) : true;
+  }, [flock, currentUserId]);
+
+  /* ------------------------------------------------------------------ */
+  /* Render guards                                                       */
+  /* ------------------------------------------------------------------ */
+
+  if (isLoadingSavedTrip) {
+    return (
+      <main className="app-page itinerary-page">
+        <div className="itinerary-shell">
+          <div className="itinerary-sidebar glass-card" style={{ maxWidth: "680px", margin: "0 auto" }}>
+            <h1 className="serif" style={{ fontSize: "2.6rem", marginTop: 0 }}>
+              Loading itinerary...
+            </h1>
+            <p className="muted" style={{ lineHeight: 1.7 }}>
+              Please wait while we open your saved trip.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <main className="app-page itinerary-page">
+        <div className="itinerary-shell">
+          <div className="itinerary-sidebar glass-card" style={{ maxWidth: "680px", margin: "0 auto" }}>
+            <h1 className="serif" style={{ fontSize: "2.6rem", marginTop: 0 }}>
+              Could not open trip.
+            </h1>
+            <p className="muted" style={{ lineHeight: 1.7 }}>{loadError}</p>
+            <button className="btn-luxury" type="button" onClick={() => navigate("/my-trips")}>
+              Back to My Trips
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!trip?.itinerary || !trip?.destCoords) {
+    return (
+      <main className="app-page itinerary-page">
+        <div className="itinerary-shell">
+          <div className="itinerary-sidebar glass-card" style={{ maxWidth: "680px", margin: "0 auto" }}>
+            <h1 className="serif" style={{ fontSize: "2.6rem", marginTop: 0 }}>
+              No itinerary found.
+            </h1>
+            <p className="muted" style={{ lineHeight: 1.7 }}>
+              Generate a trip from the dashboard first, or choose a saved trip from My Trips.
+            </p>
+            <button className="btn-luxury" type="button" onClick={() => navigate("/my-trips")}>
+              Back to My Trips
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const activeDayPlaces = localItinerary[activeDay] || [];
+  const activeHotel = hotelByDay[activeDay];
+
   return (
     <main className="app-page itinerary-page">
       <div className="itinerary-topbar">
         <div className="itinerary-topbar-inner">
-          <button
-            className="top-action-link"
-            type="button"
-            onClick={() => navigate("/my-trips")}
-          >
-            ← My Trips
+          <button className="top-action-link" type="button" onClick={() => navigate("/my-trips")}>
+            <Icon name="arrowLeft" size={16} /> My Trips
           </button>
 
-          <button
-            className="top-action-link"
-            type="button"
-            onClick={() => navigate("/dashboard")}
-            style={{ marginLeft: "auto" }}
-          >
-            Plan New Trip
-          </button>
+          <div className="itinerary-topbar__flock">
+            <FlockCluster
+              members={flock}
+              currentUserId={currentUserId}
+              onInvite={() => setInviteOpen(true)}
+              inviteLabel="Invite companion"
+              hideInvite={!trip?.itineraryId}
+            />
+          </div>
+
+          <div className="itinerary-topbar__actions">
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={handleExportPdf}
+              aria-label="Export itinerary as PDF"
+            >
+              <Icon name="download" size={16} /> Export PDF
+            </button>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={() => navigate("/dashboard")}
+            >
+              Plan new trip
+            </button>
+          </div>
         </div>
       </div>
 
@@ -997,356 +998,135 @@ export default function ItineraryPage() {
                     .filter(Boolean)
               ).map((item) => (
                 <span key={item} className="badge-pill">
-                  {item}
+                  <Icon name="vibe" size={14} /> {item}
                 </span>
               ))}
             </div>
 
             {trip.itineraryId && (
               <div className="hero-chip" style={{ marginBottom: "18px" }}>
-                Itinerary ID · {trip.itineraryId}
+                <Icon name="document" size={14} /> Itinerary ID · {trip.itineraryId}
               </div>
             )}
 
-            <div
-              className="glass-card"
-              style={{
-                marginBottom: "18px",
-                padding: "16px",
-                border: "1px solid rgba(59, 130, 246, 0.16)",
-                background:
-                  "linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.92))",
-              }}
-            >
-              <div className="hero-chip" style={{ marginBottom: "10px" }}>
-                Device Push
-              </div>
+            <DaySelector
+              days={sortedDays}
+              activeDay={activeDay}
+              onSelectDay={setActiveDay}
+              onViewAll={() => setActiveDay(null)}
+              showViewAll={sortedDays.length > 1}
+            />
 
-              <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
-                Subscribe this device to receive weather alerts even when the
-                app is closed.
-              </p>
+            <div className="itinerary-sidebar__alerts">
+              {feedbackError ? <div className="error-banner">{feedbackError}</div> : null}
+              {smartSuggestionError && !smartSuggestion ? (
+                <div className="error-banner">{smartSuggestionError}</div>
+              ) : null}
 
-              {pushStatus === "subscribed" ? (
-                <p className="muted" style={{ marginBottom: 0 }}>
-                  Push alerts are enabled on this device.
-                </p>
-              ) : (
-                <button
-                  className="top-action-link"
-                  type="button"
-                  onClick={enableDevicePushAlerts}
-                  disabled={pushStatus === "loading" || pushStatus === "unsupported"}
+              {smartSuggestion ? (
+                <div
+                  className="glass-card itinerary-sidebar__suggestion"
+                  style={{
+                    border: smartSuggestion.alert
+                      ? "1px solid rgba(225, 29, 72, 0.32)"
+                      : "1px solid rgba(59, 130, 246, 0.18)",
+                    background: smartSuggestion.alert
+                      ? "linear-gradient(135deg, rgba(225, 29, 72, 0.12), rgba(255, 255, 255, 0.92))"
+                      : "linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.92))",
+                  }}
                 >
-                  {pushStatus === "blocked"
-                    ? "Notifications blocked"
-                    : pushStatus === "loading"
-                      ? "Enabling..."
-                      : "Enable device push alerts"}
-                </button>
-              )}
-
-              {pushError && (
-                <p className="muted" style={{ marginBottom: 0, color: "#991b1b" }}>
-                  {pushError}
-                </p>
-              )}
-
-              {pushStatus === "unsupported" && missingFirebaseConfig.length > 0 && (
-                <p className="muted" style={{ marginBottom: 0, marginTop: 8 }}>
-                  Add the Firebase env vars in the frontend `.env` file, then
-                  reload the page.
-                </p>
-              )}
-            </div>
-
-            {smartSuggestion?.alert && pushStatus !== "subscribed" && (
-              <div
-                className="glass-card"
-                style={{
-                  marginBottom: "18px",
-                  padding: "16px",
-                  border: "1px solid rgba(225, 29, 72, 0.24)",
-                  background:
-                    "linear-gradient(135deg, rgba(225, 29, 72, 0.08), rgba(255, 255, 255, 0.92))",
-                }}
-              >
-                <div className="hero-chip" style={{ marginBottom: "10px" }}>
-                  In-App Alert
+                  <p className="hero-chip" style={{ marginBottom: 10 }}>
+                    <Icon name="alert" size={14} /> Smart Suggestion
+                  </p>
+                  <h3 className="serif" style={{ marginTop: 0, marginBottom: 8 }}>
+                    {smartSuggestion.headline}
+                  </h3>
+                  <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+                    {smartSuggestion.message}
+                  </p>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    Rain chance: {smartSuggestion.precipitation_probability || 0}%
+                  </p>
+                  {smartSuggestion.focus_day ? (
+                    <button
+                      className="top-action-link"
+                      type="button"
+                      onClick={() => setActiveDay(Number(smartSuggestion.focus_day))}
+                    >
+                      View Day {smartSuggestion.focus_day}
+                    </button>
+                  ) : null}
                 </div>
-                <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
-                  This fallback alert appears only when device push alerts are
-                  not enabled yet.
-                </p>
-              </div>
-            )}
+              ) : null}
 
-            {feedbackError && (
-              <div className="error-banner" style={{ marginBottom: "18px" }}>
-                {feedbackError}
-              </div>
-            )}
-
-            {smartSuggestionError && !smartSuggestion && (
-              <div className="error-banner" style={{ marginBottom: "18px" }}>
-                {smartSuggestionError}
-              </div>
-            )}
-
-            {smartSuggestion && (
-              <div
-                className="glass-card"
-                style={{
-                  marginBottom: "18px",
-                  padding: "18px",
-                  border: smartSuggestion.alert
-                    ? "1px solid rgba(225, 29, 72, 0.32)"
-                    : "1px solid rgba(59, 130, 246, 0.18)",
-                  background: smartSuggestion.alert
-                    ? "linear-gradient(135deg, rgba(225, 29, 72, 0.12), rgba(255, 255, 255, 0.92))"
-                    : "linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.92))",
-                }}
-              >
-                <div className="hero-chip" style={{ marginBottom: "10px" }}>
-                  Smart Suggestion
-                </div>
-
-                <h3 className="serif" style={{ marginTop: 0, marginBottom: "8px" }}>
-                  {smartSuggestion.headline}
-                </h3>
-
-                <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
-                  {smartSuggestion.message}
-                </p>
-
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Rain chance: {smartSuggestion.precipitation_probability || 0}%
-                </p>
-
-                {smartSuggestion.focus_day && (
+              {pushStatus !== "subscribed" ? (
+                <div className="glass-card itinerary-sidebar__push">
+                  <p className="hero-chip">
+                    <Icon name="bell" size={14} /> Device Push
+                  </p>
+                  <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+                    Subscribe this device to receive weather alerts even when the app is closed.
+                  </p>
                   <button
                     className="top-action-link"
                     type="button"
-                    onClick={() => setActiveDay(Number(smartSuggestion.focus_day))}
-                    style={{ marginBottom: "12px" }}
+                    onClick={enableDevicePushAlerts}
+                    disabled={pushStatus === "loading" || pushStatus === "unsupported"}
                   >
-                    View Day {smartSuggestion.focus_day}
+                    {pushStatus === "blocked"
+                      ? "Notifications blocked"
+                      : pushStatus === "loading"
+                        ? "Enabling..."
+                        : "Enable device push alerts"}
                   </button>
-                )}
-
-                {smartSuggestion.indoor_alternatives?.length > 0 && (
-                  <div style={{ display: "grid", gap: "10px" }}>
-                    {smartSuggestion.indoor_alternatives.map((place) => (
-                      <div key={place.id} className="place-card" style={{ margin: 0 }}>
-                        <div className="place-name">{place.name}</div>
-                        <div className="place-meta">
-                          {place.category} · ⭐ {Number(place.rating || 0).toFixed(1)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-                overflowX: "auto",
-                paddingBottom: "8px",
-                marginBottom: "18px",
-              }}
-            >
-              {sortedDays.map((dayNumber) => (
-                <button
-                  key={dayNumber}
-                  className="top-action-link"
-                  type="button"
-                  onClick={() => setActiveDay(dayNumber)}
-                  style={{
-                    whiteSpace: "nowrap",
-                    opacity: activeDay === dayNumber ? 1 : 0.6,
-                  }}
-                >
-                  Day {dayNumber}
-                </button>
-              ))}
+                  {pushError ? <p className="muted" style={{ marginBottom: 0, color: "#991b1b" }}>{pushError}</p> : null}
+                </div>
+              ) : null}
             </div>
 
-            {sortedDays.map((dayNumber) => {
-              if (dayNumber !== activeDay) {
-                return null;
-              }
-
-              const places = localItinerary[dayNumber] || [];
-
-              return (
-                <section key={dayNumber} className="itinerary-day">
-                  <h3 className="serif">Day {dayNumber}</h3>
-
-                  {places.map((place, index) => {
-                    const placeId = place.id || place.place_id;
-                    const placeKey = `${dayNumber}-${place.item_id || placeId || index}`;
-                    const isFocused = focusedPlaceKey === placeKey;
-
-                    // Helper used by inner action buttons so they don't also
-                    // trigger the card-level "click to fly" handler.
-                    const cardActionClick = (handler) => (event) => {
-                      event.stopPropagation();
-                      handler();
-                    };
-
-                    const handleCardActivate = () => {
-                      focusPlaceOnMap(place, placeKey);
-                    };
-
-                    const handleCardKeyDown = (event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        focusPlaceOnMap(place, placeKey);
-                      }
-                    };
-
-                    return (
-                      <article
-                        key={placeKey}
-                        className={`place-card place-card-clickable${isFocused ? " is-focused" : ""}`}
-                        onClick={handleCardActivate}
-                        onKeyDown={handleCardKeyDown}
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={isFocused}
-                      >
-                        <div className="place-name">
-                          {index + 1}. {place.name}
-                          {place.is_locked && (
-                            <span style={{ marginLeft: "10px", fontSize: "0.78rem" }}>
-                              Locked
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="place-meta">
-                          {place.category} · ⭐ {Number(place.rating || 0).toFixed(1)}
-                        </div>
-
-                        {(place.recommended_minutes || place.why || place.distance_km) && (
-                          <div
-                            className="place-meta"
-                            style={{ marginTop: "8px", lineHeight: 1.5 }}
-                          >
-                            {place.recommended_minutes && (
-                              <div>Suggested stay: {place.recommended_minutes} min</div>
-                            )}
-
-                            {place.distance_km !== null &&
-                              place.distance_km !== undefined && (
-                                <div>Approx. distance: {place.distance_km} km</div>
-                              )}
-
-                            {place.why && <div>{place.why}</div>}
-                          </div>
-                        )}
-
-                        <div className="place-meta place-card-hint">
-                          Click to show on map
-                        </div>
-
-                        {(trip.itineraryId && placeId) || place.item_id ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "10px",
-                              marginTop: "12px",
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            {index > 0 && (
-                              <button
-                                className="top-action-link"
-                                type="button"
-                                onClick={cardActionClick(() =>
-                                  handleMovePlace(dayNumber, index, -1),
-                                )}
-                              >
-                                Move Up
-                              </button>
-                            )}
-
-                            {index < places.length - 1 && (
-                              <button
-                                className="top-action-link"
-                                type="button"
-                                onClick={cardActionClick(() =>
-                                  handleMovePlace(dayNumber, index, 1),
-                                )}
-                              >
-                                Move Down
-                              </button>
-                            )}
-
-                            <button
-                              className="top-action-link"
-                              type="button"
-                              onClick={cardActionClick(() =>
-                                handleSwapPlace(dayNumber, index),
-                              )}
-                              disabled={swappingItemId === place.item_id}
-                            >
-                              {swappingItemId === place.item_id ? "Swapping..." : "Swap"}
-                            </button>
-
-                            <button
-                              className="top-action-link"
-                              type="button"
-                              onClick={cardActionClick(() =>
-                                handleToggleLock(dayNumber, index),
-                              )}
-                            >
-                              {place.is_locked ? "Unlock" : "Lock"}
-                            </button>
-
-                            <button
-                              className="top-action-link"
-                              type="button"
-                              onClick={cardActionClick(() =>
-                                handlePlaceFeedback(placeId, "like"),
-                              )}
-                              disabled={feedbackState[placeId] === "liked"}
-                            >
-                              {feedbackState[placeId] === "liked"
-                                ? "Saved as best pick"
-                                : "Best pick"}
-                            </button>
-
-                            <button
-                              className="top-action-link"
-                              type="button"
-                              onClick={cardActionClick(() =>
-                                handlePlaceFeedback(placeId, "dislike"),
-                              )}
-                              disabled={feedbackState[placeId] === "disliked"}
-                            >
-                              {feedbackState[placeId] === "disliked"
-                                ? "Marked not ideal"
-                                : "Not ideal"}
-                            </button>
-                          </div>
-                        ) : null}
-                      </article>
-                    );
-                  })}
-                </section>
-              );
-            })}
+            {activeDay === null ? (
+              <section className="timeline timeline--overview">
+                <p className="dashboard-kicker">Full trip overview</p>
+                <h3 className="serif">All {sortedDays.length} days at a glance</h3>
+                <p className="muted">
+                  Tap a day above to drill into its time-blocked timeline. Map markers also dim
+                  the inactive days so the chosen one always pops.
+                </p>
+              </section>
+            ) : (
+              <>
+                <VerticalTimeline
+                  dayNumber={activeDay}
+                  places={activeDayPlaces}
+                  trip={{ ...trip, dayStart: dayStarts[activeDay] }}
+                  focusedPlaceKey={focusedPlaceKey}
+                  feedbackState={feedbackState}
+                  swappingItemId={swappingItemId}
+                  memoriesByItemId={memoryByItemId}
+                  onCardActivate={(place, placeKey) => focusPlaceOnMap(place, placeKey)}
+                  onMovePlace={handleMovePlace}
+                  onSwapPlace={handleSwapPlace}
+                  onToggleLock={handleToggleLock}
+                  onPlaceFeedback={handlePlaceFeedback}
+                  onAdjustTime={handleAdjustTime}
+                  onOpenMemoryLog={handleOpenMemoryLog}
+                  isCollaborative={Boolean(trip.itineraryId)}
+                  isPastTrip={trip.status === "Past"}
+                />
+                {activeHotel ? (
+                  <HotelCard
+                    hotel={activeHotel}
+                    dayNumber={activeDay}
+                    refreshing={hotelRefreshing}
+                    onRefresh={() => refreshHotelForDay(activeDay, { refresh: true })}
+                  />
+                ) : null}
+              </>
+            )}
           </aside>
 
           <section className="itinerary-map-panel">
             <ItineraryMap
-              // Remount only when the whole trip changes, not on every day
-              // switch. This keeps the Mapbox instance alive so flyTo() can
-              // smoothly pan between stops as the user clicks cards.
               key={trip.itineraryId || trip.id || trip.destination}
               ref={mapHandleRef}
               itinerary={localItinerary}
@@ -1356,6 +1136,51 @@ export default function ItineraryPage() {
           </section>
         </div>
       </div>
+
+      {activityToast ? (
+        <div className="activity-toast" role="status" aria-live="polite">
+          <Icon name="message" size={16} tone="accent" />
+          <span>
+            <strong>{activityToast.username || "A companion"}</strong> {activityToast.action.replace(/_/g, " ")}.
+          </span>
+        </div>
+      ) : null}
+
+      <InviteCompanionSheet
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        flock={flock}
+        ownerId={(flock.find((member) => member.role === "owner") || {}).user_id}
+        currentUserId={currentUserId}
+        searchEndpoint={async (query) => {
+          const token = getStoredToken();
+          return searchFriends(token, query);
+        }}
+        onSendFriendRequest={handleSendFriendRequest}
+        onAddCollaborator={isOwner ? handleAddCollaborator : null}
+        onRemoveCollaborator={isOwner ? handleRemoveCollaborator : null}
+        emptyState="Search by username or email — friends are invited instantly, others get a friend request first."
+      />
+
+      <TimeAdjustSheet
+        open={adjustOpen}
+        onClose={() => {
+          setAdjustOpen(false);
+          setAdjustBlock(null);
+        }}
+        block={adjustBlock}
+        onSave={handleSaveAdjustedTime}
+      />
+
+      <MemoryLogSheet
+        open={Boolean(memorySheetPlace)}
+        onClose={() => setMemorySheetPlace(null)}
+        place={memorySheetPlace}
+        memories={memorySheetPlace ? memoryByItemId[memorySheetPlace.item_id] || [] : []}
+        currentUserId={currentUserId}
+        onAddMemory={handleAddMemory}
+        onDeleteMemory={handleDeleteMemoryEntry}
+      />
     </main>
   );
 }

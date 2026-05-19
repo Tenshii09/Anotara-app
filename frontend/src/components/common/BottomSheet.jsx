@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 
+import Icon from "./Icon";
+
 /**
  * Fluid bottom-up modal used for the Discover "Anchor & Fly" pattern and any
  * other place that needs to halt the browsing state while keeping the page
@@ -64,7 +66,7 @@ export default function BottomSheet({
               onClick={onClose}
               aria-label="Close"
             >
-              ✕
+              <Icon name="close" size={16} />
             </button>
           </header>
         ) : null}

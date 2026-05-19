@@ -20,15 +20,16 @@ import {
 import { tapHaptic } from "../lib/haptics";
 import BrandLogo from "./common/BrandLogo";
 import Avatar from "./common/Avatar";
+import Icon from "./common/Icon";
 import SearchOverlay from "./common/SearchOverlay";
 
 const moodFilters = [
-  { id: "all", label: "All vibes", icon: "✨", preferences: [] },
-  { id: "nature", label: "Nature", icon: "⛰️", preferences: ["nature"] },
-  { id: "food", label: "Food trip", icon: "🍜", preferences: ["food"] },
-  { id: "beach", label: "Beach vibe", icon: "🌊", preferences: ["beach"] },
-  { id: "culture", label: "Culture", icon: "🏛️", preferences: ["museums"] },
-  { id: "night", label: "Night out", icon: "🌙", preferences: ["nightlife"] },
+  { id: "all", label: "All vibes", icon: "sparkles", preferences: [] },
+  { id: "nature", label: "Nature", icon: "leaf", preferences: ["nature"] },
+  { id: "food", label: "Food trip", icon: "fork", preferences: ["food"] },
+  { id: "beach", label: "Beach vibe", icon: "image", preferences: ["beach"] },
+  { id: "culture", label: "Culture", icon: "shield", preferences: ["museums"] },
+  { id: "night", label: "Night out", icon: "vibe", preferences: ["nightlife"] },
 ];
 
 const moodDestinationPools = {
@@ -607,7 +608,7 @@ export default function DashboardPage() {
                 navigate("/my-trips");
               }}
             >
-              🔔
+              <Icon name="bell" size={20} tone="accent" />
               {(smartSuggestion?.alert || (typeof navigator !== "undefined" && !navigator.onLine)) && (
                 <span className="dashboard-bell-dot" />
               )}
@@ -636,7 +637,9 @@ export default function DashboardPage() {
             }}
             aria-label="Open destination search"
           >
-            <span className="dashboard-search-trigger__icon">🔍</span>
+            <span className="dashboard-search-trigger__icon">
+              <Icon name="search" size={14} />
+            </span>
             <span>Where do you want to fly next?</span>
           </button>
 
@@ -653,7 +656,8 @@ export default function DashboardPage() {
                   setSelectedMoodId(filter.id);
                 }}
               >
-                {filter.icon} {filter.label}
+                <Icon name={filter.icon} size={14} tone={selectedMoodId === filter.id ? "accent" : "default"} />
+                {filter.label}
               </button>
             ))}
           </div>
@@ -667,7 +671,9 @@ export default function DashboardPage() {
               <button className="btn-luxury" type="button" onClick={heroState.ctaAction} style={{ justifySelf: "center" }}>
                 {heroState.ctaLabel}
               </button>
-              <span className="hero-bounce-chevron" aria-hidden="true">↓</span>
+              <span className="hero-bounce-chevron" aria-hidden="true">
+                <Icon name="arrowDown" size={20} />
+              </span>
               <p className="muted" style={{ margin: 0, fontSize: "0.78rem", letterSpacing: "0.12em", textTransform: "uppercase" }}>
                 Tap the glowing Tara Na! button below
               </p>
@@ -887,7 +893,7 @@ export default function DashboardPage() {
                     aria-expanded={isOpen}
                     onClick={() => setRevealedReason((current) => (current === item.id ? null : item.id))}
                   >
-                    ℹ️ Why this?
+                    <Icon name="info" size={14} /> Why this?
                   </button>
                   {isOpen ? (
                     <p className="foryou-card__reveal" role="status">{item.reason}</p>

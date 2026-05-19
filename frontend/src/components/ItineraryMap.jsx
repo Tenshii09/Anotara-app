@@ -314,7 +314,7 @@ function ItineraryMap(
       try {
         if (map.getLayer(layerId)) map.removeLayer(layerId);
         if (map.getSource(sourceId)) map.removeSource(sourceId);
-      } catch (_error) {
+      } catch {
         // Map style is being torn down; nothing to clean up.
       }
     });
@@ -326,19 +326,30 @@ function ItineraryMap(
     const directionsAbortController = new AbortController();
 
     const sortedDays = getSortedDays(itinerary);
-    const daysToRender = activeDay ? [Number(activeDay)] : sortedDays;
+    const hasActiveDay = activeDay !== null && activeDay !== undefined;
+    const activeDayNumber = hasActiveDay ? Number(activeDay) : null;
 
+    // Progressive Disclosure (Feature 4): render ALL days so the user always
+    // sees the full multi-day route, but dim inactive days to 30% opacity so
+    // the chosen day visually dominates.
     const bounds = new mapboxgl.LngLatBounds();
+    const focusedBounds = new mapboxgl.LngLatBounds();
     const allCoordinates = [];
+    let focusedCoordinateCount = 0;
     let sequenceNumber = 1;
 
-    daysToRender.forEach((dayNumber) => {
+    sortedDays.forEach((dayNumber) => {
       const dayPlaces = itinerary[dayNumber] || [];
       const coordinates = dayPlaces.map(getValidCoordinate).filter(Boolean);
+      const isFocused = !hasActiveDay || dayNumber === activeDayNumber;
 
       coordinates.forEach((coordinate) => {
         bounds.extend(coordinate);
         allCoordinates.push(coordinate);
+        if (isFocused) {
+          focusedBounds.extend(coordinate);
+          focusedCoordinateCount += 1;
+        }
       });
 
       // Draw the connecting line for this day. We always seed the source with
@@ -363,16 +374,14 @@ function ItineraryMap(
           },
           paint: {
             "line-color": DAY_COLORS[(dayNumber - 1) % DAY_COLORS.length],
-            "line-width": 4,
-            "line-opacity": 0.88,
+            "line-width": isFocused ? 5 : 3,
+            "line-opacity": isFocused ? 0.95 : 0.3,
+            "line-blur": isFocused ? 0 : 0.6,
           },
         });
 
         routeLayersRef.current.push({ sourceId, layerId });
 
-        // Upgrade the placeholder line to road-snapped geometry as soon as
-        // Mapbox responds. We guard against the layer having been torn down
-        // by a day switch that arrived first.
         fetchDrivingRoute(
           coordinates,
           MAPBOX_TOKEN,
@@ -401,14 +410,19 @@ function ItineraryMap(
           });
       }
 
-      // One numbered marker per stop, with a click-to-zoom popup attached so
-      // the map and the sidebar cards stay in sync.
       dayPlaces.forEach((place, index) => {
         const coordinate = getValidCoordinate(place);
         if (!coordinate) return;
 
         const stopNumber = sequenceNumber + index;
         const markerElement = createMarkerElement(place, dayNumber, stopNumber);
+        if (!isFocused) {
+          markerElement.classList.add("map-marker--dimmed");
+          markerElement.style.opacity = "0.34";
+          markerElement.style.filter = "grayscale(40%) saturate(0.85)";
+        } else {
+          markerElement.classList.add("map-marker--focused");
+        }
 
         const popup = new mapboxgl.Popup({
           offset: 18,
@@ -416,8 +430,6 @@ function ItineraryMap(
           maxWidth: "260px",
         }).setHTML(buildPopupHTML(place, dayNumber, stopNumber));
 
-        // Tapping a marker should zoom in just like tapping a sidebar card,
-        // so we wire flyTo here too.
         markerElement.addEventListener("click", (event) => {
           event.stopPropagation();
           map.flyTo({
@@ -439,7 +451,6 @@ function ItineraryMap(
       sequenceNumber += dayPlaces.length;
     });
 
-    // START/END tags book-end the visible route so the direction is obvious.
     if (allCoordinates.length > 0) {
       const startMarker = new mapboxgl.Marker({
         element: createTagElement("START", "#111827"),
@@ -460,19 +471,25 @@ function ItineraryMap(
       markersRef.current.push(endMarker);
     }
 
-    // Fit the camera to the new day. First draw snaps instantly so the map
-    // never shows a default-zoom flash; subsequent draws (day switches)
-    // animate smoothly.
-    if (allCoordinates.length > 1) {
-      map.fitBounds(bounds, {
+    // When a specific day is focused we frame just that day; otherwise we
+    // frame the whole trip. This is the heart of the progressive-disclosure
+    // animation — switching days smoothly pans + zooms the camera.
+    const targetBounds = focusedCoordinateCount > 0 ? focusedBounds : bounds;
+    const totalCoords =
+      focusedCoordinateCount > 0 ? focusedCoordinateCount : allCoordinates.length;
+
+    if (totalCoords > 1) {
+      map.fitBounds(targetBounds, {
         padding: 80,
         maxZoom: 14,
         duration: isFirstDrawRef.current ? 0 : 900,
         essential: true,
       });
-    } else if (allCoordinates.length === 1) {
+    } else if (totalCoords === 1) {
+      const center =
+        focusedCoordinateCount > 0 ? focusedBounds.getCenter() : new mapboxgl.LngLat(allCoordinates[0][0], allCoordinates[0][1]);
       map.flyTo({
-        center: allCoordinates[0],
+        center,
         zoom: 14,
         duration: isFirstDrawRef.current ? 0 : 900,
         essential: true,

@@ -16,9 +16,18 @@ import {
   updateProfilePreferences,
 } from "../lib/profileApi";
 import { getDashboardSummary, getSavedItineraries } from "../lib/tripsApi";
+import {
+  getFriends,
+  removeFriend,
+  respondToFriendRequest,
+  searchFriends,
+  sendFriendRequest,
+} from "../lib/socialApi";
 import { tapHaptic, successHaptic, warningHaptic } from "../lib/haptics";
 import Avatar from "./common/Avatar";
 import BottomSheet from "./common/BottomSheet";
+import Icon from "./common/Icon";
+import InviteCompanionSheet from "./common/InviteCompanionSheet";
 
 const BUDGET_OPTIONS = [
   { value: "low", label: "Backpacker" },
@@ -99,6 +108,8 @@ export default function ProfilePage() {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [friendsState, setFriendsState] = useState({ friends: [], incoming: [], outgoing: [] });
+  const [findFriendsOpen, setFindFriendsOpen] = useState(false);
 
   useEffect(() => {
     async function loadProfile() {
@@ -140,6 +151,17 @@ export default function ProfilePage() {
 
         const estimate = await estimateStorageUsage();
         setStorage(estimate);
+
+        try {
+          const friends = await getFriends(token);
+          setFriendsState({
+            friends: friends?.friends || [],
+            incoming: friends?.incoming || [],
+            outgoing: friends?.outgoing || [],
+          });
+        } catch {
+          /* friends list is optional */
+        }
       } catch (requestError) {
         if (requestError.status === 401 || requestError.status === 422) {
           clearStoredToken();
@@ -328,6 +350,63 @@ export default function ProfilePage() {
       setError(requestError.message || "Could not delete account.");
       setDeleteBusy(false);
     }
+  }
+
+  async function refreshFriends() {
+    const token = getStoredToken();
+    if (!token) return;
+    try {
+      const friends = await getFriends(token);
+      setFriendsState({
+        friends: friends?.friends || [],
+        incoming: friends?.incoming || [],
+        outgoing: friends?.outgoing || [],
+      });
+    } catch {
+      /* swallow */
+    }
+  }
+
+  async function handleAcceptFriendRequest(friendship_id) {
+    const token = getStoredToken();
+    if (!token) return;
+    try {
+      await respondToFriendRequest(token, friendship_id, "accepted");
+      successHaptic();
+      refreshFriends();
+    } catch (requestError) {
+      setError(requestError?.message || "Could not accept request.");
+    }
+  }
+
+  async function handleDeclineFriendRequest(friendship_id) {
+    const token = getStoredToken();
+    if (!token) return;
+    try {
+      await respondToFriendRequest(token, friendship_id, "declined");
+      tapHaptic();
+      refreshFriends();
+    } catch (requestError) {
+      setError(requestError?.message || "Could not decline request.");
+    }
+  }
+
+  async function handleRemoveFriend(friendId) {
+    const token = getStoredToken();
+    if (!token) return;
+    try {
+      await removeFriend(token, friendId);
+      warningHaptic();
+      refreshFriends();
+    } catch (requestError) {
+      setError(requestError?.message || "Could not remove friend.");
+    }
+  }
+
+  async function handleSendFriendRequestFromSheet(user) {
+    const token = getStoredToken();
+    await sendFriendRequest(token, user.id);
+    refreshFriends();
   }
 
   if (loading) {
@@ -533,6 +612,117 @@ export default function ProfilePage() {
           </div>
         </article>
 
+        {/* The Flock — Friends & companions */}
+        <article className="glass-card" style={{ padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <p className="dashboard-kicker">The Flock · Travel companions</p>
+              <h3 className="serif" style={{ margin: "4px 0 0" }}>Friends &amp; collaborators</h3>
+            </div>
+            <button
+              type="button"
+              className="btn-luxury"
+              onClick={() => {
+                tapHaptic();
+                setFindFriendsOpen(true);
+              }}
+            >
+              <Icon name="userPlus" size={16} /> Find friends
+            </button>
+          </div>
+
+          {friendsState.incoming.length > 0 ? (
+            <section style={{ marginTop: 16, display: "grid", gap: 8 }}>
+              <p className="dashboard-kicker">Pending requests</p>
+              {friendsState.incoming.map((friend) => (
+                <div key={friend.friendship_id} className="profile-friends__row">
+                  <span className="invite-sheet__avatar" aria-hidden="true">
+                    {String(friend.username || "T").charAt(0).toUpperCase()}
+                  </span>
+                  <div>
+                    <p className="invite-sheet__name">{friend.username}</p>
+                    <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+                      Wants to add you to their flock.
+                    </p>
+                  </div>
+                  <div className="profile-friends__actions">
+                    <button
+                      type="button"
+                      className="profile-friends__cta"
+                      onClick={() => handleAcceptFriendRequest(friend.friendship_id)}
+                    >
+                      <Icon name="check" size={14} /> Accept
+                    </button>
+                    <button
+                      type="button"
+                      className="profile-friends__cta profile-friends__cta--danger"
+                      onClick={() => handleDeclineFriendRequest(friend.friendship_id)}
+                    >
+                      <Icon name="close" size={14} /> Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          ) : null}
+
+          {friendsState.outgoing.length > 0 ? (
+            <section style={{ marginTop: 16, display: "grid", gap: 8 }}>
+              <p className="dashboard-kicker">Sent requests</p>
+              {friendsState.outgoing.map((friend) => (
+                <div key={friend.friendship_id} className="profile-friends__row">
+                  <span className="invite-sheet__avatar" aria-hidden="true">
+                    {String(friend.username || "T").charAt(0).toUpperCase()}
+                  </span>
+                  <div>
+                    <p className="invite-sheet__name">{friend.username}</p>
+                    <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>Waiting for them to respond.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="profile-friends__cta profile-friends__cta--danger"
+                    onClick={() => handleRemoveFriend(friend.id)}
+                  >
+                    <Icon name="close" size={14} /> Cancel
+                  </button>
+                </div>
+              ))}
+            </section>
+          ) : null}
+
+          <section style={{ marginTop: 16, display: "grid", gap: 8 }}>
+            <p className="dashboard-kicker">
+              Friends · {friendsState.friends.length}
+            </p>
+            {friendsState.friends.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>
+                No friends yet — tap <strong>Find friends</strong> to start your flock.
+              </p>
+            ) : (
+              friendsState.friends.map((friend) => (
+                <div key={friend.friendship_id} className="profile-friends__row">
+                  <span className="invite-sheet__avatar" aria-hidden="true">
+                    {String(friend.username || "T").charAt(0).toUpperCase()}
+                  </span>
+                  <div>
+                    <p className="invite-sheet__name">{friend.username}</p>
+                    {friend.email ? (
+                      <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>{friend.email}</p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="profile-friends__cta profile-friends__cta--danger"
+                    onClick={() => handleRemoveFriend(friend.id)}
+                  >
+                    <Icon name="trash" size={14} /> Remove
+                  </button>
+                </div>
+              ))
+            )}
+          </section>
+        </article>
+
         {/* Travel stats summary */}
         <article className="glass-card dashboard-stats">
           <p className="dashboard-kicker">Travel summary</p>
@@ -636,6 +826,21 @@ export default function ProfilePage() {
           autoComplete="off"
         />
       </BottomSheet>
+
+      <InviteCompanionSheet
+        open={findFriendsOpen}
+        onClose={() => setFindFriendsOpen(false)}
+        title="Find &amp; add friends"
+        flock={[]}
+        showCollaboratorList={false}
+        currentUserId={profile?.id}
+        searchEndpoint={async (query) => {
+          const token = getStoredToken();
+          return searchFriends(token, query);
+        }}
+        onSendFriendRequest={handleSendFriendRequestFromSheet}
+        emptyState="Search for any explorer by username or email — friend requests sent instantly."
+      />
     </main>
   );
 }

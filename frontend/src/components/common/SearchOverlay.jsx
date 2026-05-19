@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import Icon from "./Icon";
+
 // Tiny inner panel — separated so the parent can remount it on every open via
 // a key prop.  This lets us keep the "reset value on open" behavior without
 // calling setState inside an effect (which the React Compiler lint rule
@@ -43,7 +45,7 @@ function SearchOverlayPanel({
     <div className="search-overlay" role="dialog" aria-modal="true" aria-label="Search destinations">
       <header className="search-overlay__header">
         <button type="button" className="search-overlay__close" onClick={onClose} aria-label="Close search">
-          ←
+          <Icon name="arrowLeft" size={18} />
         </button>
         <form
           className="search-overlay__form"
@@ -84,7 +86,7 @@ function SearchOverlayPanel({
                   className="badge-pill search-overlay__pill"
                   onClick={() => submit(item)}
                 >
-                  🕒 {item}
+                  <Icon name="clock" size={14} /> {item}
                 </button>
               ))}
             </div>
@@ -144,9 +146,9 @@ function SearchOverlayPanel({
                 className="search-overlay__suggestion"
                 onClick={() => submit(destination)}
               >
-                <span aria-hidden="true">📍</span>
+                <Icon name="mapPin" size={16} tone="accent" />
                 <span>{destination}</span>
-                <span aria-hidden="true" className="search-overlay__chevron">›</span>
+                <Icon name="arrowRight" size={16} tone="muted" />
               </button>
             ))}
           </div>
@@ -164,11 +166,11 @@ const QUICK_REGIONS = [
 ];
 
 const TRENDING_TAGS = [
-  { id: "beach", label: "🌊 Beach" },
-  { id: "nature", label: "⛰️ Nature" },
-  { id: "food", label: "🍜 Food trip" },
-  { id: "culture", label: "🏛️ Culture" },
-  { id: "nightlife", label: "🌙 Nightlife" },
+  { id: "beach", label: "Beach" },
+  { id: "nature", label: "Nature" },
+  { id: "food", label: "Food trip" },
+  { id: "culture", label: "Culture" },
+  { id: "nightlife", label: "Nightlife" },
 ];
 
 /**
