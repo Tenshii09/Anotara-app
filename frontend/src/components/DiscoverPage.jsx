@@ -13,6 +13,7 @@ import {
 } from "../lib/storage";
 import { tapHaptic, successHaptic } from "../lib/haptics";
 import BottomSheet from "./common/BottomSheet";
+import PageSkeleton from "./common/PageSkeleton";
 import SearchOverlay from "./common/SearchOverlay";
 
 // Filter chips deliberately stack: tapping a region + a vibe + a weather chip
@@ -216,14 +217,11 @@ export default function DiscoverPage() {
 
   if (loading) {
     return (
-      <main className="app-page">
-        <section className="dashboard-shell">
-          <article className="glass-card dashboard-empty">
-            <h1 className="serif dashboard-title">Loading Discover...</h1>
-            <p className="muted">Finding destinations you might love.</p>
-          </article>
-        </section>
-      </main>
+      <PageSkeleton
+        variant="discover"
+        title="Loading Discover"
+        subtitle="Finding destinations you might love."
+      />
     );
   }
 

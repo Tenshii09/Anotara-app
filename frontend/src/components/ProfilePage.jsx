@@ -24,10 +24,12 @@ import {
   sendFriendRequest,
 } from "../lib/socialApi";
 import { tapHaptic, successHaptic, warningHaptic } from "../lib/haptics";
+import { applyTheme, getInitialTheme, persistTheme, THEMES } from "../lib/theme";
 import Avatar from "./common/Avatar";
 import BottomSheet from "./common/BottomSheet";
 import Icon from "./common/Icon";
 import InviteCompanionSheet from "./common/InviteCompanionSheet";
+import PageSkeleton from "./common/PageSkeleton";
 
 const BUDGET_OPTIONS = [
   { value: "low", label: "Backpacker" },
@@ -110,6 +112,7 @@ export default function ProfilePage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [friendsState, setFriendsState] = useState({ friends: [], incoming: [], outgoing: [] });
   const [findFriendsOpen, setFindFriendsOpen] = useState(false);
+  const [theme, setTheme] = useState(() => getInitialTheme());
 
   useEffect(() => {
     async function loadProfile() {
@@ -176,6 +179,11 @@ export default function ProfilePage() {
     }
     loadProfile();
   }, [navigate]);
+
+  useEffect(() => {
+    applyTheme(theme);
+    persistTheme(theme);
+  }, [theme]);
 
   const stats = useMemo(() => {
     if (serverStats) {
@@ -409,15 +417,18 @@ export default function ProfilePage() {
     refreshFriends();
   }
 
+  function handleThemeChange(nextTheme) {
+    tapHaptic();
+    setTheme(nextTheme);
+  }
+
   if (loading) {
     return (
-      <main className="app-page">
-        <section className="dashboard-shell">
-          <article className="glass-card dashboard-empty">
-            <h1 className="serif dashboard-title">Loading profile...</h1>
-          </article>
-        </section>
-      </main>
+      <PageSkeleton
+        variant="profile"
+        title="Loading profile"
+        subtitle="Preparing your account, preferences, and travel stats."
+      />
     );
   }
 
@@ -566,6 +577,37 @@ export default function ProfilePage() {
             <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
               Active sessions: <strong>This device</strong>
             </p>
+          </div>
+        </article>
+
+        {/* Appearance */}
+        <article className="glass-card theme-toggle-card">
+          <div className="theme-toggle-card__row">
+            <div className="theme-toggle-card__copy">
+              <p className="dashboard-kicker">Appearance</p>
+              <h3 className="serif">Color mode</h3>
+              <p className="muted" style={{ margin: 0 }}>
+                Switch between bright pastel glass and a calmer night palette.
+              </p>
+            </div>
+            <div className="theme-toggle" aria-label="Choose color mode">
+              <button
+                type="button"
+                className={theme === THEMES.light ? "is-active" : ""}
+                onClick={() => handleThemeChange(THEMES.light)}
+                aria-pressed={theme === THEMES.light}
+              >
+                Light
+              </button>
+              <button
+                type="button"
+                className={theme === THEMES.dark ? "is-active" : ""}
+                onClick={() => handleThemeChange(THEMES.dark)}
+                aria-pressed={theme === THEMES.dark}
+              >
+                Dark
+              </button>
+            </div>
           </div>
         </article>
 

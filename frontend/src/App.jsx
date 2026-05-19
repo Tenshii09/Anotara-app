@@ -11,6 +11,7 @@ import OfflineIndicator from "./components/common/OfflineIndicator";
 import DashboardPage from "./components/DashboardPage";
 import DiscoverPage from "./components/DiscoverPage";
 import ProfilePage from "./components/ProfilePage";
+import { applyTheme, getInitialTheme } from "./lib/theme";
 
 import "./App.css";
 
@@ -72,6 +73,10 @@ function RouteAwareBottomNav() {
 }
 
 export default function App() {
+  useEffect(() => {
+    applyTheme(getInitialTheme());
+  }, []);
+
   return (
     <BrowserRouter>
       <AnimatedBackground />

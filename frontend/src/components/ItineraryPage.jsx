@@ -10,6 +10,7 @@ import HotelCard from "./itinerary/HotelCard";
 import FlockCluster from "./common/FlockCluster";
 import InviteCompanionSheet from "./common/InviteCompanionSheet";
 import Icon from "./common/Icon";
+import PageSkeleton from "./common/PageSkeleton";
 import {
   API_BASE_URL,
   FIREBASE_VAPID_KEY,
@@ -879,18 +880,11 @@ export default function ItineraryPage() {
 
   if (isLoadingSavedTrip) {
     return (
-      <main className="app-page itinerary-page">
-        <div className="itinerary-shell">
-          <div className="itinerary-sidebar glass-card" style={{ maxWidth: "680px", margin: "0 auto" }}>
-            <h1 className="serif" style={{ fontSize: "2.6rem", marginTop: 0 }}>
-              Loading itinerary...
-            </h1>
-            <p className="muted" style={{ lineHeight: 1.7 }}>
-              Please wait while we open your saved trip.
-            </p>
-          </div>
-        </div>
-      </main>
+      <PageSkeleton
+        variant="itinerary"
+        title="Loading itinerary"
+        subtitle="Please wait while we open your saved trip."
+      />
     );
   }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { registerModalSurface } from "../../lib/modalActivity";
 import Icon from "./Icon";
 
 // Tiny inner panel — separated so the parent can remount it on every open via
@@ -22,8 +23,10 @@ function SearchOverlayPanel({
     const handle = window.requestAnimationFrame(() => {
       inputRef.current?.focus();
     });
+    const unregisterModal = registerModalSurface();
     document.body.style.overflow = "hidden";
     return () => {
+      unregisterModal();
       window.cancelAnimationFrame(handle);
       document.body.style.overflow = "";
     };

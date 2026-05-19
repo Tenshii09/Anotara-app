@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import { registerModalSurface } from "../../lib/modalActivity";
 import Icon from "./Icon";
 
 /**
@@ -30,9 +31,11 @@ export default function BottomSheet({
       }
     }
 
+    const unregisterModal = registerModalSurface();
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", handleKeyDown);
     return () => {
+      unregisterModal();
       document.body.style.overflow = "";
       document.removeEventListener("keydown", handleKeyDown);
     };

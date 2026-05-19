@@ -21,6 +21,7 @@ import { tapHaptic } from "../lib/haptics";
 import BrandLogo from "./common/BrandLogo";
 import Avatar from "./common/Avatar";
 import Icon from "./common/Icon";
+import PageSkeleton from "./common/PageSkeleton";
 import SearchOverlay from "./common/SearchOverlay";
 
 const moodFilters = [
@@ -571,14 +572,11 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <main className="app-page">
-        <section className="dashboard-shell">
-          <article className="glass-card dashboard-empty">
-            <h1 className="serif dashboard-title">Loading your dashboard...</h1>
-            <p className="muted">Pulling your latest trips, trends, and recommendations.</p>
-          </article>
-        </section>
-      </main>
+      <PageSkeleton
+        variant="dashboard"
+        title="Loading your dashboard"
+        subtitle="Pulling your latest trips, trends, and recommendations."
+      />
     );
   }
 

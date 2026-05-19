@@ -5,7 +5,7 @@
 
 .bottom-nav {
   position: fixed;
-  bottom: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   width: min(640px, calc(100vw - 32px));
@@ -14,15 +14,26 @@
   align-items: center;
   padding: 10px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--glass-bg);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
   backdrop-filter: blur(28px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--glass-border);
   box-shadow:
-    0 30px 70px -20px rgba(78, 60, 110, 0.32),
-    0 12px 32px -12px rgba(78, 60, 110, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    var(--shadow-floating),
+    var(--shadow-inset-highlight);
   z-index: 50;
+  transition:
+    opacity 240ms ease,
+    transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 240ms ease;
+  will-change: transform, opacity;
+}
+
+.bottom-nav--hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(calc(100% + 28px + env(safe-area-inset-bottom, 0px)));
+  visibility: hidden;
 }
 
 .bottom-nav-btn {
@@ -37,7 +48,7 @@
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
-  color: #6a6285;
+  color: var(--muted);
   transition:
     transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
     color 220ms ease,
@@ -52,7 +63,7 @@
 }
 
 .bottom-nav-btn:hover {
-  color: #4a3a8a;
+  color: var(--accent);
 }
 
 .bottom-nav-btn:hover .icon {
@@ -60,8 +71,8 @@
 }
 
 .bottom-nav-btn.active {
-  color: #4a3a8a;
-  background: rgba(255, 255, 255, 0.55);
+  color: var(--accent);
+  background: var(--glass-bg-strong);
 }
 
 .bottom-nav-btn.active::after {
@@ -73,7 +84,7 @@
   transform: translateX(-50%);
   height: 3px;
   width: 28px;
-  background: linear-gradient(90deg, #4a3a8a, #c44f8a);
+  background: linear-gradient(90deg, var(--accent), var(--accent-alt));
   border-radius: 999px;
 }
 

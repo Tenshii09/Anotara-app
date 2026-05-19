@@ -10,6 +10,7 @@ import {
 import { clearStoredToken, getStoredToken, saveWizardDraft } from "../lib/storage";
 import { tapHaptic, successHaptic, warningHaptic } from "../lib/haptics";
 import BottomSheet from "./common/BottomSheet";
+import PageSkeleton from "./common/PageSkeleton";
 
 // Lifecycle tabs match the spec's segmented categorisation engine — keeps
 // drafts, upcoming, active, and past trips visually distinct without losing
@@ -314,13 +315,11 @@ export default function MyTripsPage() {
 
   if (loading) {
     return (
-      <main className="app-page">
-        <section className="dashboard-shell">
-          <article className="glass-card dashboard-empty">
-            <h1 className="serif dashboard-title">Loading your trip vault...</h1>
-          </article>
-        </section>
-      </main>
+      <PageSkeleton
+        variant="trips"
+        title="Loading your trip vault"
+        subtitle="Collecting your saved journeys and travel dates."
+      />
     );
   }
 
