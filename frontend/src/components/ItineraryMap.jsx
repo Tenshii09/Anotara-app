@@ -35,6 +35,14 @@ const DAY_COLORS = [
 // Mapbox Directions API caps a single request at 25 waypoints on the driving profile.
 const MAX_DIRECTIONS_WAYPOINTS = 25;
 
+function isValidLongitude(value) {
+  return Number.isFinite(value) && value >= -180 && value <= 180;
+}
+
+function isValidLatitude(value) {
+  return Number.isFinite(value) && value >= -90 && value <= 90;
+}
+
 // Itinerary days arrive as an object keyed by day number. Sort once so route
 // drawing and the sidebar always agree on the order of the trip.
 function getSortedDays(itinerary) {
@@ -50,7 +58,22 @@ function getValidCoordinate(place) {
   const latitude = Number(place?.latitude ?? place?.lat);
   const longitude = Number(place?.longitude ?? place?.lon ?? place?.lng);
 
-  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+  if (isValidLatitude(latitude) && isValidLongitude(longitude)) {
+    return [longitude, latitude];
+  }
+
+  return null;
+}
+
+function normalizeMapboxCoordinate(coordinate) {
+  if (!Array.isArray(coordinate) || coordinate.length < 2) {
+    return null;
+  }
+
+  const longitude = Number(coordinate[0]);
+  const latitude = Number(coordinate[1]);
+
+  if (isValidLongitude(longitude) && isValidLatitude(latitude)) {
     return [longitude, latitude];
   }
 
@@ -73,11 +96,24 @@ function toRouteFeature(coordinates) {
 // geometry that connects every waypoint. Throws on a non-OK response so the
 // caller can fall back to a straight-line route.
 async function fetchDrivingRoute(coordinates, token, signal) {
-  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+  const waypoints = Array.isArray(coordinates)
+    ? coordinates.map(normalizeMapboxCoordinate).filter(Boolean)
+    : [];
+
+  if (waypoints.length < 2) {
     return null;
   }
 
-  const waypoints = coordinates.slice(0, MAX_DIRECTIONS_WAYPOINTS);
+  if (waypoints.length !== coordinates.length) {
+    throw new Error("Route contains invalid coordinates.");
+  }
+
+  if (waypoints.length > MAX_DIRECTIONS_WAYPOINTS) {
+    throw new Error(
+      `Mapbox Directions supports up to ${MAX_DIRECTIONS_WAYPOINTS} waypoints per request.`,
+    );
+  }
+
   const coordinateString = waypoints
     .map(([lon, lat]) => `${lon},${lat}`)
     .join(";");
@@ -396,10 +432,7 @@ function ItineraryMap(
             const source = liveMap.getSource(sourceId);
             if (!source) return;
 
-            source.setData({
-              type: "Feature",
-              geometry: routeGeometry,
-            });
+            source.setData(toRouteFeature(routeGeometry.coordinates));
           })
           .catch((error) => {
             if (error?.name === "AbortError") return;

@@ -4,7 +4,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, precision_recall_fscore_support
 from sklearn.model_selection import train_test_split
 
 
@@ -83,13 +83,16 @@ def build_place_catalog(df):
     )
 
 
-def train_model(dataset_path=DATASET_PATH):
+def train_model(dataset_path=DATASET_PATH, return_metrics=False):
     """Train the recommendation classifier and save the model artifacts."""
     df = load_dataset(dataset_path)
     feature_columns = get_feature_columns(df)
 
     X = df[feature_columns]
     y = df[TARGET_COLUMN]
+    if y.nunique() < 2:
+        raise ValueError("Training requires both positive and negative recommendation labels.")
+
     X_encoded = encode_features(X)
     model_columns = list(X_encoded.columns)
 
@@ -113,6 +116,27 @@ def train_model(dataset_path=DATASET_PATH):
 
     predictions = model.predict(X_test)
     accuracy = accuracy_score(y_test, predictions)
+    precision, recall, f1_score, _ = precision_recall_fscore_support(
+        y_test,
+        predictions,
+        average='binary',
+        zero_division=0,
+    )
+    metrics = {
+        'accuracy': float(accuracy),
+        'precision': float(precision),
+        'recall': float(recall),
+        'f1_score': float(f1_score),
+        'dataset_rows': int(len(df)),
+        'train_rows': int(len(X_train)),
+        'test_rows': int(len(X_test)),
+        'classification_report': classification_report(y_test, predictions, output_dict=True, zero_division=0),
+        'artifact_paths': {
+            'model': str(MODEL_PATH),
+            'columns': str(COLUMNS_PATH),
+            'place_catalog': str(PLACE_CATALOG_PATH),
+        },
+    }
 
     joblib.dump(model, MODEL_PATH)
     joblib.dump(model_columns, COLUMNS_PATH)
@@ -124,6 +148,9 @@ def train_model(dataset_path=DATASET_PATH):
     print(f"Saved model to: {MODEL_PATH}")
     print(f"Saved feature columns to: {COLUMNS_PATH}")
     print(f"Saved place catalog to: {PLACE_CATALOG_PATH}")
+
+    if return_metrics:
+        return model, model_columns, metrics
 
     return model, model_columns
 

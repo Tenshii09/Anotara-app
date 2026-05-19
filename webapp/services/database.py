@@ -6,7 +6,11 @@ focused on request/response logic.
 
 import hashlib
 import json
+import csv
+import tempfile
+from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import mysql.connector
 from flask import current_app
@@ -42,16 +46,18 @@ def get_table_columns(table_name):
         cursor.close()
         db.close()
 
-def ensure_user_preference_columns():
-    """Add columns used to persist algorithmic tuning preferences for the user.
+def ensure_user_columns():
+    """Add optional user columns used by profile tuning and admin RBAC.
 
-    These columns power the Profile "Algorithmic Preference Tuning Matrix" so
-    that future Tara Na! wizard runs and ML reranker calls inherit a user's
-    explicit preferences without re-asking on every flow.
+    Preference columns power the Profile "Algorithmic Preference Tuning Matrix"
+    so future Tara Na! wizard runs inherit explicit user preferences. The role
+    column is the backend source of truth for privileged admin access.
     """
     existing_columns = get_table_columns('users')
     missing_columns = []
 
+    if 'role' not in existing_columns:
+        missing_columns.append("ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'")
     if 'default_budget' not in existing_columns:
         missing_columns.append("ADD COLUMN default_budget VARCHAR(20) DEFAULT 'comfort'")
     if 'companion_vector' not in existing_columns:
@@ -60,6 +66,12 @@ def ensure_user_preference_columns():
         missing_columns.append("ADD COLUMN vibe_weights JSON NULL")
     if 'biometric_enabled' not in existing_columns:
         missing_columns.append("ADD COLUMN biometric_enabled BOOLEAN DEFAULT FALSE")
+    if 'account_status' not in existing_columns:
+        missing_columns.append("ADD COLUMN account_status VARCHAR(20) NOT NULL DEFAULT 'active'")
+    if 'suspended_at' not in existing_columns:
+        missing_columns.append('ADD COLUMN suspended_at DATETIME NULL')
+    if 'suspended_reason' not in existing_columns:
+        missing_columns.append('ADD COLUMN suspended_reason VARCHAR(255) NULL')
 
     if not missing_columns:
         return
@@ -74,9 +86,14 @@ def ensure_user_preference_columns():
         db.close()
 
 
+def ensure_user_preference_columns():
+    """Backward-compatible wrapper for older service callers."""
+    ensure_user_columns()
+
+
 def get_user_profile(user_id):
     """Return the basic profile payload for one user."""
-    ensure_user_preference_columns()
+    ensure_user_columns()
     db = get_db()
     cursor = db.cursor(dictionary=True)
 
@@ -84,7 +101,7 @@ def get_user_profile(user_id):
         cursor.execute(
             """
             SELECT id, username, email, default_budget, companion_vector,
-                   vibe_weights, biometric_enabled, created_at
+                   vibe_weights, biometric_enabled, role, created_at
             FROM users
             WHERE id = %s
             """,
@@ -113,7 +130,7 @@ def get_user_profile(user_id):
 
 def update_user_preferences(user_id, *, default_budget=None, companion_vector=None, vibe_weights=None, biometric_enabled=None):
     """Persist a partial update of the user's algorithmic preferences."""
-    ensure_user_preference_columns()
+    ensure_user_columns()
 
     assignments = []
     params = []
@@ -377,6 +394,16 @@ def ensure_place_metadata_columns():
         missing_columns.append("ADD COLUMN environment_type VARCHAR(20) DEFAULT 'Mixed'")
     if 'physical_intensity' not in existing_columns:
         missing_columns.append("ADD COLUMN physical_intensity VARCHAR(20) DEFAULT 'Medium'")
+    if 'status' not in existing_columns:
+        missing_columns.append("ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'published'")
+    if 'curation_notes' not in existing_columns:
+        missing_columns.append('ADD COLUMN curation_notes TEXT NULL')
+    if 'source' not in existing_columns:
+        missing_columns.append("ADD COLUMN source VARCHAR(40) DEFAULT 'system'")
+    if 'updated_at' not in existing_columns:
+        missing_columns.append('ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')
+    if 'updated_by' not in existing_columns:
+        missing_columns.append('ADD COLUMN updated_by INT NULL')
 
     if not missing_columns:
         return
@@ -1464,3 +1491,1174 @@ def swap_itinerary_item(itinerary_id, item_id):
     finally:
         cursor.close()
         db.close()
+
+
+ADMIN_ROLES = {'admin', 'super_admin'}
+USER_ROLES = {'user', 'admin', 'super_admin'}
+ACCOUNT_STATUSES = {'active', 'suspended'}
+PLACE_STATUSES = {'published', 'review', 'archived'}
+
+
+def _json_safe(value):
+    """Convert DB values into JSON-friendly primitives."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        return value.decode('utf-8')
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _coerce_json_value(value, fallback=None):
+    """Decode JSON columns that may be returned as strings by mysql-connector."""
+    if value is None:
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def ensure_admin_tables():
+    """Create and upgrade durable tables needed by the admin console."""
+    ensure_user_columns()
+    ensure_place_metadata_columns()
+    ensure_itinerary_metadata_columns()
+    ensure_itinerary_item_columns()
+    ensure_feedback_columns()
+    ensure_push_token_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_audit_log (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                actor_id    INT NOT NULL,
+                action      VARCHAR(80) NOT NULL,
+                target_type VARCHAR(40) NOT NULL,
+                target_id   INT NULL,
+                payload     JSON,
+                ip_address  VARCHAR(64),
+                user_agent  VARCHAR(255),
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ml_training_runs (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                status          VARCHAR(20) NOT NULL DEFAULT 'running',
+                dataset_rows    INT DEFAULT 0,
+                accuracy        DECIMAL(6, 4) NULL,
+                metrics         JSON,
+                artifact_paths  JSON,
+                started_by      INT NULL,
+                started_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+                completed_at    DATETIME NULL,
+                error_message   TEXT,
+                FOREIGN KEY (started_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_settings (
+                setting_key   VARCHAR(80) PRIMARY KEY,
+                setting_value TEXT,
+                value_type    VARCHAR(20) NOT NULL DEFAULT 'string',
+                description   VARCHAR(255),
+                updated_by    INT NULL,
+                updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_notification_log (
+                id             INT AUTO_INCREMENT PRIMARY KEY,
+                actor_id       INT NOT NULL,
+                audience_type  VARCHAR(30) NOT NULL,
+                target_user_id INT NULL,
+                title          VARCHAR(140) NOT NULL,
+                body           TEXT NOT NULL,
+                result         JSON,
+                created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        cursor.executemany(
+            """
+            INSERT IGNORE INTO admin_settings
+                (setting_key, setting_value, value_type, description)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                ('maintenance_mode', 'false', 'boolean', 'Temporarily pause user-facing trip generation notices.'),
+                ('admin_broadcasts_enabled', 'true', 'boolean', 'Allow admins to send targeted push notifications.'),
+                ('ml_auto_retrain_enabled', 'false', 'boolean', 'Reserve flag for scheduled recommendation model retraining.'),
+                ('content_review_required', 'true', 'boolean', 'Keep newly created admin places in review by default.'),
+            ),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_user_role(user_id):
+    """Return the current role for authorization decisions."""
+    ensure_user_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            "SELECT id, role, account_status FROM users WHERE id = %s",
+            (int(user_id),),
+        )
+        user = cursor.fetchone()
+        if not user:
+            return None
+        return {
+            'id': int(user['id']),
+            'role': user.get('role') or 'user',
+            'account_status': user.get('account_status') or 'active',
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+def log_admin_action(actor_id, action, target_type, target_id=None, payload=None, ip_address=None, user_agent=None):
+    """Persist a privileged action for auditability."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO admin_audit_log
+                (actor_id, action, target_type, target_id, payload, ip_address, user_agent)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                int(actor_id),
+                str(action)[:80],
+                str(target_type)[:40],
+                int(target_id) if target_id is not None else None,
+                json.dumps(_json_safe(payload or {})),
+                str(ip_address or '')[:64],
+                str(user_agent or '')[:255],
+            ),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+        db.close()
+
+
+def _append_date_filters(conditions, params, column_name, start_date=None, end_date=None):
+    """Append optional date-window filters to a query."""
+    if start_date:
+        conditions.append(f'DATE({column_name}) >= %s')
+        params.append(str(start_date)[:10])
+    if end_date:
+        conditions.append(f'DATE({column_name}) <= %s')
+        params.append(str(end_date)[:10])
+
+
+def get_admin_audit_log(limit=30, offset=0, action='', target_type='', actor_id=None, start_date=None, end_date=None):
+    """Return paginated privileged-action history."""
+    ensure_admin_tables()
+    safe_limit = max(1, min(int(limit or 30), 100))
+    safe_offset = max(0, int(offset or 0))
+    conditions = []
+    params = []
+    if action:
+        conditions.append('audit.action LIKE %s')
+        params.append(f'%{str(action).strip()}%')
+    if target_type:
+        conditions.append('audit.target_type = %s')
+        params.append(str(target_type).strip()[:40])
+    if actor_id:
+        conditions.append('audit.actor_id = %s')
+        params.append(int(actor_id))
+    _append_date_filters(conditions, params, 'audit.created_at', start_date, end_date)
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                audit.id,
+                audit.actor_id,
+                users.username AS actor_name,
+                users.email AS actor_email,
+                audit.action,
+                audit.target_type,
+                audit.target_id,
+                audit.payload,
+                audit.ip_address,
+                audit.user_agent,
+                audit.created_at
+            FROM admin_audit_log audit
+            LEFT JOIN users ON users.id = audit.actor_id
+            {where_sql}
+            ORDER BY audit.created_at DESC, audit.id DESC
+            LIMIT %s OFFSET %s
+            """,
+            tuple(params + [safe_limit, safe_offset]),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            row['payload'] = _coerce_json_value(row.get('payload'), {})
+        return [_json_safe(row) for row in rows]
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_admin_overview():
+    """Return command-center metrics backed by live database data."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute("SELECT COUNT(*) AS value FROM users")
+        total_users = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM users WHERE account_status = 'active'")
+        active_users = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM users WHERE role IN ('admin', 'super_admin')")
+        admin_users = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM itineraries")
+        itinerary_count = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM trip_feedback")
+        feedback_count = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM places")
+        places_count = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM places WHERE status = 'review'")
+        review_places = int((cursor.fetchone() or {}).get('value') or 0)
+
+        latest_run = get_latest_ml_training_run()
+        return {
+            'metrics': [
+                {'label': 'Active users', 'value': active_users, 'delta': f'{total_users} total accounts', 'tone': 'positive'},
+                {'label': 'Generated itineraries', 'value': itinerary_count, 'delta': f'{feedback_count} feedback signals', 'tone': 'positive'},
+                {'label': 'Places catalog', 'value': places_count, 'delta': f'{review_places} in review', 'tone': 'warning' if review_places else 'positive'},
+                {'label': 'Admin accounts', 'value': admin_users, 'delta': 'RBAC protected', 'tone': 'positive'},
+            ],
+            'model_status': latest_run,
+            'recent_audit': get_admin_audit_log(limit=6),
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_users(search_query='', limit=50):
+    """Return a searchable user-management list."""
+    ensure_user_columns()
+    safe_query = str(search_query or '').strip()
+    safe_limit = max(1, min(int(limit or 50), 100))
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        where_sql = ''
+        params = []
+        if safe_query:
+            where_sql = 'WHERE username LIKE %s OR email LIKE %s OR role LIKE %s OR account_status LIKE %s'
+            like_value = f'%{safe_query}%'
+            params.extend([like_value, like_value, like_value, like_value])
+
+        cursor.execute(
+            f"""
+            SELECT
+                users.id,
+                users.username,
+                users.email,
+                users.role,
+                users.account_status,
+                users.suspended_at,
+                users.suspended_reason,
+                users.created_at,
+                COUNT(DISTINCT itineraries.id) AS trip_count,
+                MAX(itineraries.created_at) AS last_trip_at
+            FROM users
+            LEFT JOIN itineraries ON itineraries.user_id = users.id
+            {where_sql}
+            GROUP BY users.id, users.username, users.email, users.role, users.account_status,
+                     users.suspended_at, users.suspended_reason, users.created_at
+            ORDER BY users.created_at DESC, users.id DESC
+            LIMIT %s
+            """,
+            tuple(params + [safe_limit]),
+        )
+        return [_json_safe(row) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_admin_user_role(actor_id, target_user_id, role):
+    """Change a user's role while preserving super-admin invariants."""
+    ensure_user_columns()
+    safe_role = str(role or '').strip()
+    if safe_role not in USER_ROLES:
+        return None, 'Invalid role.'
+
+    actor_id = int(actor_id)
+    target_user_id = int(target_user_id)
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute('SELECT id, role FROM users WHERE id = %s', (target_user_id,))
+        target = cursor.fetchone()
+        if not target:
+            return None, 'User not found.'
+
+        if actor_id == target_user_id and target.get('role') == 'super_admin' and safe_role != 'super_admin':
+            return None, 'You cannot demote your own super admin account.'
+
+        if target.get('role') == 'super_admin' and safe_role != 'super_admin':
+            cursor.execute("SELECT COUNT(*) AS value FROM users WHERE role = 'super_admin' AND account_status = 'active'")
+            super_admin_count = int((cursor.fetchone() or {}).get('value') or 0)
+            if super_admin_count <= 1:
+                return None, 'At least one active super admin is required.'
+
+        cursor.execute('UPDATE users SET role = %s WHERE id = %s', (safe_role, target_user_id))
+        db.commit()
+        return {'id': target_user_id, 'role': safe_role}, None
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_admin_user_status(actor_id, target_user_id, status, reason=''):
+    """Suspend or reactivate a user account without deleting data."""
+    ensure_user_columns()
+    safe_status = str(status or '').strip().lower()
+    if safe_status not in ACCOUNT_STATUSES:
+        return None, 'Invalid account status.'
+
+    actor_id = int(actor_id)
+    target_user_id = int(target_user_id)
+    if actor_id == target_user_id and safe_status == 'suspended':
+        return None, 'You cannot suspend your own admin account.'
+
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute('SELECT id, role, account_status FROM users WHERE id = %s', (target_user_id,))
+        target = cursor.fetchone()
+        if not target:
+            return None, 'User not found.'
+
+        if target.get('role') == 'super_admin' and safe_status == 'suspended':
+            cursor.execute("SELECT COUNT(*) AS value FROM users WHERE role = 'super_admin' AND account_status = 'active'")
+            super_admin_count = int((cursor.fetchone() or {}).get('value') or 0)
+            if super_admin_count <= 1:
+                return None, 'At least one active super admin is required.'
+
+        cursor.execute(
+            """
+            UPDATE users
+            SET account_status = %s,
+                suspended_at = CASE WHEN %s = 'suspended' THEN CURRENT_TIMESTAMP ELSE NULL END,
+                suspended_reason = CASE WHEN %s = 'suspended' THEN %s ELSE NULL END
+            WHERE id = %s
+            """,
+            (safe_status, safe_status, safe_status, str(reason or '')[:255], target_user_id),
+        )
+        db.commit()
+        return {'id': target_user_id, 'account_status': safe_status}, None
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_places(search_query='', limit=80):
+    """Return content-management rows from the places catalog."""
+    ensure_place_metadata_columns()
+    safe_query = str(search_query or '').strip()
+    safe_limit = max(1, min(int(limit or 80), 150))
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        where_sql = ''
+        params = []
+        if safe_query:
+            where_sql = 'WHERE name LIKE %s OR city LIKE %s OR category LIKE %s OR tags LIKE %s OR status LIKE %s'
+            like_value = f'%{safe_query}%'
+            params.extend([like_value, like_value, like_value, like_value, like_value])
+
+        cursor.execute(
+            f"""
+            SELECT
+                id, name, category, latitude, longitude, rating, city, tags,
+                environment_type, physical_intensity, status, curation_notes,
+                source, updated_at, updated_by
+            FROM places
+            {where_sql}
+            ORDER BY updated_at DESC, rating DESC, name ASC
+            LIMIT %s
+            """,
+            tuple(params + [safe_limit]),
+        )
+        return [_json_safe(row) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+        db.close()
+
+
+def create_admin_place(actor_id, payload):
+    """Create a destination/content record managed by admins."""
+    ensure_place_metadata_columns()
+    name = str(payload.get('name') or '').strip()
+    category = str(payload.get('category') or '').strip()
+    if not name or not category:
+        return None, 'Place name and category are required.'
+
+    status = str(payload.get('status') or 'review').strip().lower()
+    if status not in PLACE_STATUSES:
+        return None, 'Invalid place status.'
+
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO places
+                (name, category, latitude, longitude, rating, city, tags,
+                 environment_type, physical_intensity, status, curation_notes, source, updated_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                name,
+                category[:50],
+                payload.get('latitude'),
+                payload.get('longitude'),
+                payload.get('rating') or 0,
+                str(payload.get('city') or '')[:100],
+                str(payload.get('tags') or '')[:255],
+                str(payload.get('environment_type') or 'Mixed')[:20],
+                str(payload.get('physical_intensity') or 'Medium')[:20],
+                status,
+                payload.get('curation_notes'),
+                str(payload.get('source') or 'admin')[:40],
+                int(actor_id),
+            ),
+        )
+        db.commit()
+        place_id = cursor.lastrowid
+        return {'id': place_id}, None
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_admin_place(actor_id, place_id, payload):
+    """Patch editable admin fields for a destination/content record."""
+    ensure_place_metadata_columns()
+    allowed_fields = {
+        'name': 150,
+        'category': 50,
+        'latitude': None,
+        'longitude': None,
+        'rating': None,
+        'city': 100,
+        'tags': 255,
+        'environment_type': 20,
+        'physical_intensity': 20,
+        'status': 20,
+        'curation_notes': None,
+        'source': 40,
+    }
+    assignments = []
+    params = []
+
+    for field, max_length in allowed_fields.items():
+        if field not in payload:
+            continue
+        value = payload.get(field)
+        if field == 'status':
+            value = str(value or '').strip().lower()
+            if value not in PLACE_STATUSES:
+                return None, 'Invalid place status.'
+        elif isinstance(value, str) and max_length:
+            value = value.strip()[:max_length]
+        assignments.append(f'{field} = %s')
+        params.append(value)
+
+    if not assignments:
+        return {'id': int(place_id)}, None
+
+    assignments.extend(['updated_by = %s', 'updated_at = CURRENT_TIMESTAMP'])
+    params.extend([int(actor_id), int(place_id)])
+
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            f"UPDATE places SET {', '.join(assignments)} WHERE id = %s",
+            tuple(params),
+        )
+        db.commit()
+        if cursor.rowcount == 0:
+            return None, 'Place not found.'
+        return {'id': int(place_id)}, None
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_itineraries(search_query='', status='', limit=60):
+    """Return searchable itinerary rows for admin inspection."""
+    ensure_admin_tables()
+    safe_query = str(search_query or '').strip()
+    safe_status = str(status or '').strip()
+    safe_limit = max(1, min(int(limit or 60), 150))
+    conditions = []
+    params = []
+    if safe_query:
+        like_value = f'%{safe_query}%'
+        conditions.append(
+            '(itineraries.trip_name LIKE %s OR itineraries.destination LIKE %s '
+            'OR users.username LIKE %s OR users.email LIKE %s)'
+        )
+        params.extend([like_value, like_value, like_value, like_value])
+    if safe_status:
+        conditions.append('itineraries.status = %s')
+        params.append(safe_status[:20])
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            f"""
+            SELECT
+                itineraries.id,
+                itineraries.trip_name,
+                itineraries.destination,
+                itineraries.budget,
+                itineraries.num_days,
+                itineraries.pacing_style,
+                itineraries.companion_type,
+                itineraries.transport_mode,
+                itineraries.status,
+                itineraries.trip_start_date,
+                itineraries.created_at,
+                users.id AS user_id,
+                users.username AS owner_name,
+                users.email AS owner_email,
+                COUNT(DISTINCT itinerary_items.id) AS item_count,
+                COUNT(DISTINCT trip_feedback.id) AS feedback_count
+            FROM itineraries
+            LEFT JOIN users ON users.id = itineraries.user_id
+            LEFT JOIN itinerary_items ON itinerary_items.itinerary_id = itineraries.id
+            LEFT JOIN trip_feedback ON trip_feedback.itinerary_id = itineraries.id
+            {where_sql}
+            GROUP BY
+                itineraries.id, itineraries.trip_name, itineraries.destination, itineraries.budget,
+                itineraries.num_days, itineraries.pacing_style, itineraries.companion_type,
+                itineraries.transport_mode, itineraries.status, itineraries.trip_start_date,
+                itineraries.created_at, users.id, users.username, users.email
+            ORDER BY itineraries.created_at DESC, itineraries.id DESC
+            LIMIT %s
+            """,
+            tuple(params + [safe_limit]),
+        )
+        return [_json_safe(row) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_admin_itinerary_detail(itinerary_id):
+    """Return one itinerary with owner metadata and ordered stops."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                itineraries.*,
+                users.username AS owner_name,
+                users.email AS owner_email
+            FROM itineraries
+            LEFT JOIN users ON users.id = itineraries.user_id
+            WHERE itineraries.id = %s
+            """,
+            (int(itinerary_id),),
+        )
+        itinerary = cursor.fetchone()
+        if not itinerary:
+            return None
+
+        itinerary['preferences'] = _coerce_json_value(itinerary.get('preferences'), {})
+        cursor.execute(
+            """
+            SELECT
+                itinerary_items.id,
+                itinerary_items.day_number,
+                itinerary_items.sequence_order,
+                itinerary_items.estimated_duration,
+                itinerary_items.is_locked,
+                itinerary_items.swap_history,
+                places.id AS place_id,
+                places.name,
+                places.category,
+                places.city,
+                places.rating,
+                places.status AS place_status
+            FROM itinerary_items
+            LEFT JOIN places ON places.id = itinerary_items.place_id
+            WHERE itinerary_items.itinerary_id = %s
+            ORDER BY itinerary_items.day_number ASC, itinerary_items.sequence_order ASC, itinerary_items.id ASC
+            """,
+            (int(itinerary_id),),
+        )
+        items = cursor.fetchall()
+        cursor.execute(
+            """
+            SELECT rating_type AS label, COUNT(*) AS value
+            FROM trip_feedback
+            WHERE itinerary_id = %s
+            GROUP BY rating_type
+            ORDER BY value DESC
+            """,
+            (int(itinerary_id),),
+        )
+        feedback = cursor.fetchall()
+        return _json_safe({'itinerary': itinerary, 'items': items, 'feedback': feedback})
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_admin_notification_overview():
+    """Return push-token coverage and recent admin notification sends."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute("SELECT COUNT(*) AS value FROM push_tokens")
+        token_count = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(DISTINCT user_id) AS value FROM push_tokens")
+        reachable_users = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM users WHERE account_status = 'active'")
+        active_users = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute(
+            """
+            SELECT
+                log.id,
+                log.actor_id,
+                users.username AS actor_name,
+                log.audience_type,
+                log.target_user_id,
+                target.username AS target_name,
+                log.title,
+                log.body,
+                log.result,
+                log.created_at
+            FROM admin_notification_log log
+            LEFT JOIN users ON users.id = log.actor_id
+            LEFT JOIN users target ON target.id = log.target_user_id
+            ORDER BY log.created_at DESC, log.id DESC
+            LIMIT 20
+            """
+        )
+        recent = cursor.fetchall()
+        for row in recent:
+            row['result'] = _coerce_json_value(row.get('result'), {})
+        return _json_safe({
+            'token_count': token_count,
+            'reachable_users': reachable_users,
+            'active_users': active_users,
+            'recent': recent,
+        })
+    finally:
+        cursor.close()
+        db.close()
+
+
+def create_admin_notification_log(actor_id, audience_type, target_user_id, title, body, result):
+    """Persist the result of an admin-initiated notification send."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO admin_notification_log
+                (actor_id, audience_type, target_user_id, title, body, result)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                int(actor_id),
+                str(audience_type or 'targeted')[:30],
+                int(target_user_id) if target_user_id else None,
+                str(title or '')[:140],
+                str(body or ''),
+                json.dumps(_json_safe(result or {})),
+            ),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_push_recipient_ids(audience_type='all', target_user_id=None):
+    """Return user ids eligible for an admin push notification."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        if audience_type == 'user' and target_user_id:
+            cursor.execute(
+                """
+                SELECT DISTINCT users.id
+                FROM users
+                INNER JOIN push_tokens ON push_tokens.user_id = users.id
+                WHERE users.id = %s AND users.account_status = 'active'
+                """,
+                (int(target_user_id),),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT DISTINCT users.id
+                FROM users
+                INNER JOIN push_tokens ON push_tokens.user_id = users.id
+                WHERE users.account_status = 'active'
+                ORDER BY users.id ASC
+                LIMIT 500
+                """
+            )
+        return [int(row['id']) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_settings():
+    """Return editable operations settings."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                settings.setting_key,
+                settings.setting_value,
+                settings.value_type,
+                settings.description,
+                settings.updated_by,
+                users.username AS updated_by_name,
+                settings.updated_at
+            FROM admin_settings settings
+            LEFT JOIN users ON users.id = settings.updated_by
+            ORDER BY settings.setting_key ASC
+            """
+        )
+        return [_json_safe(row) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_admin_setting(actor_id, setting_key, setting_value):
+    """Update one existing operations setting."""
+    ensure_admin_tables()
+    safe_key = str(setting_key or '').strip()[:80]
+    if not safe_key:
+        return None, 'Setting key is required.'
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute('SELECT setting_key, value_type FROM admin_settings WHERE setting_key = %s', (safe_key,))
+        existing = cursor.fetchone()
+        if not existing:
+            return None, 'Setting not found.'
+
+        value_type = existing.get('value_type') or 'string'
+        safe_value = setting_value
+        if value_type == 'boolean':
+            safe_value = 'true' if str(setting_value).lower() in ('1', 'true', 'yes', 'on') else 'false'
+        elif value_type == 'number':
+            try:
+                safe_value = str(float(setting_value))
+            except (TypeError, ValueError):
+                return None, 'Setting value must be numeric.'
+        else:
+            safe_value = str(setting_value or '')[:500]
+
+        cursor.execute(
+            """
+            UPDATE admin_settings
+            SET setting_value = %s, updated_by = %s
+            WHERE setting_key = %s
+            """,
+            (safe_value, int(actor_id), safe_key),
+        )
+        db.commit()
+        return {'setting_key': safe_key, 'setting_value': safe_value}, None
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_admin_analytics(start_date=None, end_date=None):
+    """Return lightweight visualization data for the operations console."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        date_conditions = []
+        date_params = []
+        _append_date_filters(date_conditions, date_params, 'created_at', start_date, end_date)
+        date_where = f"WHERE {' AND '.join(date_conditions)}" if date_conditions else ''
+
+        cursor.execute(
+            f"""
+            SELECT DATE(created_at) AS label, COUNT(*) AS value
+            FROM itineraries
+            {date_where}
+            GROUP BY DATE(created_at)
+            ORDER BY label DESC
+            LIMIT 14
+            """,
+            tuple(date_params),
+        )
+        itinerary_trend = list(reversed(cursor.fetchall()))
+
+        feedback_conditions = []
+        feedback_params = []
+        _append_date_filters(feedback_conditions, feedback_params, 'created_at', start_date, end_date)
+        feedback_where = f"WHERE {' AND '.join(feedback_conditions)}" if feedback_conditions else ''
+        cursor.execute(
+            f"""
+            SELECT rating_type AS label, COUNT(*) AS value
+            FROM trip_feedback
+            {feedback_where}
+            GROUP BY rating_type
+            ORDER BY value DESC
+            """,
+            tuple(feedback_params),
+        )
+        feedback_labels = cursor.fetchall()
+
+        cursor.execute(
+            """
+            SELECT COALESCE(category, 'Uncategorized') AS label, COUNT(*) AS value
+            FROM places
+            GROUP BY COALESCE(category, 'Uncategorized')
+            ORDER BY value DESC
+            LIMIT 8
+            """
+        )
+        top_categories = cursor.fetchall()
+
+        cursor.execute(
+            f"""
+            SELECT DATE(created_at) AS label, COUNT(*) AS value
+            FROM users
+            {date_where}
+            GROUP BY DATE(created_at)
+            ORDER BY label DESC
+            LIMIT 14
+            """,
+            tuple(date_params),
+        )
+        user_growth = list(reversed(cursor.fetchall()))
+
+        cursor.execute("SELECT COUNT(*) AS value FROM push_tokens")
+        push_tokens = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM ml_training_runs")
+        ml_runs = int((cursor.fetchone() or {}).get('value') or 0)
+
+        return _json_safe({
+            'itinerary_trend': itinerary_trend,
+            'feedback_labels': feedback_labels,
+            'top_categories': top_categories,
+            'user_growth': user_growth,
+            'totals': {
+                'push_tokens': push_tokens,
+                'ml_runs': ml_runs,
+            },
+        })
+    finally:
+        cursor.close()
+        db.close()
+
+
+def create_ml_training_run(started_by, status='running', dataset_rows=0):
+    """Create a training-run record before work begins."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO ml_training_runs (status, dataset_rows, started_by)
+            VALUES (%s, %s, %s)
+            """,
+            (status, int(dataset_rows or 0), int(started_by)),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+        db.close()
+
+
+def finish_ml_training_run(run_id, *, status, dataset_rows=0, accuracy=None, metrics=None, artifact_paths=None, error_message=None):
+    """Complete a training-run record with metrics or failure details."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE ml_training_runs
+            SET status = %s,
+                dataset_rows = %s,
+                accuracy = %s,
+                metrics = %s,
+                artifact_paths = %s,
+                error_message = %s,
+                completed_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (
+                status,
+                int(dataset_rows or 0),
+                accuracy,
+                json.dumps(_json_safe(metrics or {})),
+                json.dumps(_json_safe(artifact_paths or {})),
+                error_message,
+                int(run_id),
+            ),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_latest_ml_training_run():
+    """Return the newest ML training run and artifact metadata."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                runs.id,
+                runs.status,
+                runs.dataset_rows,
+                runs.accuracy,
+                runs.metrics,
+                runs.artifact_paths,
+                runs.started_by,
+                users.username AS started_by_name,
+                runs.started_at,
+                runs.completed_at,
+                runs.error_message
+            FROM ml_training_runs runs
+            LEFT JOIN users ON users.id = runs.started_by
+            ORDER BY runs.started_at DESC, runs.id DESC
+            LIMIT 1
+            """
+        )
+        run = cursor.fetchone()
+        if run:
+            run['metrics'] = _coerce_json_value(run.get('metrics'), {})
+            run['artifact_paths'] = _coerce_json_value(run.get('artifact_paths'), {})
+            return _json_safe(run)
+
+        base_dir = Path(current_app.root_path).resolve()
+        artifacts = {
+            'model': base_dir / 'anotara_ml_model.pkl',
+            'columns': base_dir / 'anotara_model_columns.pkl',
+            'place_catalog': base_dir / 'anotara_place_catalog.pkl',
+        }
+        artifact_status = {
+            key: {
+                'path': str(path),
+                'exists': path.exists(),
+                'updated_at': datetime.fromtimestamp(path.stat().st_mtime).isoformat() if path.exists() else None,
+            }
+            for key, path in artifacts.items()
+        }
+        return {
+            'id': None,
+            'status': 'ready' if all(item['exists'] for item in artifact_status.values()) else 'not_trained',
+            'dataset_rows': 0,
+            'accuracy': None,
+            'metrics': {},
+            'artifact_paths': artifact_status,
+            'started_by': None,
+            'started_by_name': None,
+            'started_at': None,
+            'completed_at': None,
+            'error_message': None,
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_ml_training_runs(limit=8):
+    """Return recent ML training history for the admin console."""
+    ensure_admin_tables()
+    safe_limit = max(1, min(int(limit or 8), 30))
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                runs.id,
+                runs.status,
+                runs.dataset_rows,
+                runs.accuracy,
+                runs.metrics,
+                runs.started_at,
+                runs.completed_at,
+                runs.error_message,
+                users.username AS started_by_name
+            FROM ml_training_runs runs
+            LEFT JOIN users ON users.id = runs.started_by
+            ORDER BY runs.started_at DESC, runs.id DESC
+            LIMIT %s
+            """,
+            (safe_limit,),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            row['metrics'] = _coerce_json_value(row.get('metrics'), {})
+        return [_json_safe(row) for row in rows]
+    finally:
+        cursor.close()
+        db.close()
+
+
+def export_feedback_training_dataset():
+    """Export user-generated planning signals into a CSV for model retraining."""
+    ensure_feedback_columns()
+    ensure_itinerary_metadata_columns()
+    ensure_place_metadata_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                itineraries.budget AS user_budget,
+                itineraries.num_days AS user_days,
+                itineraries.preferences,
+                places.name AS place_name,
+                COALESCE(places.city, '') AS place_province,
+                places.category AS place_category,
+                places.rating AS place_rating,
+                trip_feedback.rating_type
+            FROM trip_feedback
+            INNER JOIN itineraries ON itineraries.id = trip_feedback.itinerary_id
+            INNER JOIN places ON places.id = trip_feedback.place_id
+            WHERE places.name IS NOT NULL
+            ORDER BY trip_feedback.created_at DESC
+            """
+        )
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
+
+    preference_keys = ['food', 'beach', 'nature', 'museums', 'nightlife']
+    records = []
+    for row in rows:
+        preferences = _coerce_json_value(row.get('preferences'), [])
+        preference_tokens = {str(item).lower() for item in preferences if item}
+        record = {
+            'user_budget': row.get('user_budget') or 'comfort',
+            'user_days': int(row.get('user_days') or 1),
+            'place_name': row.get('place_name') or '',
+            'place_province': row.get('place_province') or '',
+            'place_category': row.get('place_category') or 'general',
+            'place_rating': float(row.get('place_rating') or 3.5),
+            'is_recommended': 1 if str(row.get('rating_type') or '').lower() in {'best pick', 'best_pick', 'like', 'liked'} else 0,
+        }
+        for key in preference_keys:
+            record[f'pref_{key}'] = 1 if key in preference_tokens else 0
+        records.append(record)
+
+    if not records:
+        return None, 0
+
+    fieldnames = [
+        'user_budget',
+        'user_days',
+        'pref_beach',
+        'pref_food',
+        'pref_museums',
+        'pref_nature',
+        'pref_nightlife',
+        'place_name',
+        'place_province',
+        'place_category',
+        'place_rating',
+        'is_recommended',
+    ]
+    dataset_file = tempfile.NamedTemporaryFile(
+        mode='w',
+        newline='',
+        suffix='.csv',
+        prefix='anotara_feedback_training_',
+        delete=False,
+        encoding='utf-8',
+    )
+    with dataset_file:
+        writer = csv.DictWriter(dataset_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+    return dataset_file.name, len(records)

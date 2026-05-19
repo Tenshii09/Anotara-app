@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import AuthPage from "./components/AuthPage";
 import ItineraryPage from "./components/ItineraryPage";
@@ -11,6 +11,15 @@ import OfflineIndicator from "./components/common/OfflineIndicator";
 import DashboardPage from "./components/DashboardPage";
 import DiscoverPage from "./components/DiscoverPage";
 import ProfilePage from "./components/ProfilePage";
+import AdminPanelPage from "./components/AdminPanelPage";
+import {
+  clearSession,
+  getValidAccessToken,
+  hasStoredSession,
+  onSessionExpired,
+  scheduleSilentRefresh,
+} from "./lib/authSession";
+import { getStoredToken } from "./lib/storage";
 import { applyTheme, getInitialTheme } from "./lib/theme";
 
 import "./App.css";
@@ -64,7 +73,7 @@ function LaunchSplash() {
  */
 function RouteAwareBottomNav() {
   const location = useLocation();
-  const hiddenPrefixes = ["/login", "/register", "/generate"];
+  const hiddenPrefixes = ["/login", "/register", "/generate", "/admin"];
   const pathname = location.pathname;
   const shouldHide =
     pathname === "/" || hiddenPrefixes.some((prefix) => pathname.startsWith(prefix));
@@ -72,21 +81,64 @@ function RouteAwareBottomNav() {
   return <BottomNav />;
 }
 
-export default function App() {
+function SessionManager() {
+  const navigate = useNavigate();
+  const [sessionToast, setSessionToast] = useState("");
+
   useEffect(() => {
     applyTheme(getInitialTheme());
   }, []);
 
+  useEffect(() => {
+    const token = getStoredToken();
+    if (!token) return;
+
+    if (hasStoredSession()) {
+      scheduleSilentRefresh(token);
+      return;
+    }
+
+    getValidAccessToken({ forceRefresh: true }).catch(() => {
+      clearSession();
+    });
+  }, []);
+
+  useEffect(() => {
+    return onSessionExpired((event) => {
+      const message =
+        event.detail?.message || "Your session expired. Please log in again.";
+      setSessionToast(message);
+
+      if (!["/", "/login", "/register"].includes(window.location.pathname)) {
+        navigate("/login", { replace: true });
+      }
+    });
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!sessionToast) return undefined;
+    const timer = window.setTimeout(() => setSessionToast(""), 5200);
+    return () => window.clearTimeout(timer);
+  }, [sessionToast]);
+
+  return sessionToast ? (
+    <div className="session-toast" role="status" aria-live="polite">
+      {sessionToast}
+    </div>
+  ) : null;
+}
+
+function AppRouteFrame() {
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith("/admin");
+
   return (
-    <BrowserRouter>
-      <AnimatedBackground />
-      <LaunchSplash />
-      <OfflineIndicator />
+    <>
       {/*
-        The bottom padding reserves space for the floating glass nav so the
-        last card on each route is never clipped by it.
+        The bottom padding reserves space for the floating glass nav on mobile
+        routes. The desktop admin console owns the full viewport.
       */}
-      <div style={{ paddingBottom: "96px" }}>
+      <div className={isAdminRoute ? "app-route-frame app-route-frame--admin" : "app-route-frame"}>
         <Routes>
           <Route path="/" element={<AuthPage initialMode="login" />} />
           <Route path="/login" element={<AuthPage initialMode="login" />} />
@@ -100,11 +152,24 @@ export default function App() {
 
           <Route path="/discover" element={<DiscoverPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/admin" element={<AdminPanelPage />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
       <RouteAwareBottomNav />
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AnimatedBackground />
+      <LaunchSplash />
+      <OfflineIndicator />
+      <SessionManager />
+      <AppRouteFrame />
     </BrowserRouter>
   );
 }

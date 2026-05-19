@@ -73,6 +73,16 @@ export function getStoredToken() {
   return window.localStorage.getItem(TOKEN_STORAGE_KEY) || "";
 }
 
+export function saveStoredToken(token) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (token) {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  }
+}
+
 export function clearStoredToken() {
   if (typeof window === "undefined") {
     return;

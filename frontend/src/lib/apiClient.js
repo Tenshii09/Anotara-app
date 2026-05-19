@@ -1,4 +1,8 @@
 import { API_BASE_URL } from "./config";
+import {
+  emitSessionExpired,
+  getValidAccessToken,
+} from "./authSession";
 
 function normalizeErrorMessage(status, payload) {
   const payloadMessage =
@@ -22,16 +26,38 @@ function normalizeErrorMessage(status, payload) {
 }
 
 export async function apiRequest(path, options = {}) {
-  const { token = "", headers = {}, ...restOptions } = options;
+  const { token = "", headers = {}, skipAuthRefresh = false, ...restOptions } = options;
 
-  try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+  async function resolveToken(forceRefresh = false) {
+    if (skipAuthRefresh) return token;
+    try {
+      return await getValidAccessToken({ forceRefresh });
+    } catch {
+      return token;
+    }
+  }
+
+  async function sendRequest(authToken) {
+    return fetch(`${API_BASE_URL}${path}`, {
       ...restOptions,
+      credentials: restOptions.credentials || "include",
       headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         ...headers,
       },
     });
+  }
+
+  try {
+    let response = await sendRequest(await resolveToken(false));
+
+    if (!skipAuthRefresh && (response.status === 401 || response.status === 422)) {
+      try {
+        response = await sendRequest(await resolveToken(true));
+      } catch {
+        emitSessionExpired("Your session expired. Please log in again.");
+      }
+    }
 
     const hasJsonBody = response.headers
       .get("content-type")
@@ -43,6 +69,9 @@ export async function apiRequest(path, options = {}) {
       const requestError = new Error(normalizeErrorMessage(response.status, payload));
       requestError.status = response.status;
       requestError.payload = payload;
+      if (!skipAuthRefresh && (response.status === 401 || response.status === 422)) {
+        emitSessionExpired(requestError.message);
+      }
       throw requestError;
     }
 

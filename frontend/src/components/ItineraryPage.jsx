@@ -12,12 +12,12 @@ import InviteCompanionSheet from "./common/InviteCompanionSheet";
 import Icon from "./common/Icon";
 import PageSkeleton from "./common/PageSkeleton";
 import {
-  API_BASE_URL,
   FIREBASE_VAPID_KEY,
   HAS_FIREBASE_CONFIG,
   getMissingFirebaseConfigKeys,
-  TOKEN_STORAGE_KEY,
 } from "../lib/config";
+import { apiRequest } from "../lib/apiClient";
+import { decodeJwtPayload } from "../lib/authSession";
 import { getFirebasePushToken } from "../lib/firebase";
 import {
   clearStoredToken,
@@ -144,16 +144,112 @@ function normalizeSavedTrip(data) {
   };
 }
 
-function decodeJwtSubject(token) {
-  if (!token || typeof token !== "string" || token.split(".").length !== 3) return null;
-  try {
-    const payload = token.split(".")[1];
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-    return JSON.parse(atob(padded));
-  } catch {
-    return null;
+function formatDisplayDate(date) {
+  if (!date) return "";
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat("en-PH", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(parsed);
+}
+
+function getConfirmedTripDates(trip) {
+  const startDateValue = trip?.tripStartDate || trip?.trip_start_date;
+  const numDays = Number(trip?.numDays || trip?.num_days || trip?.days || 1);
+  const startDate = startDateValue ? new Date(`${startDateValue}T00:00:00`) : null;
+
+  if (!startDate || Number.isNaN(startDate.getTime())) {
+    return {
+      range: "Flexible dates",
+      helper: "Add exact dates from My Trips when your booking window is locked.",
+    };
   }
+
+  const endDate = new Date(startDate.getTime() + Math.max(numDays - 1, 0) * 24 * 60 * 60 * 1000);
+  return {
+    range: `${formatDisplayDate(startDateValue)} - ${new Intl.DateTimeFormat("en-PH", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(endDate)}`,
+    helper: `${numDays} day${numDays === 1 ? "" : "s"} confirmed for ${trip.destination || "your trip"}.`,
+  };
+}
+
+function SavePlanningOverlay() {
+  return (
+    <div className="save-plan-overlay" role="status" aria-live="polite" aria-label="Saving itinerary">
+      <div className="save-plan-overlay__card">
+        <span className="save-plan-spinner" aria-hidden="true" />
+        <p className="hero-chip">Save & Plan</p>
+        <h2 className="serif">Finalizing your perfect trip...</h2>
+        <p className="muted">
+          We are locking in your customized route, dates, and downloadable itinerary.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SavePlanningSuccess({ trip, tripDates, onDownloadPdf, onBackToItinerary, onPlanNewTrip }) {
+  const nextSteps = [
+    "Pack your bags around the day-by-day pace.",
+    "Check the weather 24 hours before departure.",
+    "Share the itinerary with your travel companions.",
+    "Keep a digital and offline copy of bookings.",
+  ];
+
+  return (
+    <main className="app-page save-plan-success-page">
+      <section className="save-plan-success glass-card" aria-labelledby="save-plan-success-title">
+        <span className="save-plan-success__icon" aria-hidden="true">
+          <Icon name="check" size={32} />
+        </span>
+        <p className="hero-chip">Trip Saved</p>
+        <h1 id="save-plan-success-title" className="serif">
+          {trip.destination || "Your itinerary"} is ready.
+        </h1>
+        <p className="muted save-plan-success__copy">
+          Your customized itinerary has been finalized. Download a polished PDF or keep planning
+          from the interactive map.
+        </p>
+
+        <div className="save-plan-success__dates">
+          <span>
+            <Icon name="calendar" size={18} /> Confirmed trip dates
+          </span>
+          <strong>{tripDates.range}</strong>
+          <p>{tripDates.helper}</p>
+        </div>
+
+        <div className="save-plan-success__actions">
+          <button className="btn-luxury" type="button" onClick={onDownloadPdf}>
+            <Icon name="download" size={16} /> Download Itinerary as PDF
+          </button>
+          <button className="btn-outline-luxury" type="button" onClick={onBackToItinerary}>
+            Back to itinerary
+          </button>
+          <button className="top-action-link" type="button" onClick={onPlanNewTrip}>
+            Plan another trip
+          </button>
+        </div>
+
+        <div className="save-plan-success__checklist">
+          <h2 className="serif">Next Steps</h2>
+          <ul>
+            {nextSteps.map((step) => (
+              <li key={step}>
+                <Icon name="check" size={16} />
+                <span>{step}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    </main>
+  );
 }
 
 export default function ItineraryPage() {
@@ -170,6 +266,7 @@ export default function ItineraryPage() {
   const [feedbackState, setFeedbackState] = useState({});
   const [feedbackError, setFeedbackError] = useState("");
   const [swappingItemId, setSwappingItemId] = useState(null);
+  const [savePlanStatus, setSavePlanStatus] = useState("idle");
 
   const [smartSuggestion, setSmartSuggestion] = useState(null);
   const [smartSuggestionError, setSmartSuggestionError] = useState("");
@@ -199,7 +296,7 @@ export default function ItineraryPage() {
 
   const mapHandleRef = useRef(null);
   const [tokenPayload] = useState(
-    () => decodeJwtSubject(localStorage.getItem(TOKEN_STORAGE_KEY)) || {},
+    () => decodeJwtPayload(getStoredToken()) || {},
   );
   const currentUserId = tokenPayload?.sub ? Number(tokenPayload.sub) : null;
 
@@ -212,6 +309,8 @@ export default function ItineraryPage() {
         .sort((left, right) => left - right),
     [localItinerary],
   );
+
+  const tripDates = useMemo(() => getConfirmedTripDates(trip), [trip]);
 
   const focusPlaceOnMap = useCallback((place, placeKey) => {
     const latitude = Number(place?.latitude ?? place?.lat);
@@ -245,25 +344,18 @@ export default function ItineraryPage() {
         }
 
         try {
-          const response = await fetch(`${API_BASE_URL}/api/itineraries/${itineraryId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            if (response.status === 401 || response.status === 422) {
-              clearStoredToken();
-              navigate("/login");
-              return;
-            }
-            setLoadError(data.error || data.msg || "Could not load saved itinerary.");
-            return;
-          }
+          const data = await apiRequest(`/api/itineraries/${itineraryId}`, { token });
           const normalizedTrip = normalizeSavedTrip(data);
           setTrip(normalizedTrip);
           setLocalItinerary(normalizedTrip.itinerary || {});
           saveTripData(normalizedTrip);
-        } catch {
-          setLoadError("Connection error while loading saved itinerary.");
+        } catch (requestError) {
+          if (requestError.status === 401 || requestError.status === 422) {
+            clearStoredToken();
+            navigate("/login");
+            return;
+          }
+          setLoadError(requestError.message || "Connection error while loading saved itinerary.");
         } finally {
           setIsLoadingSavedTrip(false);
         }
@@ -507,22 +599,17 @@ export default function ItineraryPage() {
         return;
       }
       const token = getStoredToken();
-      const saveResponse = await fetch(`${API_BASE_URL}/api/push-tokens`, {
+      await apiRequest("/api/push-tokens", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        token,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: firebaseToken, platform: "web", user_agent: navigator.userAgent }),
       });
-      if (!saveResponse.ok) {
-        const data = await saveResponse.json();
-        setPushStatus("error");
-        setPushError(data.error || "Could not save the push subscription.");
-        return;
-      }
       setPushStatus("subscribed");
       if (smartSuggestion?.alert) maybeNotifyWeatherAlert(smartSuggestion);
-    } catch {
+    } catch (requestError) {
       setPushStatus("error");
-      setPushError("Could not enable device push alerts.");
+      setPushError(requestError.message || "Could not enable device push alerts.");
     }
   };
 
@@ -539,25 +626,20 @@ export default function ItineraryPage() {
 
     async function loadSuggestion() {
       try {
-        const response = await fetch(
-          `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/smart-suggestion`,
-          { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal },
-        );
-        const data = await response.json();
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 422) {
-            clearStoredToken();
-            navigate("/login");
-            return;
-          }
-          setSmartSuggestionError(data.error || "Could not load smart suggestion.");
-          return;
-        }
+        const data = await apiRequest(`/api/itineraries/${trip.itineraryId}/smart-suggestion`, {
+          token,
+          signal: controller.signal,
+        });
         setSmartSuggestion(data);
         setSmartSuggestionError("");
       } catch (suggestionError) {
+        if (suggestionError.status === 401 || suggestionError.status === 422) {
+          clearStoredToken();
+          navigate("/login");
+          return;
+        }
         if (suggestionError.name !== "AbortError") {
-          setSmartSuggestionError("Weather suggestions are temporarily unavailable.");
+          setSmartSuggestionError(suggestionError.message || "Weather suggestions are temporarily unavailable.");
         }
       }
     }
@@ -588,13 +670,14 @@ export default function ItineraryPage() {
         const firebaseToken = await getFirebasePushToken();
         if (!firebaseToken) return;
         const token = getStoredToken();
-        const response = await fetch(`${API_BASE_URL}/api/push-tokens`, {
+        await apiRequest("/api/push-tokens", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          token,
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token: firebaseToken, platform: "web", user_agent: navigator.userAgent }),
           signal: controller.signal,
         });
-        if (response.ok) setPushStatus("subscribed");
+        setPushStatus("subscribed");
       } catch (syncError) {
         if (syncError?.name === "AbortError") return;
         setPushStatus((current) => (current === "subscribed" ? current : "idle"));
@@ -616,26 +699,24 @@ export default function ItineraryPage() {
   const persistDayOrder = async (dayNumber, nextPlaces) => {
     if (!trip?.itineraryId) return;
     const token = getStoredToken();
-    const response = await fetch(
-      `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/items/reorder`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          items: nextPlaces.map((place, index) => ({
-            item_id: place.item_id,
-            day_number: dayNumber,
-            sequence_order: index + 1,
-          })),
-        }),
-      },
-    );
+    const data = await apiRequest(`/api/itineraries/${trip.itineraryId}/items/reorder`, {
+      method: "PATCH",
+      token,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: nextPlaces.map((place, index) => ({
+          item_id: place.item_id,
+          day_number: dayNumber,
+          sequence_order: index + 1,
+        })),
+      }),
+    });
     try {
       await postTripActivity(token, trip.itineraryId, "reordered_day", { day: dayNumber });
     } catch {
       /* activity ping is best-effort */
     }
-    return response.json();
+    return data;
   };
 
   const updateDayPlaces = async (dayNumber, nextPlaces) => {
@@ -649,25 +730,18 @@ export default function ItineraryPage() {
     setFeedbackError("");
     const token = getStoredToken();
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/itinerary/${trip.itineraryId}/feedback`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ place_id: placeId, feedback }),
-        },
-      );
-      const data = await response.json();
-      if (!response.ok) {
-        setFeedbackError(data.error || "Could not save feedback.");
-        return;
-      }
+      await apiRequest(`/api/itinerary/${trip.itineraryId}/feedback`, {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ place_id: placeId, feedback }),
+      });
       setFeedbackState((current) => ({
         ...current,
         [placeId]: feedback === "like" ? "liked" : "disliked",
       }));
-    } catch {
-      setFeedbackError("Network error while saving feedback.");
+    } catch (requestError) {
+      setFeedbackError(requestError.message || "Network error while saving feedback.");
     }
   };
 
@@ -688,19 +762,12 @@ export default function ItineraryPage() {
     const token = getStoredToken();
     setSwappingItemId(place.item_id);
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/itineraries/${trip.itineraryId}/items/${place.item_id}/swap`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({}),
-        },
-      );
-      const data = await response.json();
-      if (!response.ok) {
-        setFeedbackError(data.error || "Could not swap place.");
-        return;
-      }
+      const data = await apiRequest(`/api/itineraries/${trip.itineraryId}/items/${place.item_id}/swap`, {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
       const replacementPlace = normalizeItineraryPlaces({
         1: [
           {
@@ -728,8 +795,8 @@ export default function ItineraryPage() {
       } catch {
         /* best-effort */
       }
-    } catch {
-      setFeedbackError("Network error while swapping place.");
+    } catch (requestError) {
+      setFeedbackError(requestError.message || "Network error while swapping place.");
     } finally {
       setSwappingItemId(null);
     }
@@ -742,25 +809,18 @@ export default function ItineraryPage() {
     const token = getStoredToken();
     const nextLocked = !place.is_locked;
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/itineraries/items/${place.item_id}/lock`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ itinerary_id: trip.itineraryId, is_locked: nextLocked }),
-        },
-      );
-      const data = await response.json();
-      if (!response.ok) {
-        setFeedbackError(data.error || "Could not update lock state.");
-        return;
-      }
+      const data = await apiRequest(`/api/itineraries/items/${place.item_id}/lock`, {
+        method: "PATCH",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itinerary_id: trip.itineraryId, is_locked: nextLocked }),
+      });
       const nextPlaces = (localItinerary[dayNumber] || []).map((item) =>
         item.item_id === place.item_id ? { ...item, is_locked: data.is_locked } : item,
       );
       updateTripState({ ...localItinerary, [dayNumber]: nextPlaces });
-    } catch {
-      setFeedbackError("Network error while updating lock state.");
+    } catch (requestError) {
+      setFeedbackError(requestError.message || "Network error while updating lock state.");
     }
   };
 
@@ -869,6 +929,32 @@ export default function ItineraryPage() {
     });
   }
 
+  async function handleSaveItinerary() {
+    if (!trip || savePlanStatus === "saving") return;
+    tapHaptic();
+    setFeedbackError("");
+    setSavePlanStatus("saving");
+
+    try {
+      const finalizedTrip = {
+        ...trip,
+        itinerary: localItinerary,
+        savedAt: new Date().toISOString(),
+      };
+
+      saveTripData(finalizedTrip);
+      await Promise.resolve();
+
+      setTrip(finalizedTrip);
+      successHaptic();
+      setSavePlanStatus("success");
+    } catch (saveError) {
+      warningHaptic();
+      setFeedbackError(saveError?.message || "Could not save this itinerary. Please try again.");
+      setSavePlanStatus("idle");
+    }
+  }
+
   const isOwner = useMemo(() => {
     const owner = (flock || []).find((member) => member.role === "owner");
     return owner ? Number(owner.user_id) === Number(currentUserId) : true;
@@ -928,6 +1014,19 @@ export default function ItineraryPage() {
 
   const activeDayPlaces = localItinerary[activeDay] || [];
   const activeHotel = hotelByDay[activeDay];
+  const isSavingItinerary = savePlanStatus === "saving";
+
+  if (savePlanStatus === "success") {
+    return (
+      <SavePlanningSuccess
+        trip={trip}
+        tripDates={tripDates}
+        onDownloadPdf={handleExportPdf}
+        onBackToItinerary={() => setSavePlanStatus("idle")}
+        onPlanNewTrip={() => navigate("/dashboard")}
+      />
+    );
+  }
 
   return (
     <main className="app-page itinerary-page">
@@ -948,6 +1047,23 @@ export default function ItineraryPage() {
           </div>
 
           <div className="itinerary-topbar__actions">
+            <button
+              className="top-action-link save-itinerary-button"
+              type="button"
+              onClick={handleSaveItinerary}
+              disabled={isSavingItinerary}
+              aria-busy={isSavingItinerary}
+            >
+              {isSavingItinerary ? (
+                <>
+                  <span className="button-spinner" aria-hidden="true" /> Saving...
+                </>
+              ) : (
+                <>
+                  <Icon name="check" size={16} /> Save Itinerary
+                </>
+              )}
+            </button>
             <button
               className="top-action-link"
               type="button"
@@ -1175,6 +1291,8 @@ export default function ItineraryPage() {
         onAddMemory={handleAddMemory}
         onDeleteMemory={handleDeleteMemoryEntry}
       />
+
+      {isSavingItinerary ? <SavePlanningOverlay /> : null}
     </main>
   );
 }

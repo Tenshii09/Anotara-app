@@ -12,10 +12,15 @@ Core Product Features
 
 1. User Authentication
 - Users can register and log in.
-- Authentication uses Flask-JWT-Extended tokens.
+- Authentication uses Flask-JWT-Extended access and refresh tokens.
 - Passwords are hashed with bcrypt.
-- The frontend stores the JWT in localStorage for API calls.
+- The frontend stores only the short-lived access JWT in localStorage for API calls. The longer-lived refresh JWT is set by the backend as an HttpOnly cookie scoped to `/api/refresh`, allowing silent renewal without exposing the refresh credential to JavaScript.
+- The React API client refreshes access tokens before expiry, retries once after an auth failure, and emits a clean session-expired redirect/toast when renewal is no longer possible.
+- Users have a role column (`user` by default, `admin` for privileged accounts). Login responses include the role and JWTs carry the role as an additional claim.
+- Local admin access can be seeded with `seed_admin_user.py`, which hashes the runtime `ANOTARA_ADMIN_PASSWORD` value before inserting or promoting `juandelacruz@gmail.com`.
 - Profile management endpoints:
+  - POST /api/refresh (exchange HttpOnly refresh cookie for a new access token)
+  - POST /api/logout (clear JWT cookies)
   - GET /api/profile (fetch current user profile, including algorithmic preferences and member-since timestamp)
   - PATCH /api/profile (update username)
   - PATCH /api/profile/preferences (persist default budget, companion vector, vibe weights, biometric toggle)
@@ -88,6 +93,7 @@ Core Product Features
 - Interactive Memory Log allows collaborators to attach note/photo memories to saved itinerary items.
 - Apex Hotel Recommendation Engine returns a cached hotel/basecamp suggestion per day near the final stop, with refresh support and booking search link.
 - Printable Souvenir PDF export builds a self-contained A4 HTML document in a hidden iframe, including timeline blocks, metadata, and hotel anchors, then opens the browser print flow.
+- Save & Plan UX on /itinerary disables the save action, shows a full-screen "Finalizing your perfect trip..." overlay, then transitions to a success screen with confirmed trip dates, PDF download, and next-step checklist.
 
 11. Device Push Notifications
 - Firebase Cloud Messaging sends weather alerts to registered devices.
@@ -101,6 +107,33 @@ Core Product Features
 - Dynamic Hero with four conditional states: Empty (with bouncing chevron to the central Tara Na! FAB), Upcoming (countdown + weather hint), Active (Day X of Y + Open today's map), Recently-completed (replan CTA).
 - Live Monitor banner is hidden by default and only drops in when smart-suggestion endpoints surface a weather alert — featuring an "Apply Smart Fix" CTA that pings the ML reranker through /itinerary/:id.
 - Active trip progress bar, Quick Glance trip carousel with lifecycle chips, image-style Latest Discoveries carousel, Trending Destinations social-proof grid, Travel Stats gamification card (provinces explored fraction, days planned, next countdown), and a "For You" feed with tap-to-reveal "Why this?" reason badges.
+
+12a. Admin Operations Console
+- /admin renders a module-based operations console separate from the mobile bottom-navigation shell.
+- The frontend checks the stored JWT/profile role for navigation UX, while all admin operations are enforced again on the Flask backend through live database role checks.
+- Roles are `user`, `admin`, and `super_admin`. Only `super_admin` can promote or demote admin accounts. Admins can manage content, view analytics, suspend/reactivate accounts, review audit history, and request ML retraining.
+- Suspended accounts are blocked during login and cannot use protected routes after their database status is changed.
+- Admin APIs:
+  - GET /api/admin/overview returns command-center metrics, model status, and recent audit events.
+  - GET /api/admin/users returns searchable account-management rows.
+  - PATCH /api/admin/users/:id/role is super-admin-only and protects against self-demotion and removing the last active super admin.
+  - PATCH /api/admin/users/:id/status suspends or reactivates accounts without deleting user data.
+  - GET/POST/PATCH /api/admin/places supports destination/content management for the places catalog.
+  - GET /api/admin/itineraries returns searchable saved-trip rows for support inspection.
+  - GET /api/admin/itineraries/:id returns owner metadata, ordered itinerary stops, and feedback labels.
+  - GET /api/admin/notifications returns push-token coverage and recent admin notification sends.
+  - POST /api/admin/notifications/send sends targeted or all-user operational push notifications through FCM when credentials and user tokens exist.
+  - GET /api/admin/settings returns editable operational feature flags.
+  - PATCH /api/admin/settings/:key is super-admin-only and updates one setting.
+  - GET /api/admin/analytics returns chart-ready itinerary, feedback, category, user-growth, push-token, and ML-run data with optional date filters.
+  - GET /api/admin/ml/status returns the latest Random Forest training run and run history.
+  - POST /api/admin/ml/retrain exports user feedback signals and retrains the Random Forest recommendation classifier.
+  - GET /api/admin/audit-log returns privileged-action history with optional action, target, and date filters.
+- Admin UI patterns use dense data tables, operational metric cards, progress meters, status pills, filter controls, and command buttons aligned with the existing Aero-Glass design system.
+- All privileged mutations write to `admin_audit_log` with actor, action, target, request metadata, and payload context.
+- Admin-managed content extends the `places` table with publication status, curation notes, source, updated timestamp, and updater id so destination operations are tied to the recommendation and discovery systems.
+- ML operations write to `ml_training_runs`, including status, dataset rows, accuracy, precision/recall/F1 metrics, artifact paths, timestamps, and errors.
+- Operations settings are stored in `admin_settings`; admin notification attempts are stored in `admin_notification_log`.
 
 13. Discover Tab
 - Dual-state view controller toggles between a Spatial map (stylized Philippine board with algorithmic smart pins whose size + color reflect ML relevance) and a Thematic feed (image-style cards organized in semantic rows: Trending with your flock, Curated by vibe, Off the beaten path).
@@ -163,7 +196,8 @@ Frontend Layer
   - PacingSlider.jsx — visual pacing selector.
   - TransportPicker.jsx — transport mode selector.
   - DealbreakersGrid.jsx — hard-constraint selector.
-- lib/apiClient.js — centralized fetch wrapper with normalized error messages.
+- lib/apiClient.js — centralized fetch wrapper with normalized error messages, credentialed requests, silent token refresh, and one retry on expired access tokens.
+- lib/authSession.js — access-token persistence, JWT expiry decoding, refresh scheduling, logout cookie clearing, and global session-expired events.
 - lib/tripsApi.js — trip-focused helpers (getSavedItineraries, getDashboardSummary, getDiscoverFeed, getSmartSuggestion, updateTripStartDate, deleteItinerary, duplicateItinerary).
 - lib/profileApi.js — profile and preferences helpers (getProfile, updateProfile, updateProfilePreferences, deleteAccount).
 - lib/socialApi.js — friends, collaborators, vote sessions, memories, and hotel helper calls.
@@ -179,6 +213,8 @@ Backend Layer
 - webapp/routes/auth_routes.py
   - POST /api/register
   - POST /api/login
+  - POST /api/refresh
+  - POST /api/logout
   - GET / PATCH /api/profile
   - PATCH /api/profile/preferences (algorithmic tuning matrix)
   - DELETE /api/account (destructive delete protocol)
@@ -217,12 +253,30 @@ Backend Layer
   - POST /api/itineraries/<id>/items/<item_id>/memories
   - DELETE /api/memories/<memory_id>
   - GET /api/itineraries/<id>/hotels/<day_number>
+- webapp/routes/admin_routes.py
+  - GET /api/admin/overview
+  - GET /api/admin/users
+  - PATCH /api/admin/users/<id>/role
+  - PATCH /api/admin/users/<id>/status
+  - GET / POST /api/admin/places
+  - PATCH /api/admin/places/<id>
+  - GET /api/admin/itineraries
+  - GET /api/admin/itineraries/<id>
+  - GET /api/admin/notifications
+  - POST /api/admin/notifications/send
+  - GET /api/admin/settings
+  - PATCH /api/admin/settings/<key>
+  - GET /api/admin/analytics
+  - GET /api/admin/ml/status
+  - POST /api/admin/ml/retrain
+  - GET /api/admin/audit-log
 - webapp/services/database.py adds:
   - ensure_user_preference_columns() — defensively adds default_budget, companion_vector, vibe_weights, biometric_enabled, created_at usage to users.
   - update_user_preferences(user_id, …)
   - delete_user_account(user_id)
   - delete_itinerary_for_user(user_id, itinerary_id)
   - duplicate_itinerary_for_user(user_id, itinerary_id) — re-creates the trip and its items in a brand-new Draft row.
+  - ensure_admin_tables(), log_admin_action(), admin user/place/trip/notification/settings helpers, analytics aggregations, and ML training-run persistence.
 - webapp/services/social.py owns all collaboration persistence:
   - ensure_social_schema() — idempotently creates the social/collaboration tables.
   - Friend search/request/list/remove helpers.
@@ -233,8 +287,9 @@ Backend Layer
 
 Data Layer
 - MySQL schema:
-  - users (now: default_budget, companion_vector, vibe_weights, biometric_enabled in addition to baseline columns)
-  - places, itineraries (with trip_start_date), itinerary_items, trip_feedback, weather_alerts, push_tokens
+  - users (now: default_budget, companion_vector, vibe_weights, biometric_enabled, role, account_status, suspended_at, suspended_reason)
+  - places (now: content status, curation notes, source, updated_at, updated_by), itineraries (with trip_start_date), itinerary_items, trip_feedback, weather_alerts, push_tokens
+  - admin_audit_log, ml_training_runs, admin_settings, and admin_notification_log
   - friendships, trip_collaborators, trip_activity
   - vote_sessions, vote_session_participants, vote_session_responses
   - itinerary_item_memories
@@ -249,7 +304,7 @@ External Services
 
 Data Flow (Updated)
 
-Authentication: standard JWT issuance unchanged.
+Authentication: login returns a short-lived access JWT and sets an HttpOnly refresh-cookie JWT. The SPA schedules a silent refresh before access-token expiry, rehydrates the schedule on page reload, and redirects to login with a toast only when the refresh token is missing, expired, invalid, or the account is suspended.
 
 Trip Creation:
 1. Wizard collects 9 phases of preferences (solo/flock mode, optional trip_start_date, up to 3 ranked vibes, and dealbreakers).
@@ -287,9 +342,21 @@ Account Deletion:
 2. They must type "delete my account" verbatim.
 3. DELETE /api/account fires; cascade removes itineraries, feedback, push tokens, and the user row.
 
+Admin Operations:
+1. Admin login returns a JWT role claim and stores the profile role for frontend routing.
+2. Every `/api/admin/*` request re-checks the current database role and active account status before executing.
+3. Super admins can promote or demote admins, with guards against self-demotion and removing the last active super admin.
+4. Admins curate place records, inspect itineraries, suspend/reactivate accounts, inspect analytics, send operational notifications, and request ML retraining.
+5. Super admins can update operations settings and feature flags.
+6. Mutations are written to `admin_audit_log` so privileged changes remain traceable.
+7. Retraining exports feedback-derived rows, trains the RandomForest classifier, updates model artifacts, and records metrics in `ml_training_runs`.
+
 Database Schema Highlights
 - itineraries has trip_start_date for server-backed countdown / progress timelines and lifecycle segmentation.
-- users has default_budget, companion_vector (JSON), vibe_weights (JSON), biometric_enabled.
+- users has default_budget, companion_vector (JSON), vibe_weights (JSON), biometric_enabled, role, and admin-controlled account_status.
+- places has admin curation metadata for publication workflow and recommendation catalog management.
+- admin_audit_log stores privileged changes; ml_training_runs stores retraining status and model metrics.
+- admin_settings stores operations feature flags; admin_notification_log stores admin-triggered notification delivery attempts.
 - trip_feedback uses rating_type ("Best Pick" / "Not Ideal").
 - weather_alerts and push_tokens tables back the live monitor + FCM features.
 - friendships stores pending/accepted friend relationships with requester/addressee ownership.

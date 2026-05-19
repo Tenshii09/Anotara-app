@@ -23,6 +23,7 @@ import {
   searchFriends,
   sendFriendRequest,
 } from "../lib/socialApi";
+import { logoutSession } from "../lib/authSession";
 import { tapHaptic, successHaptic, warningHaptic } from "../lib/haptics";
 import { applyTheme, getInitialTheme, persistTheme, THEMES } from "../lib/theme";
 import Avatar from "./common/Avatar";
@@ -330,12 +331,11 @@ export default function ProfilePage() {
     }
   }
 
-  function handleLogout() {
+  async function handleLogout() {
     tapHaptic();
-    clearStoredToken();
-    clearUserProfile();
     clearTripData();
     clearWizardDraft();
+    await logoutSession();
     navigate("/login");
   }
 
@@ -349,10 +349,9 @@ export default function ProfilePage() {
       setDeleteBusy(true);
       warningHaptic();
       await deleteAccount(token, deleteConfirmation);
-      clearStoredToken();
-      clearUserProfile();
       clearTripData();
       clearWizardDraft();
+      await logoutSession();
       navigate("/login");
     } catch (requestError) {
       setError(requestError.message || "Could not delete account.");

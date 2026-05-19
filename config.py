@@ -1,6 +1,7 @@
 """Central environment-based configuration for the Flask backend."""
 
 import os
+from datetime import timedelta
 from dotenv import load_dotenv
 
 # Load variables from the .env file into the environment
@@ -9,6 +10,16 @@ load_dotenv()
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'anotara-secret-key')
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'super-secret-jwt-key')
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(
+        minutes=int(os.environ.get('JWT_ACCESS_TOKEN_MINUTES', '15'))
+    )
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(
+        days=int(os.environ.get('JWT_REFRESH_TOKEN_DAYS', '30'))
+    )
+    JWT_TOKEN_LOCATION = ['headers', 'cookies']
+    JWT_COOKIE_SECURE = os.environ.get('JWT_COOKIE_SECURE', 'false').lower() == 'true'
+    JWT_COOKIE_SAMESITE = os.environ.get('JWT_COOKIE_SAMESITE', 'Lax')
+    JWT_REFRESH_COOKIE_PATH = '/api/refresh'
     
     # These names MUST match exactly
     DB_HOST     = os.environ.get('MYSQLHOST')

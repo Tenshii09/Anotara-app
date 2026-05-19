@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { API_BASE_URL, TOKEN_STORAGE_KEY } from "../lib/config";
-import { saveUserProfile } from "../lib/storage";
+import { persistSession } from "../lib/authSession";
+import { apiRequest } from "../lib/apiClient";
 
 // These cards explain the frontend migration to users and also serve as a
 // quick summary of how the new React + REST architecture maps to the old UI.
@@ -48,18 +48,12 @@ export default function AuthPage({ initialMode = "login" }) {
       : { identifier, password };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/${endpoint}`, {
+      const data = await apiRequest(`/api/${endpoint}`, {
         method: "POST",
+        skipAuthRefresh: true,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(data.error || "Auth failed");
-        return;
-      }
 
       if (isRegistering) {
         // After successful registration, switch back to login so the user can
@@ -70,15 +64,11 @@ export default function AuthPage({ initialMode = "login" }) {
         return;
       }
 
-      // Store the JWT token in localStorage so later requests can authenticate.
-      localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
-      saveUserProfile({
-        name: data.username || identifier || username || "Traveler",
-      });
-      navigate("/dashboard");
-    } catch {
+      persistSession(data);
+      navigate(["admin", "super_admin"].includes(data.role) ? "/admin" : "/dashboard");
+    } catch (requestError) {
       // Any network or backend failure ends up here.
-      setMessage("Connection error.");
+      setMessage(requestError.message || "Connection error.");
     }
   };
 
@@ -87,15 +77,16 @@ export default function AuthPage({ initialMode = "login" }) {
       <div className="auth-shell auth-grid">
         <section className="auth-intro">
           <span className="hero-chip">🇵🇭 Ano tara? Travel Planner</span>
-          <h1 className="auth-title serif">
-            Plan the same journey flow,
-            <br />
-            now through React and REST.
+          <h1 className="auth-title">
+            Plan smarter trips across the Philippines.
           </h1>
+          <p className="auth-subtitle">
+            A clean, guided workspace for building memorable itineraries.
+          </p>
           <p className="auth-copy">
-            The old Flask + Jinja experience is now rebuilt as a React frontend
-            with a REST API backend, while keeping the same trip wizard,
-            itinerary generation, and Mapbox experience.
+            Create polished travel plans with an easy step-by-step flow,
+            saved itineraries, and a map-first experience that keeps every
+            destination clear and organized.
           </p>
 
           <div className="auth-highlight-grid">

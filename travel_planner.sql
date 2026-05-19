@@ -8,6 +8,10 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50)  NOT NULL UNIQUE,
     email    VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,         -- bcrypt hash
+    role     VARCHAR(20)  NOT NULL DEFAULT 'user',
+    account_status VARCHAR(20) NOT NULL DEFAULT 'active',
+    suspended_at DATETIME NULL,
+    suspended_reason VARCHAR(255) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -22,7 +26,74 @@ CREATE TABLE IF NOT EXISTS places (
     city      VARCHAR(100),
     tags      VARCHAR(255),                 -- comma-separated keywords
     environment_type   VARCHAR(20) DEFAULT 'Mixed',
-    physical_intensity  VARCHAR(20) DEFAULT 'Medium'
+    physical_intensity  VARCHAR(20) DEFAULT 'Medium',
+    status VARCHAR(20) NOT NULL DEFAULT 'published',
+    curation_notes TEXT NULL,
+    source VARCHAR(40) DEFAULT 'system',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_by INT NULL
+);
+
+-- Immutable admin action history for privileged operations.
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    actor_id    INT NOT NULL,
+    action      VARCHAR(80) NOT NULL,
+    target_type VARCHAR(40) NOT NULL,
+    target_id   INT NULL,
+    payload     JSON,
+    ip_address  VARCHAR(64),
+    user_agent  VARCHAR(255),
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ML operations history for retraining visibility and model quality tracking.
+CREATE TABLE IF NOT EXISTS ml_training_runs (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    status          VARCHAR(20) NOT NULL DEFAULT 'running',
+    dataset_rows    INT DEFAULT 0,
+    accuracy        DECIMAL(6, 4) NULL,
+    metrics         JSON,
+    artifact_paths  JSON,
+    started_by      INT NULL,
+    started_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at    DATETIME NULL,
+    error_message   TEXT,
+    FOREIGN KEY (started_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Editable operations settings and feature flags surfaced in /admin.
+CREATE TABLE IF NOT EXISTS admin_settings (
+    setting_key   VARCHAR(80) PRIMARY KEY,
+    setting_value TEXT,
+    value_type    VARCHAR(20) NOT NULL DEFAULT 'string',
+    description   VARCHAR(255),
+    updated_by    INT NULL,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+INSERT IGNORE INTO admin_settings
+    (setting_key, setting_value, value_type, description)
+VALUES
+    ('maintenance_mode', 'false', 'boolean', 'Temporarily pause user-facing trip generation notices.'),
+    ('admin_broadcasts_enabled', 'true', 'boolean', 'Allow admins to send targeted push notifications.'),
+    ('ml_auto_retrain_enabled', 'false', 'boolean', 'Reserve flag for scheduled recommendation model retraining.'),
+    ('content_review_required', 'true', 'boolean', 'Keep newly created admin places in review by default.');
+
+-- Admin-triggered notification delivery attempts.
+CREATE TABLE IF NOT EXISTS admin_notification_log (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    actor_id       INT NOT NULL,
+    audience_type  VARCHAR(30) NOT NULL,
+    target_user_id INT NULL,
+    title          VARCHAR(140) NOT NULL,
+    body           TEXT NOT NULL,
+    result         JSON,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- Itineraries table (saved plans per user)

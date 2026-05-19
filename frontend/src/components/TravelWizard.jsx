@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { API_BASE_URL, TOKEN_STORAGE_KEY } from "../lib/config";
+import { apiRequest } from "../lib/apiClient";
+import { decodeJwtPayload, getValidAccessToken } from "../lib/authSession";
 import {
   clearStoredToken,
+  getStoredToken,
   loadWizardDraft,
   saveWizardDraft,
   saveTripData,
@@ -104,18 +106,6 @@ function getInitialDraft() {
   };
 }
 
-function decodeJwtPayload(token) {
-  if (!token || typeof token !== "string" || token.split(".").length !== 3) return null;
-  try {
-    const payload = token.split(".")[1];
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-    return JSON.parse(atob(padded));
-  } catch {
-    return null;
-  }
-}
-
 export default function TravelWizard() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -139,7 +129,7 @@ export default function TravelWizard() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
 
-  const tokenPayload = useMemo(() => decodeJwtPayload(localStorage.getItem(TOKEN_STORAGE_KEY)), []);
+  const tokenPayload = useMemo(() => decodeJwtPayload(getStoredToken()), []);
   const currentUserId = tokenPayload?.sub ? Number(tokenPayload.sub) : null;
 
   useEffect(() => {
@@ -239,8 +229,10 @@ export default function TravelWizard() {
       return;
     }
 
-    const token = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (!token) {
+    let token = "";
+    try {
+      token = await getValidAccessToken();
+    } catch {
       setError("Please log in again before generating an itinerary.");
       navigate("/login");
       return;
@@ -249,11 +241,11 @@ export default function TravelWizard() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/generate`, {
+      const data = await apiRequest("/api/generate", {
         method: "POST",
+        token,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           destination,
@@ -268,20 +260,6 @@ export default function TravelWizard() {
           dealbreakers,
         }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 422) {
-          clearStoredToken();
-          setError("Your login expired. Please sign in again.");
-          navigate("/login");
-          return;
-        }
-        setError(data.error || "Failed to generate itinerary.");
-        setIsSubmitting(false);
-        return;
-      }
 
       successHaptic();
 
@@ -303,8 +281,14 @@ export default function TravelWizard() {
 
       saveTripData(trip);
       navigate("/itinerary", { state: trip, replace: true });
-    } catch {
-      setError("Could not reach the generator. Please try again.");
+    } catch (requestError) {
+      if (requestError.status === 401 || requestError.status === 422) {
+        clearStoredToken();
+        setError("Your login expired. Please sign in again.");
+        navigate("/login");
+        return;
+      }
+      setError(requestError.message || "Could not reach the generator. Please try again.");
       setIsSubmitting(false);
     }
   }

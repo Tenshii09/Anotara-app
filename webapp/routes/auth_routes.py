@@ -5,11 +5,19 @@ This blueprint handles registration and login and returns JWTs to the frontend.
 
 import mysql.connector
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
+from flask_jwt_extended import (
+    create_access_token,
+    create_refresh_token,
+    get_jwt_identity,
+    jwt_required,
+    set_refresh_cookies,
+    unset_jwt_cookies,
+)
 
 from webapp.extensions import bcrypt
 from webapp.services.database import (
     delete_user_account,
+    ensure_user_columns,
     get_db,
     get_user_profile,
     update_user_preferences,
@@ -19,9 +27,40 @@ from webapp.services.database import (
 auth_bp = Blueprint('auth', __name__)
 
 
+def _build_login_response(user):
+    """Issue short-lived access tokens plus a refresh cookie for silent renewal."""
+    role = user.get('role') or 'user'
+    identity = str(user['id'])
+    claims = {'role': role}
+    access_token = create_access_token(identity=identity, additional_claims=claims)
+    refresh_token = create_refresh_token(identity=identity, additional_claims=claims)
+    response = jsonify({
+        'token': access_token,
+        'username': user['username'],
+        'role': role,
+    })
+    set_refresh_cookies(response, refresh_token)
+    return response
+
+
+def _get_active_user_for_refresh(user_id):
+    """Load active account metadata before minting a replacement access token."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            'SELECT id, username, role, account_status FROM users WHERE id = %s',
+            (user_id,),
+        )
+        return cursor.fetchone()
+    finally:
+        db.close()
+
+
 @auth_bp.route('/api/register', methods=['POST'])
 def api_register():
     """Create a new user account if the username and email are available."""
+    ensure_user_columns()
     data = request.get_json()
     username = data.get('username', '').strip()
     email = data.get('email', '').strip()
@@ -49,6 +88,7 @@ def api_register():
 @auth_bp.route('/api/login', methods=['POST'])
 def api_login():
     """Validate credentials and issue a JWT access token."""
+    ensure_user_columns()
     data = request.get_json()
     identifier = data.get('identifier', '').strip()
     password = data.get('password', '')
@@ -59,10 +99,48 @@ def api_login():
     user = cursor.fetchone()
     db.close()
 
+    if user and user.get('account_status') == 'suspended':
+        return jsonify({'error': 'This account is suspended. Please contact an administrator.'}), 403
+
     if user and bcrypt.check_password_hash(user['password'], password):
-        token = create_access_token(identity=str(user['id']))
-        return jsonify({'token': token, 'username': user['username']}), 200
+        return _build_login_response(user), 200
     return jsonify({'error': 'Invalid credentials'}), 401
+
+
+@auth_bp.route('/api/refresh', methods=['POST'])
+@jwt_required(refresh=True, locations=['cookies'])
+def api_refresh():
+    """Exchange the HttpOnly refresh cookie for a fresh access token."""
+    current_user_id = get_jwt_identity()
+    user = _get_active_user_for_refresh(current_user_id)
+
+    if not user:
+        response = jsonify({'error': 'User not found', 'code': 'user_not_found'})
+        unset_jwt_cookies(response)
+        return response, 404
+
+    if user.get('account_status') == 'suspended':
+        response = jsonify({
+            'error': 'This account is suspended. Please contact an administrator.',
+            'code': 'account_suspended',
+        })
+        unset_jwt_cookies(response)
+        return response, 403
+
+    role = user.get('role') or 'user'
+    token = create_access_token(
+        identity=str(user['id']),
+        additional_claims={'role': role},
+    )
+    return jsonify({'token': token, 'username': user['username'], 'role': role}), 200
+
+
+@auth_bp.route('/api/logout', methods=['POST'])
+def api_logout():
+    """Clear JWT cookies so the browser cannot silently refresh again."""
+    response = jsonify({'message': 'Logged out'})
+    unset_jwt_cookies(response)
+    return response, 200
 
 
 @auth_bp.route('/api/profile', methods=['GET'])
