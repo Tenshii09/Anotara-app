@@ -1,0 +1,9 @@
+{{ app_name }}
+
+Trip reminder set
+
+Hi {{ recipient_name or 'there' }},
+
+Your trip to {{ destination }} is scheduled for {{ trip_start_date }}.
+
+A reminder will be delivered before departure if delivery is enabled.

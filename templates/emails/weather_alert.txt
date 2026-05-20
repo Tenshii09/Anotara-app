@@ -1,0 +1,9 @@
+{{ app_name }}
+
+Weather alert for your trip
+
+Hi {{ recipient_name or 'there' }},
+
+Weather conditions may affect {{ destination }}. Indoor alternatives are ready if you want to pivot.
+
+Open the itinerary to review the latest weather-aware suggestion.

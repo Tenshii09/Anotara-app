@@ -1,0 +1,6 @@
+{% extends 'emails/base.html' %} {% block headline %}New friend request{%
+endblock %} {% block content %}
+<p>Hi {{ recipient_name or 'there' }},</p>
+<p>{{ sender_name }} sent you a friend request on Anotara.</p>
+<p>Open the app to review the request and decide whether to connect.</p>
+{% endblock %}

@@ -1,0 +1,9 @@
+{{ app_name }}
+
+Removed from itinerary
+
+Hi {{ recipient_name or 'there' }},
+
+You were removed from the itinerary {{ trip_name }}.
+
+If this was unexpected, contact the itinerary owner or support.

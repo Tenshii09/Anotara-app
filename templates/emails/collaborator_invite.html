@@ -1,0 +1,9 @@
+{% extends 'emails/base.html' %} {% block headline %}You're invited to
+collaborate{% endblock %} {% block content %}
+<p>Hi {{ recipient_name or 'there' }},</p>
+<p>
+  {{ inviter_name }} invited you to collaborate on
+  <strong>{{ trip_name }}</strong>.
+</p>
+<p>Open the itinerary to join the planning session and help shape the trip.</p>
+{% endblock %}

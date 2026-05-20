@@ -64,6 +64,8 @@ def ensure_user_columns():
         missing_columns.append("ADD COLUMN companion_vector JSON NULL")
     if 'vibe_weights' not in existing_columns:
         missing_columns.append("ADD COLUMN vibe_weights JSON NULL")
+    if 'email_preferences' not in existing_columns:
+        missing_columns.append("ADD COLUMN email_preferences JSON NULL")
     if 'biometric_enabled' not in existing_columns:
         missing_columns.append("ADD COLUMN biometric_enabled BOOLEAN DEFAULT FALSE")
     if 'account_status' not in existing_columns:
@@ -100,8 +102,8 @@ def get_user_profile(user_id):
     try:
         cursor.execute(
             """
-            SELECT id, username, email, default_budget, companion_vector,
-                   vibe_weights, biometric_enabled, role, created_at
+                 SELECT id, username, email, default_budget, companion_vector,
+                     vibe_weights, email_preferences, biometric_enabled, role, created_at
             FROM users
             WHERE id = %s
             """,
@@ -111,7 +113,7 @@ def get_user_profile(user_id):
         if not profile:
             return None
 
-        for json_key in ('companion_vector', 'vibe_weights'):
+        for json_key in ('companion_vector', 'vibe_weights', 'email_preferences'):
             raw_value = profile.get(json_key)
             if isinstance(raw_value, str):
                 try:
@@ -128,7 +130,7 @@ def get_user_profile(user_id):
         db.close()
 
 
-def update_user_preferences(user_id, *, default_budget=None, companion_vector=None, vibe_weights=None, biometric_enabled=None):
+def update_user_preferences(user_id, *, default_budget=None, companion_vector=None, vibe_weights=None, email_preferences=None, biometric_enabled=None):
     """Persist a partial update of the user's algorithmic preferences."""
     ensure_user_columns()
 
@@ -144,6 +146,9 @@ def update_user_preferences(user_id, *, default_budget=None, companion_vector=No
     if vibe_weights is not None:
         assignments.append('vibe_weights = %s')
         params.append(json.dumps(vibe_weights))
+    if email_preferences is not None:
+        assignments.append('email_preferences = %s')
+        params.append(json.dumps(email_preferences))
     if biometric_enabled is not None:
         assignments.append('biometric_enabled = %s')
         params.append(bool(biometric_enabled))
@@ -1892,7 +1897,16 @@ def update_admin_user_status(actor_id, target_user_id, status, reason=''):
             (safe_status, safe_status, safe_status, str(reason or '')[:255], target_user_id),
         )
         db.commit()
-        return {'id': target_user_id, 'account_status': safe_status}, None
+        cursor.execute('SELECT id, username, email, role, account_status FROM users WHERE id = %s', (target_user_id,))
+        updated_target = cursor.fetchone() or target
+        return {
+            'id': target_user_id,
+            'username': updated_target.get('username'),
+            'email': updated_target.get('email'),
+            'role': updated_target.get('role'),
+            'account_status': updated_target.get('account_status'),
+            'previous_account_status': target.get('account_status'),
+        }, None
     finally:
         cursor.close()
         db.close()

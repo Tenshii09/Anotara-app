@@ -9,6 +9,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from webapp.services.email_service import queue_email
 from webapp.services.database import (
     delete_itinerary_for_user,
     duplicate_itinerary_for_user,
@@ -17,6 +18,7 @@ from webapp.services.database import (
     ensure_itinerary_metadata_columns,
     get_itinerary_item_context,
     get_itinerary_overview,
+    get_user_profile,
     get_user_travel_stats,
     get_weather_alert_history,
     get_indoor_place_alternatives,
@@ -257,6 +259,21 @@ def api_generate():
         trip_start_date=trip_start_date,
     )
 
+    profile = get_user_profile(current_user_id)
+    if profile and profile.get('email'):
+        queue_email({
+            'recipient_user_id': profile.get('id'),
+            'recipient_email': profile.get('email'),
+            'recipient_name': profile.get('username'),
+            'subject': f'Your itinerary for {destination} was saved',
+            'template_name': 'itinerary_saved',
+            'category': 'itinerary_updates',
+            'context': {
+                'recipient_name': profile.get('username'),
+                'destination': destination,
+            },
+        })
+
     return jsonify({
         'itinerary': itinerary,
         'itinerary_id': itinerary_id,
@@ -348,6 +365,26 @@ def api_update_itinerary_start_date(itinerary_id):
     updated = update_itinerary_start_date(current_user_id, itinerary_id, trip_start_date)
     if not updated:
         return jsonify({'error': 'Itinerary not found'}), 404
+
+    if trip_start_date:
+        itinerary = get_itinerary_overview(itinerary_id) or {}
+        itinerary_data = itinerary.get('itinerary') or {}
+        profile = get_user_profile(current_user_id)
+        if profile and profile.get('email'):
+            queue_email({
+                'recipient_user_id': profile.get('id'),
+                'recipient_email': profile.get('email'),
+                'recipient_name': profile.get('username'),
+                'subject': f'Your trip reminder for {itinerary_data.get("destination") or "your itinerary"} is set',
+                'template_name': 'itinerary_start_date',
+                'category': 'itinerary_updates',
+                'send_at': f'{trip_start_date}T09:00:00',
+                'context': {
+                    'recipient_name': profile.get('username'),
+                    'destination': itinerary_data.get('destination'),
+                    'trip_start_date': trip_start_date,
+                },
+            })
 
     return jsonify({'message': 'Trip start date updated.', 'trip_start_date': trip_start_date}), 200
 

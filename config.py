@@ -35,3 +35,18 @@ class Config:
     FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', '')
     FIREBASE_SERVICE_ACCOUNT_JSON = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON', '')
     FIREBASE_SERVICE_ACCOUNT_PATH = os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH', '')
+
+    MAIL_PROVIDER = os.environ.get('MAIL_PROVIDER', 'disabled').strip().lower()
+    MAIL_API_KEY = os.environ.get('MAIL_API_KEY', '')
+    MAIL_FROM = os.environ.get('MAIL_FROM', '')
+    MAIL_FROM_NAME = os.environ.get('MAIL_FROM_NAME', 'Ano Tara!')
+    MAIL_DOMAIN = os.environ.get('MAIL_DOMAIN', '')
+    MAIL_DKIM_SELECTOR = os.environ.get('MAIL_DKIM_SELECTOR', '')
+    MAIL_WEBHOOK_SECRET = os.environ.get('MAIL_WEBHOOK_SECRET', '')
+    MAIL_SUPPRESSION_DB = os.environ.get('MAIL_SUPPRESSION_DB', '')
+    MAIL_SEND_IMMEDIATELY = os.environ.get('MAIL_SEND_IMMEDIATELY', 'true')
+    MAIL_SMTP_HOST = os.environ.get('MAIL_SMTP_HOST', '')
+    MAIL_SMTP_PORT = int(os.environ.get('MAIL_SMTP_PORT', '587'))
+    MAIL_SMTP_USERNAME = os.environ.get('MAIL_SMTP_USERNAME', '')
+    MAIL_SMTP_PASSWORD = os.environ.get('MAIL_SMTP_PASSWORD', '')
+    MAIL_SMTP_USE_TLS = os.environ.get('MAIL_SMTP_USE_TLS', 'true').lower() == 'true'

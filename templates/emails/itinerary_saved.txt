@@ -1,0 +1,9 @@
+{{ app_name }}
+
+Itinerary saved
+
+Hi {{ recipient_name or 'there' }},
+
+Your trip to {{ destination }} has been saved successfully.
+
+You can revisit the itinerary anytime to edit stops, collaborators, and trip timing.

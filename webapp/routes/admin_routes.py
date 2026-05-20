@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from train_model import train_model
+from webapp.services.email_service import queue_email
 from webapp.services.database import (
     ADMIN_ROLES,
     create_admin_place,
@@ -138,6 +139,22 @@ def api_admin_update_user_status(user_id):
     result, error = update_admin_user_status(actor_id, user_id, status, reason)
     if error:
         return jsonify({'error': error}), 400
+
+    if result.get('email'):
+        queue_email({
+            'recipient_user_id': result['id'],
+            'recipient_email': result['email'],
+            'recipient_name': result.get('username'),
+            'subject': f"Your account status changed to {result.get('account_status')}",
+            'template_name': 'account_status_changed',
+            'category': 'security',
+            'context': {
+                'username': result.get('username'),
+                'account_status': result.get('account_status'),
+                'reason': reason,
+                'previous_account_status': result.get('previous_account_status'),
+            },
+        })
 
     _log_action(actor_id, 'user.status.update', 'user', user_id, {'account_status': status, 'reason': reason})
     return jsonify(result), 200

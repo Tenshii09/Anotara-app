@@ -1,0 +1,6 @@
+{% extends 'emails/base.html' %} {% block headline %}Account deleted{% endblock
+%} {% block content %}
+<p>Hi {{ username or 'there' }},</p>
+<p>Your Anotara account has been permanently deleted.</p>
+<p>If you did not request this change, please contact support immediately.</p>
+{% endblock %}

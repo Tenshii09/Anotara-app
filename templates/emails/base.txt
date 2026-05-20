@@ -1,0 +1,7 @@
+{{ app_name }}
+
+{% block headline %}{% endblock %}
+
+{% block content %}{% endblock %}
+
+Need help? Contact {{ support_email }}.

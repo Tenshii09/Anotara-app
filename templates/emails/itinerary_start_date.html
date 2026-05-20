@@ -1,0 +1,9 @@
+{% extends 'emails/base.html' %} {% block headline %}Trip reminder set{%
+endblock %} {% block content %}
+<p>Hi {{ recipient_name or 'there' }},</p>
+<p>
+  Your trip to <strong>{{ destination }}</strong> is scheduled for {{
+  trip_start_date }}.
+</p>
+<p>A reminder will be delivered before departure if delivery is enabled.</p>
+{% endblock %}

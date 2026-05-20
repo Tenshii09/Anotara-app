@@ -1,0 +1,11 @@
+{{ app_name }}
+
+Account status changed
+
+Hi {{ username or 'there' }},
+
+Your account status is now {{ account_status }}.
+
+{% if reason %}Reason: {{ reason }}{% endif %}
+
+If you believe this is a mistake, contact support.

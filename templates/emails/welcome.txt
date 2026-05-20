@@ -1,0 +1,9 @@
+{{ app_name }}
+
+Welcome to {{ app_name }}
+
+Hi {{ username or 'there' }},
+
+Your account is ready. You can start planning your next trip, invite companions, and save itineraries from any device.
+
+Open the app and continue planning at your own pace.

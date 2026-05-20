@@ -12,9 +12,12 @@ import json
 import secrets
 from datetime import datetime, timedelta
 
+from webapp.services.email_service import queue_email
 from webapp.services.database import (
     get_db,
     get_table_columns,
+    get_itinerary_overview,
+    get_user_profile,
 )
 
 
@@ -301,20 +304,38 @@ def send_friend_request(requester_id, addressee_id):
             )
             db.commit()
             cursor.execute("SELECT * FROM friendships WHERE id = %s", (existing["id"],))
-            return _serialize_friendship(cursor.fetchone()), None
+            friendship = _serialize_friendship(cursor.fetchone())
+        else:
+            cursor.execute(
+                """
+                INSERT INTO friendships (requester_id, addressee_id, status)
+                VALUES (%s, %s, 'pending')
+                """,
+                (int(requester_id), int(addressee_id)),
+            )
+            db.commit()
+            cursor.execute(
+                "SELECT * FROM friendships WHERE id = %s", (cursor.lastrowid,)
+            )
+            friendship = _serialize_friendship(cursor.fetchone())
 
-        cursor.execute(
-            """
-            INSERT INTO friendships (requester_id, addressee_id, status)
-            VALUES (%s, %s, 'pending')
-            """,
-            (int(requester_id), int(addressee_id)),
-        )
-        db.commit()
-        cursor.execute(
-            "SELECT * FROM friendships WHERE id = %s", (cursor.lastrowid,)
-        )
-        return _serialize_friendship(cursor.fetchone()), None
+        sender_profile = get_user_profile(requester_id)
+        recipient_profile = get_user_profile(addressee_id)
+        if recipient_profile and recipient_profile.get('email'):
+            queue_email({
+                'recipient_user_id': recipient_profile.get('id'),
+                'recipient_email': recipient_profile.get('email'),
+                'recipient_name': recipient_profile.get('username'),
+                'subject': f"{sender_profile.get('username')} sent you a friend request",
+                'template_name': 'friend_request',
+                'category': 'collaboration',
+                'context': {
+                    'recipient_name': recipient_profile.get('username'),
+                    'sender_name': sender_profile.get('username'),
+                },
+            })
+
+        return friendship, None
     finally:
         cursor.close()
         db.close()
@@ -350,6 +371,22 @@ def respond_to_friend_request(user_id, friendship_id, decision):
                 (int(friendship_id),),
             )
             db.commit()
+            requester_profile = get_user_profile(existing.get('requester_id'))
+            responder_profile = get_user_profile(user_id)
+            if requester_profile and requester_profile.get('email'):
+                queue_email({
+                    'recipient_user_id': requester_profile.get('id'),
+                    'recipient_email': requester_profile.get('email'),
+                    'recipient_name': requester_profile.get('username'),
+                    'subject': f"{responder_profile.get('username')} declined your friend request",
+                    'template_name': 'friend_response',
+                    'category': 'collaboration',
+                    'context': {
+                        'recipient_name': requester_profile.get('username'),
+                        'responder_name': responder_profile.get('username'),
+                        'decision_text': 'declined',
+                    },
+                })
             return {"id": int(friendship_id), "status": "declined"}, None
 
         cursor.execute(
@@ -362,6 +399,22 @@ def respond_to_friend_request(user_id, friendship_id, decision):
         )
         db.commit()
         cursor.execute("SELECT * FROM friendships WHERE id = %s", (int(friendship_id),))
+        requester_profile = get_user_profile(existing.get('requester_id'))
+        responder_profile = get_user_profile(user_id)
+        if requester_profile and requester_profile.get('email'):
+            queue_email({
+                'recipient_user_id': requester_profile.get('id'),
+                'recipient_email': requester_profile.get('email'),
+                'recipient_name': requester_profile.get('username'),
+                'subject': f"{responder_profile.get('username')} accepted your friend request",
+                'template_name': 'friend_response',
+                'category': 'collaboration',
+                'context': {
+                    'recipient_name': requester_profile.get('username'),
+                    'responder_name': responder_profile.get('username'),
+                    'decision_text': 'accepted',
+                },
+            })
         return _serialize_friendship(cursor.fetchone()), None
     finally:
         cursor.close()
@@ -524,6 +577,24 @@ def add_collaborator(itinerary_id, invited_user_id, invited_by_id, role="editor"
             ),
         )
         db.commit()
+
+        inviter_profile = get_user_profile(invited_by_id)
+        invited_profile = get_user_profile(invited_user_id)
+        itinerary = get_itinerary_overview(itinerary_id)
+        if invited_profile and invited_profile.get('email'):
+            queue_email({
+                'recipient_user_id': invited_profile.get('id'),
+                'recipient_email': invited_profile.get('email'),
+                'recipient_name': invited_profile.get('username'),
+                'subject': f"You were invited to collaborate on {itinerary.get('itinerary', {}).get('trip_name') if itinerary else 'an itinerary'}",
+                'template_name': 'collaborator_invite',
+                'category': 'collaboration',
+                'context': {
+                    'recipient_name': invited_profile.get('username'),
+                    'inviter_name': inviter_profile.get('username'),
+                    'trip_name': (itinerary or {}).get('itinerary', {}).get('trip_name') or f'Trip to {(itinerary or {}).get("itinerary", {}).get("destination") or "your destination"}',
+                },
+            })
     finally:
         cursor.close()
         db.close()
