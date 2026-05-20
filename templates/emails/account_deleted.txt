@@ -1,0 +1,9 @@
+{{ app_name }}
+
+Account deleted
+
+Hi {{ username or 'there' }},
+
+Your Anotara account has been permanently deleted.
+
+If you did not request this change, please contact support immediately.

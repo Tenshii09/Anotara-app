@@ -1,0 +1,9 @@
+{{ app_name }}
+
+New friend request
+
+Hi {{ recipient_name or 'there' }},
+
+{{ sender_name }} sent you a friend request on Anotara.
+
+Open the app to review the request and decide whether to connect.

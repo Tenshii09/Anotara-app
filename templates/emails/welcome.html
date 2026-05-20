@@ -1,0 +1,9 @@
+{% extends 'emails/base.html' %} {% block headline %}Welcome to {{ app_name }}{%
+endblock %} {% block content %}
+<p>Hi {{ username or 'there' }},</p>
+<p>
+  Your account is ready. You can start planning your next trip, invite
+  companions, and save itineraries from any device.
+</p>
+<p>Open the app and continue planning at your own pace.</p>
+{% endblock %}

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background: #f6f1e8;
+      color: #1d1b18;
+      font-family: Arial, sans-serif;
+      line-height: 1.5;
+    "
+  >
+    <div style="max-width: 640px; margin: 0 auto; padding: 32px 20px">
+      <div
+        style="
+          background: #ffffff;
+          border: 1px solid #e6ddd2;
+          border-radius: 18px;
+          padding: 32px;
+        "
+      >
+        <div
+          style="
+            font-size: 12px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #8a5b2d;
+            margin-bottom: 16px;
+          "
+        >
+          {{ app_name }}
+        </div>
+        <h1
+          style="
+            margin: 0 0 16px;
+            font-size: 28px;
+            line-height: 1.2;
+            color: #16324f;
+          "
+        >
+          {% block headline %}{% endblock %}
+        </h1>
+        <div style="font-size: 16px; color: #2f2a24">
+          {% block content %}{% endblock %}
+        </div>
+        <p style="margin: 24px 0 0; font-size: 13px; color: #7a6f63">
+          Need help? Contact
+          <a href="mailto:{{ support_email }}" style="color: #8a5b2d"
+            >{{ support_email }}</a
+          >.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>

@@ -25,7 +25,12 @@ import {
 } from "../lib/socialApi";
 import { logoutSession } from "../lib/authSession";
 import { tapHaptic, successHaptic, warningHaptic } from "../lib/haptics";
-import { applyTheme, getInitialTheme, persistTheme, THEMES } from "../lib/theme";
+import {
+  applyTheme,
+  getInitialTheme,
+  persistTheme,
+  THEMES,
+} from "../lib/theme";
 import Avatar from "./common/Avatar";
 import BottomSheet from "./common/BottomSheet";
 import Icon from "./common/Icon";
@@ -63,10 +68,31 @@ const DEFAULT_VIBE_WEIGHTS = {
   nightlife: 0.5,
 };
 
+const DEFAULT_EMAIL_PREFERENCES = {
+  security: true,
+  collaboration: true,
+  itinerary_updates: true,
+  weather_alerts: true,
+  messages: true,
+  marketing: false,
+};
+
+const EMAIL_PREFERENCE_OPTIONS = [
+  { key: "security", label: "Security alerts" },
+  { key: "collaboration", label: "Collaboration updates" },
+  { key: "itinerary_updates", label: "Itinerary updates" },
+  { key: "weather_alerts", label: "Weather alerts" },
+  { key: "messages", label: "Messages" },
+  { key: "marketing", label: "Marketing" },
+];
+
 function deriveExplorerLevel(totalTrips) {
-  if (totalTrips >= 20) return { level: 6, label: "Elite Wanderer", progress: 100 };
-  if (totalTrips >= 12) return { level: 5, label: "Master Voyager", progress: 90 };
-  if (totalTrips >= 8) return { level: 4, label: "Seasoned Flier", progress: 75 };
+  if (totalTrips >= 20)
+    return { level: 6, label: "Elite Wanderer", progress: 100 };
+  if (totalTrips >= 12)
+    return { level: 5, label: "Master Voyager", progress: 90 };
+  if (totalTrips >= 8)
+    return { level: 4, label: "Seasoned Flier", progress: 75 };
   if (totalTrips >= 5) return { level: 3, label: "Wayfinder", progress: 60 };
   if (totalTrips >= 2) return { level: 2, label: "Trailblazer", progress: 40 };
   if (totalTrips >= 1) return { level: 1, label: "Fresh Flier", progress: 22 };
@@ -105,13 +131,20 @@ export default function ProfilePage() {
   const [defaultBudget, setDefaultBudget] = useState("comfort");
   const [companionVector, setCompanionVector] = useState(["Solo"]);
   const [vibeWeights, setVibeWeights] = useState(DEFAULT_VIBE_WEIGHTS);
+  const [emailPreferences, setEmailPreferences] = useState(
+    DEFAULT_EMAIL_PREFERENCES,
+  );
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [storage, setStorage] = useState({ usage: 0, quota: 0 });
   const [forceSyncBusy, setForceSyncBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [friendsState, setFriendsState] = useState({ friends: [], incoming: [], outgoing: [] });
+  const [friendsState, setFriendsState] = useState({
+    friends: [],
+    incoming: [],
+    outgoing: [],
+  });
   const [findFriendsOpen, setFindFriendsOpen] = useState(false);
   const [theme, setTheme] = useState(() => getInitialTheme());
 
@@ -136,13 +169,18 @@ export default function ProfilePage() {
         setTrips(Array.isArray(tripData) ? tripData : []);
         setDefaultBudget(profileData?.default_budget || "comfort");
         setCompanionVector(
-          Array.isArray(profileData?.companion_vector) && profileData.companion_vector.length
+          Array.isArray(profileData?.companion_vector) &&
+            profileData.companion_vector.length
             ? profileData.companion_vector
             : ["Solo"],
         );
         setVibeWeights({
           ...DEFAULT_VIBE_WEIGHTS,
           ...(profileData?.vibe_weights || {}),
+        });
+        setEmailPreferences({
+          ...DEFAULT_EMAIL_PREFERENCES,
+          ...(profileData?.email_preferences || {}),
         });
         setBiometricEnabled(Boolean(profileData?.biometric_enabled));
 
@@ -196,17 +234,28 @@ export default function ProfilePage() {
       };
     }
     const totalTrips = trips.length;
-    const totalDays = trips.reduce((acc, trip) => acc + Number(trip.days || trip.num_days || 0), 0);
+    const totalDays = trips.reduce(
+      (acc, trip) => acc + Number(trip.days || trip.num_days || 0),
+      0,
+    );
     const uniqueDestinations = new Set(
-      trips.map((trip) => String(trip.destination || "").toLowerCase()).filter(Boolean),
+      trips
+        .map((trip) => String(trip.destination || "").toLowerCase())
+        .filter(Boolean),
     ).size;
     return { totalTrips, totalDays, uniqueDestinations, topDestination: "—" };
   }, [serverStats, trips]);
 
-  const explorerRank = useMemo(() => deriveExplorerLevel(stats.totalTrips), [stats.totalTrips]);
+  const explorerRank = useMemo(
+    () => deriveExplorerLevel(stats.totalTrips),
+    [stats.totalTrips],
+  );
   const storagePercent = useMemo(() => {
     if (!storage.quota) return 12;
-    return Math.max(2, Math.min(100, Math.round((storage.usage / storage.quota) * 100)));
+    return Math.max(
+      2,
+      Math.min(100, Math.round((storage.usage / storage.quota) * 100)),
+    );
   }, [storage]);
 
   async function persistPreferences(payload) {
@@ -265,6 +314,15 @@ export default function ProfilePage() {
     persistPreferences({ biometric_enabled: next });
   }
 
+  function toggleEmailPreference(key) {
+    setEmailPreferences((current) => {
+      const next = { ...current, [key]: !Boolean(current[key]) };
+      tapHaptic();
+      persistPreferences({ email_preferences: next });
+      return next;
+    });
+  }
+
   async function handleSaveProfile(event) {
     event.preventDefault();
     const token = getStoredToken();
@@ -276,7 +334,9 @@ export default function ProfilePage() {
     try {
       setSavingName(true);
       setSaveMessage("");
-      const updated = await updateProfile(token, { username: draftName.trim() });
+      const updated = await updateProfile(token, {
+        username: draftName.trim(),
+      });
       const nextName = updated?.username || draftName.trim();
       setProfile((current) => ({ ...(current || {}), username: nextName }));
       saveUserProfile({ name: nextName });
@@ -448,18 +508,27 @@ export default function ProfilePage() {
             size={72}
           />
           <div className="profile-identity__text">
-            <p className="dashboard-kicker">Digital twin · {explorerRank.label}</p>
+            <p className="dashboard-kicker">
+              Digital twin · {explorerRank.label}
+            </p>
             <h1 className="profile-identity__name">{displayName}</h1>
-            <p className="profile-identity__meta">{email || "Verified explorer"}</p>
+            <p className="profile-identity__meta">
+              {email || "Verified explorer"}
+            </p>
             {memberSince ? (
-              <p className="profile-identity__meta">Member since · {memberSince}</p>
+              <p className="profile-identity__meta">
+                Member since · {memberSince}
+              </p>
             ) : null}
           </div>
         </article>
 
         {error ? <article className="error-banner">{error}</article> : null}
         {saveMessage ? (
-          <article className="glass-card" style={{ padding: 12, color: "var(--accent)" }}>
+          <article
+            className="glass-card"
+            style={{ padding: 12, color: "var(--accent)" }}
+          >
             {saveMessage}
           </article>
         ) : null}
@@ -467,8 +536,13 @@ export default function ProfilePage() {
         {/* Editable name inline form */}
         <article className="glass-card" style={{ padding: 20 }}>
           <p className="dashboard-kicker">Identity</p>
-          <h3 className="serif" style={{ margin: "4px 0 12px" }}>Edit display name</h3>
-          <form onSubmit={handleSaveProfile} style={{ display: "grid", gap: 10 }}>
+          <h3 className="serif" style={{ margin: "4px 0 12px" }}>
+            Edit display name
+          </h3>
+          <form
+            onSubmit={handleSaveProfile}
+            style={{ display: "grid", gap: 10 }}
+          >
             <input
               className="auth-input"
               type="text"
@@ -486,15 +560,21 @@ export default function ProfilePage() {
 
         {/* Algorithmic Preference Tuning Matrix */}
         <article className="glass-card" style={{ padding: 20 }}>
-          <p className="dashboard-kicker">ML Tuning · Algorithmic preference matrix</p>
-          <h3 className="serif" style={{ margin: "4px 0 12px" }}>Reshape the recommendation engine</h3>
+          <p className="dashboard-kicker">
+            ML Tuning · Algorithmic preference matrix
+          </p>
+          <h3 className="serif" style={{ margin: "4px 0 12px" }}>
+            Reshape the recommendation engine
+          </h3>
 
           <div className="profile-tuner">
             <div className="profile-tuner__row">
               <div className="profile-tuner__label">
                 <span>Default budget tier</span>
                 <span className="profile-tuner__value">
-                  {BUDGET_OPTIONS.find((option) => option.value === defaultBudget)?.label || ""}
+                  {BUDGET_OPTIONS.find(
+                    (option) => option.value === defaultBudget,
+                  )?.label || ""}
                 </span>
               </div>
               <div className="profile-tuner__chips">
@@ -514,7 +594,9 @@ export default function ProfilePage() {
             <div className="profile-tuner__row">
               <div className="profile-tuner__label">
                 <span>Companion persona vector (the flock)</span>
-                <span className="profile-tuner__value">{companionVector.length} active</span>
+                <span className="profile-tuner__value">
+                  {companionVector.length} active
+                </span>
               </div>
               <div className="profile-tuner__chips">
                 {COMPANION_OPTIONS.map((option) => (
@@ -544,7 +626,9 @@ export default function ProfilePage() {
                   max="1"
                   step="0.01"
                   value={vibeWeights[dimension.id] ?? 0}
-                  onChange={(event) => handleVibeWeightChange(dimension.id, event.target.value)}
+                  onChange={(event) =>
+                    handleVibeWeightChange(dimension.id, event.target.value)
+                  }
                   className="profile-tuner__slider"
                   aria-label={`${dimension.label} weight`}
                 />
@@ -556,12 +640,24 @@ export default function ProfilePage() {
         {/* Security & hardware integration */}
         <article className="glass-card" style={{ padding: 20 }}>
           <p className="dashboard-kicker">Security · Hardware integration</p>
-          <h3 className="serif" style={{ margin: "4px 0 12px" }}>Authentication matrix</h3>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <h3 className="serif" style={{ margin: "4px 0 12px" }}>
+            Authentication matrix
+          </h3>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
             <div>
-              <p style={{ margin: 0, fontWeight: 700 }}>Biometric authentication</p>
+              <p style={{ margin: 0, fontWeight: 700 }}>
+                Biometric authentication
+              </p>
               <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-                Bind log-in approvals to your device's fingerprint or Face ID where available.
+                Bind log-in approvals to your device's fingerprint or Face ID
+                where available.
               </p>
             </div>
             <button
@@ -576,6 +672,33 @@ export default function ProfilePage() {
             <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
               Active sessions: <strong>This device</strong>
             </p>
+          </div>
+        </article>
+
+        {/* Email notifications */}
+        <article className="glass-card" style={{ padding: 20 }}>
+          <p className="dashboard-kicker">Email · Delivery preferences</p>
+          <h3 className="serif" style={{ margin: "4px 0 12px" }}>
+            What should arrive in your inbox
+          </h3>
+          <div className="profile-tuner">
+            {EMAIL_PREFERENCE_OPTIONS.map((option) => (
+              <div key={option.key} className="profile-tuner__row">
+                <div className="profile-tuner__label">
+                  <span>{option.label}</span>
+                  <span className="profile-tuner__value">
+                    {emailPreferences[option.key] ? "On" : "Off"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={`profile-tuner__chip${emailPreferences[option.key] ? " is-active" : ""}`}
+                  onClick={() => toggleEmailPreference(option.key)}
+                >
+                  {emailPreferences[option.key] ? "Enabled" : "Disabled"}
+                </button>
+              </div>
+            ))}
           </div>
         </article>
 
@@ -613,21 +736,43 @@ export default function ProfilePage() {
         {/* PWA Memory & Cloud Sync Hub */}
         <article className="glass-card" style={{ padding: 20 }}>
           <p className="dashboard-kicker">PWA storage · Cloud sync</p>
-          <h3 className="serif" style={{ margin: "4px 0 8px" }}>Local data footprint</h3>
+          <h3 className="serif" style={{ margin: "4px 0 8px" }}>
+            Local data footprint
+          </h3>
           <p className="muted" style={{ margin: 0 }}>
-            Cached map tiles, offline itineraries, and images stored on this device.
+            Cached map tiles, offline itineraries, and images stored on this
+            device.
           </p>
           <div className="profile-storage-bar">
             <span style={{ width: `${storagePercent}%` }} />
           </div>
           <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-            {formatBytes(storage.usage)} {storage.quota ? `of ${formatBytes(storage.quota)} quota` : "cached locally"}
+            {formatBytes(storage.usage)}{" "}
+            {storage.quota
+              ? `of ${formatBytes(storage.quota)} quota`
+              : "cached locally"}
           </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
-            <button className="btn-outline-luxury" type="button" onClick={handlePurgeCache}>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 10,
+              marginTop: 12,
+            }}
+          >
+            <button
+              className="btn-outline-luxury"
+              type="button"
+              onClick={handlePurgeCache}
+            >
               Purge local cache
             </button>
-            <button className="btn-luxury" type="button" onClick={handleForceSync} disabled={forceSyncBusy}>
+            <button
+              className="btn-luxury"
+              type="button"
+              onClick={handleForceSync}
+              disabled={forceSyncBusy}
+            >
               {forceSyncBusy ? "Syncing..." : "Force cloud sync"}
             </button>
           </div>
@@ -636,18 +781,36 @@ export default function ProfilePage() {
         {/* Quick navigation */}
         <article className="glass-card" style={{ padding: 20 }}>
           <p className="dashboard-kicker">Quick navigation</p>
-          <h3 className="serif" style={{ margin: "4px 0 12px" }}>Jump anywhere</h3>
+          <h3 className="serif" style={{ margin: "4px 0 12px" }}>
+            Jump anywhere
+          </h3>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button className="top-action-link" type="button" onClick={() => navigate("/dashboard")}>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={() => navigate("/dashboard")}
+            >
               Dashboard
             </button>
-            <button className="top-action-link" type="button" onClick={() => navigate("/my-trips")}>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={() => navigate("/my-trips")}
+            >
               My Trips
             </button>
-            <button className="top-action-link" type="button" onClick={() => navigate("/discover")}>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={() => navigate("/discover")}
+            >
               Discover
             </button>
-            <button className="top-action-link" type="button" onClick={() => navigate("/generate")}>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={() => navigate("/generate")}
+            >
               Trip Generator
             </button>
           </div>
@@ -655,10 +818,20 @@ export default function ProfilePage() {
 
         {/* The Flock — Friends & companions */}
         <article className="glass-card" style={{ padding: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
             <div>
               <p className="dashboard-kicker">The Flock · Travel companions</p>
-              <h3 className="serif" style={{ margin: "4px 0 0" }}>Friends &amp; collaborators</h3>
+              <h3 className="serif" style={{ margin: "4px 0 0" }}>
+                Friends &amp; collaborators
+              </h3>
             </div>
             <button
               type="button"
@@ -676,13 +849,21 @@ export default function ProfilePage() {
             <section style={{ marginTop: 16, display: "grid", gap: 8 }}>
               <p className="dashboard-kicker">Pending requests</p>
               {friendsState.incoming.map((friend) => (
-                <div key={friend.friendship_id} className="profile-friends__row">
+                <div
+                  key={friend.friendship_id}
+                  className="profile-friends__row"
+                >
                   <span className="invite-sheet__avatar" aria-hidden="true">
-                    {String(friend.username || "T").charAt(0).toUpperCase()}
+                    {String(friend.username || "T")
+                      .charAt(0)
+                      .toUpperCase()}
                   </span>
                   <div>
                     <p className="invite-sheet__name">{friend.username}</p>
-                    <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+                    <p
+                      className="muted"
+                      style={{ margin: 0, fontSize: "0.78rem" }}
+                    >
                       Wants to add you to their flock.
                     </p>
                   </div>
@@ -690,14 +871,18 @@ export default function ProfilePage() {
                     <button
                       type="button"
                       className="profile-friends__cta"
-                      onClick={() => handleAcceptFriendRequest(friend.friendship_id)}
+                      onClick={() =>
+                        handleAcceptFriendRequest(friend.friendship_id)
+                      }
                     >
                       <Icon name="check" size={14} /> Accept
                     </button>
                     <button
                       type="button"
                       className="profile-friends__cta profile-friends__cta--danger"
-                      onClick={() => handleDeclineFriendRequest(friend.friendship_id)}
+                      onClick={() =>
+                        handleDeclineFriendRequest(friend.friendship_id)
+                      }
                     >
                       <Icon name="close" size={14} /> Decline
                     </button>
@@ -711,13 +896,23 @@ export default function ProfilePage() {
             <section style={{ marginTop: 16, display: "grid", gap: 8 }}>
               <p className="dashboard-kicker">Sent requests</p>
               {friendsState.outgoing.map((friend) => (
-                <div key={friend.friendship_id} className="profile-friends__row">
+                <div
+                  key={friend.friendship_id}
+                  className="profile-friends__row"
+                >
                   <span className="invite-sheet__avatar" aria-hidden="true">
-                    {String(friend.username || "T").charAt(0).toUpperCase()}
+                    {String(friend.username || "T")
+                      .charAt(0)
+                      .toUpperCase()}
                   </span>
                   <div>
                     <p className="invite-sheet__name">{friend.username}</p>
-                    <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>Waiting for them to respond.</p>
+                    <p
+                      className="muted"
+                      style={{ margin: 0, fontSize: "0.78rem" }}
+                    >
+                      Waiting for them to respond.
+                    </p>
                   </div>
                   <button
                     type="button"
@@ -737,18 +932,29 @@ export default function ProfilePage() {
             </p>
             {friendsState.friends.length === 0 ? (
               <p className="muted" style={{ margin: 0 }}>
-                No friends yet — tap <strong>Find friends</strong> to start your flock.
+                No friends yet — tap <strong>Find friends</strong> to start your
+                flock.
               </p>
             ) : (
               friendsState.friends.map((friend) => (
-                <div key={friend.friendship_id} className="profile-friends__row">
+                <div
+                  key={friend.friendship_id}
+                  className="profile-friends__row"
+                >
                   <span className="invite-sheet__avatar" aria-hidden="true">
-                    {String(friend.username || "T").charAt(0).toUpperCase()}
+                    {String(friend.username || "T")
+                      .charAt(0)
+                      .toUpperCase()}
                   </span>
                   <div>
                     <p className="invite-sheet__name">{friend.username}</p>
                     {friend.email ? (
-                      <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>{friend.email}</p>
+                      <p
+                        className="muted"
+                        style={{ margin: 0, fontSize: "0.78rem" }}
+                      >
+                        {friend.email}
+                      </p>
                     ) : null}
                   </div>
                   <button
@@ -777,11 +983,16 @@ export default function ProfilePage() {
               <span className="muted">Planned days</span>
             </div>
             <div>
-              <span className="dashboard-stat-value">{stats.uniqueDestinations}/82</span>
+              <span className="dashboard-stat-value">
+                {stats.uniqueDestinations}/82
+              </span>
               <span className="muted">Provinces explored</span>
             </div>
             <div>
-              <span className="dashboard-stat-value" style={{ fontSize: "1rem" }}>
+              <span
+                className="dashboard-stat-value"
+                style={{ fontSize: "1rem" }}
+              >
                 {stats.topDestination}
               </span>
               <span className="muted">Top destination</span>
@@ -793,16 +1004,32 @@ export default function ProfilePage() {
         <article className="glass-card" style={{ padding: 20 }}>
           <p className="dashboard-kicker">Support & legal</p>
           <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-            <button className="top-action-link" type="button" onClick={() => window.open("mailto:support@anotara.app")}>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={() => window.open("mailto:support@anotara.app")}
+            >
               Help center & bug reporter
             </button>
-            <button className="top-action-link" type="button" onClick={() => window.open("/privacy", "_blank")}>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={() => window.open("/privacy", "_blank")}
+            >
               Privacy Policy
             </button>
-            <button className="top-action-link" type="button" onClick={() => window.open("/terms", "_blank")}>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={() => window.open("/terms", "_blank")}
+            >
               Terms of Service
             </button>
-            <button className="top-action-link" type="button" onClick={handleLogout}>
+            <button
+              className="top-action-link"
+              type="button"
+              onClick={handleLogout}
+            >
               Log out
             </button>
           </div>
@@ -811,9 +1038,12 @@ export default function ProfilePage() {
         {/* Destructive protocol */}
         <article className="profile-danger">
           <p className="dashboard-kicker">Destructive protocol</p>
-          <h3 className="serif" style={{ margin: 0 }}>Delete account</h3>
+          <h3 className="serif" style={{ margin: 0 }}>
+            Delete account
+          </h3>
           <p className="muted" style={{ margin: 0, color: "#8a1f3a" }}>
-            Permanently expunges your itineraries, feedback, and account. Cannot be undone.
+            Permanently expunges your itineraries, feedback, and account. Cannot
+            be undone.
           </p>
           <button type="button" onClick={() => setPendingDelete(true)}>
             Begin delete protocol
@@ -844,9 +1074,14 @@ export default function ProfilePage() {
             <button
               className="btn-luxury"
               type="button"
-              style={{ background: "linear-gradient(135deg, #c44f5a 0%, #ff8a72 100%)" }}
+              style={{
+                background: "linear-gradient(135deg, #c44f5a 0%, #ff8a72 100%)",
+              }}
               onClick={handleConfirmDelete}
-              disabled={deleteBusy || deleteConfirmation.trim().toLowerCase() !== "delete my account"}
+              disabled={
+                deleteBusy ||
+                deleteConfirmation.trim().toLowerCase() !== "delete my account"
+              }
             >
               {deleteBusy ? "Deleting..." : "Confirm permanent delete"}
             </button>
@@ -854,8 +1089,9 @@ export default function ProfilePage() {
         }
       >
         <p className="muted">
-          To proceed, type <strong>delete my account</strong> exactly (case-insensitive) in the box
-          below. This action permanently removes your data and cannot be undone.
+          To proceed, type <strong>delete my account</strong> exactly
+          (case-insensitive) in the box below. This action permanently removes
+          your data and cannot be undone.
         </p>
         <input
           className="auth-input"

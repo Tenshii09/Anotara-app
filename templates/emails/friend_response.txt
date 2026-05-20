@@ -1,0 +1,9 @@
+{{ app_name }}
+
+Friend request updated
+
+Hi {{ recipient_name or 'there' }},
+
+{{ responder_name }} {{ decision_text }} your friend request.
+
+Open the app to continue planning together.

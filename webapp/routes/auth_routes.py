@@ -15,6 +15,7 @@ from flask_jwt_extended import (
 )
 
 from webapp.extensions import bcrypt
+from webapp.services.email_service import queue_email
 from webapp.services.database import (
     delete_user_account,
     ensure_user_columns,
@@ -78,6 +79,16 @@ def api_register():
             (username, email, hashed_pw),
         )
         db.commit()
+        user_id = cursor.lastrowid
+        queue_email({
+            'recipient_user_id': user_id,
+            'recipient_email': email,
+            'recipient_name': username,
+            'subject': 'Welcome to Ano Tara!',
+            'template_name': 'welcome',
+            'category': 'messages',
+            'context': {'username': username},
+        })
         return jsonify({'message': 'Account created'}), 201
     except mysql.connector.IntegrityError:
         return jsonify({'error': 'Username/Email taken'}), 409
@@ -189,6 +200,7 @@ def api_update_preferences():
     default_budget = data.get('default_budget')
     companion_vector = data.get('companion_vector')
     vibe_weights = data.get('vibe_weights')
+    email_preferences = data.get('email_preferences')
     biometric_enabled = data.get('biometric_enabled')
 
     if default_budget is not None and default_budget not in {'low', 'comfort', 'high'}:
@@ -209,11 +221,24 @@ def api_update_preferences():
             cleaned_weights[str(key)] = max(0.0, min(1.0, numeric))
         vibe_weights = cleaned_weights
 
+    if email_preferences is not None:
+        if not isinstance(email_preferences, dict):
+            return jsonify({'error': 'email_preferences must be an object'}), 400
+        allowed_preferences = {'security', 'collaboration', 'itinerary_updates', 'weather_alerts', 'messages', 'marketing'}
+        cleaned_preferences = {}
+        for key, value in email_preferences.items():
+            preference_key = str(key).strip().lower()
+            if preference_key not in allowed_preferences:
+                return jsonify({'error': f'invalid email preference: {key}'}), 400
+            cleaned_preferences[preference_key] = bool(value)
+        email_preferences = cleaned_preferences
+
     profile = update_user_preferences(
         current_user_id,
         default_budget=default_budget,
         companion_vector=companion_vector,
         vibe_weights=vibe_weights,
+        email_preferences=email_preferences,
         biometric_enabled=biometric_enabled,
     )
 
@@ -234,8 +259,19 @@ def api_delete_account():
     if confirmation != 'delete my account':
         return jsonify({'error': 'Please type "delete my account" exactly to confirm.'}), 400
 
+    profile = get_user_profile(current_user_id)
     deleted = delete_user_account(current_user_id)
     if not deleted:
         return jsonify({'error': 'User not found'}), 404
+
+    if profile and profile.get('email'):
+        queue_email({
+            'recipient_email': profile.get('email'),
+            'recipient_name': profile.get('username'),
+            'subject': 'Your Ano Tara account was deleted',
+            'template_name': 'account_deleted',
+            'category': 'security',
+            'context': {'username': profile.get('username')},
+        })
 
     return jsonify({'message': 'Account permanently deleted.'}), 200

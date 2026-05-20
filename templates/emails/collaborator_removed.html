@@ -1,0 +1,6 @@
+{% extends 'emails/base.html' %} {% block headline %}Removed from itinerary{%
+endblock %} {% block content %}
+<p>Hi {{ recipient_name or 'there' }},</p>
+<p>You were removed from the itinerary <strong>{{ trip_name }}</strong>.</p>
+<p>If this was unexpected, contact the itinerary owner or support.</p>
+{% endblock %}

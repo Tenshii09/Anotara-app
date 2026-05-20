@@ -1,0 +1,11 @@
+{% extends 'emails/base.html' %} {% block headline %}Itinerary saved{% endblock
+%} {% block content %}
+<p>Hi {{ recipient_name or 'there' }},</p>
+<p>
+  Your trip to <strong>{{ destination }}</strong> has been saved successfully.
+</p>
+<p>
+  You can revisit the itinerary anytime to edit stops, collaborators, and trip
+  timing.
+</p>
+{% endblock %}

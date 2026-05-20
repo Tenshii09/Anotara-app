@@ -1,0 +1,9 @@
+{% extends 'emails/base.html' %} {% block headline %}Weather alert for your
+trip{% endblock %} {% block content %}
+<p>Hi {{ recipient_name or 'there' }},</p>
+<p>
+  Weather conditions may affect <strong>{{ destination }}</strong>. Indoor
+  alternatives are ready if you want to pivot.
+</p>
+<p>Open the itinerary to review the latest weather-aware suggestion.</p>
+{% endblock %}

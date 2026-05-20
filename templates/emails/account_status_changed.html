@@ -1,0 +1,9 @@
+{% extends 'emails/base.html' %} {% block headline %}Account status changed{%
+endblock %} {% block content %}
+<p>Hi {{ username or 'there' }},</p>
+<p>Your account status is now <strong>{{ account_status }}</strong>.</p>
+{% if reason %}
+<p>Reason: {{ reason }}</p>
+{% endif %}
+<p>If you believe this is a mistake, contact support.</p>
+{% endblock %}

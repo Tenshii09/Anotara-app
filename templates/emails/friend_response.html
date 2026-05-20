@@ -1,0 +1,6 @@
+{% extends 'emails/base.html' %} {% block headline %}Friend request updated{%
+endblock %} {% block content %}
+<p>Hi {{ recipient_name or 'there' }},</p>
+<p>{{ responder_name }} {{ decision_text }} your friend request.</p>
+<p>Open the app to continue planning together.</p>
+{% endblock %}

@@ -1,0 +1,9 @@
+{{ app_name }}
+
+You're invited to collaborate
+
+Hi {{ recipient_name or 'there' }},
+
+{{ inviter_name }} invited you to collaborate on {{ trip_name }}.
+
+Open the itinerary to join the planning session and help shape the trip.

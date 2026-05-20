@@ -8,6 +8,8 @@ authentication unless explicitly stated.
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from webapp.services.email_service import queue_email
+from webapp.services.database import get_itinerary_overview, get_user_profile
 from webapp.services.social import (
     add_collaborator,
     add_memory_entry,
@@ -149,9 +151,24 @@ def api_remove_collaborator(itinerary_id, user_id):
     if not can_access_itinerary(current_user_id, itinerary_id):
         return jsonify({"error": "Forbidden"}), 403
 
+    removed_profile = get_user_profile(user_id)
     removed = remove_collaborator(itinerary_id, user_id)
     if not removed:
         return jsonify({"error": "Collaborator not found"}), 404
+    itinerary = get_itinerary_overview(itinerary_id)
+    if removed_profile and removed_profile.get('email'):
+        queue_email({
+            'recipient_user_id': removed_profile.get('id'),
+            'recipient_email': removed_profile.get('email'),
+            'recipient_name': removed_profile.get('username'),
+            'subject': f"You were removed from {itinerary.get('itinerary', {}).get('trip_name') if itinerary else 'an itinerary'}",
+            'template_name': 'collaborator_removed',
+            'category': 'collaboration',
+            'context': {
+                'recipient_name': removed_profile.get('username'),
+                'trip_name': (itinerary or {}).get('itinerary', {}).get('trip_name') or f'Trip to {(itinerary or {}).get("itinerary", {}).get("destination") or "your destination"}',
+            },
+        })
     record_trip_activity(itinerary_id, current_user_id, "collaborator_removed", {"user_id": user_id})
     return jsonify({"flock": list_collaborators(itinerary_id)}), 200
 

@@ -10,10 +10,12 @@ from webapp.services.database import (
     get_active_itineraries,
     get_indoor_place_alternatives,
     get_itinerary_overview,
+    get_user_profile,
     list_weather_alerts,
     resolve_weather_alert,
     upsert_weather_alert,
 )
+from webapp.services.email_service import queue_email
 from webapp.services.push_notifications import mark_weather_push_notified, send_push_to_user
 
 RAINY_WEATHER_CODES = {51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99}
@@ -271,6 +273,21 @@ def run_weather_monitor():
                 })
                 if current_signature:
                     mark_weather_push_notified(itinerary_id, ALERT_KEY, current_signature)
+                if push_result.get('skipped') or push_result.get('sent', 0) == 0:
+                    owner_profile = get_user_profile(overview['itinerary']['user_id'])
+                    if owner_profile and owner_profile.get('email'):
+                        queue_email({
+                            'recipient_user_id': owner_profile.get('id'),
+                            'recipient_email': owner_profile.get('email'),
+                            'recipient_name': owner_profile.get('username'),
+                            'subject': f'Weather alert for {suggestion["headline"]}',
+                            'template_name': 'weather_alert',
+                            'category': 'weather_alerts',
+                            'context': {
+                                'recipient_name': owner_profile.get('username'),
+                                'destination': overview['itinerary'].get('destination'),
+                            },
+                        })
             else:
                 summary['cleared'] += 1
         except Exception as error:
