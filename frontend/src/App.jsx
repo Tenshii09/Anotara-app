@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   BrowserRouter,
   Navigate,
@@ -9,16 +9,9 @@ import {
 } from "react-router-dom";
 
 import AuthPage from "./components/AuthPage";
-import ItineraryPage from "./components/ItineraryPage";
-import TravelWizard from "./components/TravelWizard";
-import MyTripsPage from "./components/MyTripsPage";
 import BottomNav from "./components/common/BottomNav";
 import BrandLogo from "./components/common/BrandLogo";
 import OfflineIndicator from "./components/common/OfflineIndicator";
-import DashboardPage from "./components/DashboardPage";
-import DiscoverPage from "./components/DiscoverPage";
-import ProfilePage from "./components/ProfilePage";
-import AdminPanelPage from "./components/AdminPanelPage";
 import {
   clearSession,
   getValidAccessToken,
@@ -30,6 +23,14 @@ import { getStoredToken } from "./lib/storage";
 import { applyTheme, getInitialTheme } from "./lib/theme";
 
 import "./App.css";
+
+const DashboardPage = lazy(() => import("./components/DashboardPage"));
+const DiscoverPage = lazy(() => import("./components/DiscoverPage"));
+const ProfilePage = lazy(() => import("./components/ProfilePage"));
+const MyTripsPage = lazy(() => import("./components/MyTripsPage"));
+const ItineraryPage = lazy(() => import("./components/ItineraryPage"));
+const TravelWizard = lazy(() => import("./components/TravelWizard"));
+const AdminPanelPage = lazy(() => import("./components/AdminPanelPage"));
 
 /**
  * Renders the fixed, animated fluid-pastel background that sits behind
@@ -155,26 +156,41 @@ function AppRouteFrame() {
             : "app-route-frame"
         }
       >
-        <Routes>
-          <Route path="/" element={<AuthPage initialMode="login" />} />
-          <Route path="/login" element={<AuthPage initialMode="login" />} />
-          <Route
-            path="/register"
-            element={<AuthPage initialMode="register" />}
-          />
+        <Suspense
+          fallback={<div className="admin-notice">Loading workspace...</div>}
+        >
+          <Routes>
+            <Route path="/" element={<AuthPage initialMode="login" />} />
+            <Route path="/login" element={<AuthPage initialMode="login" />} />
+            <Route
+              path="/register"
+              element={<AuthPage initialMode="register" />}
+            />
 
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/my-trips" element={<MyTripsPage />} />
-          <Route path="/itinerary" element={<ItineraryPage />} />
-          <Route path="/itinerary/:itineraryId" element={<ItineraryPage />} />
-          <Route path="/generate" element={<TravelWizard />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/my-trips" element={<MyTripsPage />} />
+            <Route path="/itinerary" element={<ItineraryPage />} />
+            <Route path="/itinerary/:itineraryId" element={<ItineraryPage />} />
+            <Route path="/generate" element={<TravelWizard />} />
 
-          <Route path="/discover" element={<DiscoverPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/admin/*" element={<AdminPanelPage />} />
+            <Route path="/discover" element={<DiscoverPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route
+              path="/admin/*"
+              element={
+                <Suspense
+                  fallback={
+                    <div className="admin-notice">Loading admin console...</div>
+                  }
+                >
+                  <AdminPanelPage />
+                </Suspense>
+              }
+            />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </div>
       <RouteAwareBottomNav />
     </>

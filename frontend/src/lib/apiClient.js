@@ -27,6 +27,7 @@ export async function apiRequest(path, options = {}) {
     token = "",
     headers = {},
     skipAuthRefresh = false,
+    responseType = "json",
     ...restOptions
   } = options;
   const baseUrl = String(API_BASE_URL || "").replace(/\/+$/, "");
@@ -66,6 +67,18 @@ export async function apiRequest(path, options = {}) {
       } catch {
         emitSessionExpired("Your session expired. Please log in again.");
       }
+    }
+
+    if (responseType === "blob") {
+      if (!response.ok) {
+        const errorText = await response.text();
+        const requestError = new Error(
+          errorText || normalizeErrorMessage(response.status, null),
+        );
+        requestError.status = response.status;
+        throw requestError;
+      }
+      return response.blob();
     }
 
     const hasJsonBody = response.headers

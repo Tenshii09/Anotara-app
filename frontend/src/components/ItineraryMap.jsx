@@ -5,8 +5,6 @@ import {
   useRef,
   useState,
 } from "react";
-
-import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 import { MAPBOX_TOKEN } from "../lib/config";
@@ -132,7 +130,9 @@ async function fetchDrivingRoute(coordinates, token, signal) {
   const payload = await response.json();
   const geometry = payload?.routes?.[0]?.geometry;
   if (!geometry || geometry.type !== "LineString") {
-    throw new Error("Mapbox Directions response did not include a route geometry.");
+    throw new Error(
+      "Mapbox Directions response did not include a route geometry.",
+    );
   }
 
   return geometry;
@@ -180,11 +180,9 @@ function buildPopupHTML(place, dayNumber, sequenceNumber) {
   `;
 }
 
-function ItineraryMap(
-  { itinerary, destCoords, activeDay = null },
-  ref,
-) {
+function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
   const mapContainerRef = useRef(null);
+  const [mapboxApi, setMapboxApi] = useState(null);
 
   // The live Mapbox instance. We keep it in a ref so other effects (and the
   // imperative handle the parent uses for fly-to) can reach it without
@@ -205,6 +203,20 @@ function ItineraryMap(
   // touch sources/layers. A state value (rather than a ref) ensures the draw
   // effect re-runs the moment the map is ready.
   const [isMapReady, setIsMapReady] = useState(false);
+  const mapboxgl = mapboxApi;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    import("mapbox-gl").then((module) => {
+      if (cancelled) return;
+      setMapboxApi(module.default || module);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Expose a `flyTo` method so the itinerary cards can pan the camera to a
   // specific stop without the parent having to know about Mapbox internals.
@@ -221,9 +233,7 @@ function ItineraryMap(
         if (Array.isArray(target)) {
           [longitude, latitude] = target;
         } else {
-          longitude = Number(
-            target.longitude ?? target.lng ?? target.lon,
-          );
+          longitude = Number(target.longitude ?? target.lng ?? target.lon);
           latitude = Number(target.latitude ?? target.lat);
         }
 
@@ -248,7 +258,7 @@ function ItineraryMap(
   // not tear down the map (which would otherwise reset camera and freeze the
   // fly-to animation).
   useEffect(() => {
-    if (!mapContainerRef.current || !destCoords) return undefined;
+    if (!mapContainerRef.current || !destCoords || !mapboxgl) return undefined;
 
     if (!MAPBOX_TOKEN) {
       console.error("VITE_MAPBOX_TOKEN is not set.");
@@ -331,7 +341,7 @@ function ItineraryMap(
       map.remove();
       mapRef.current = null;
     };
-  }, [destCoords]);
+  }, [destCoords, mapboxgl]);
 
   // Effect 2 — draw (and redraw) markers + route geometry whenever the
   // itinerary changes or the user switches days. The map itself is preserved
@@ -509,7 +519,9 @@ function ItineraryMap(
     // animation — switching days smoothly pans + zooms the camera.
     const targetBounds = focusedCoordinateCount > 0 ? focusedBounds : bounds;
     const totalCoords =
-      focusedCoordinateCount > 0 ? focusedCoordinateCount : allCoordinates.length;
+      focusedCoordinateCount > 0
+        ? focusedCoordinateCount
+        : allCoordinates.length;
 
     if (totalCoords > 1) {
       map.fitBounds(targetBounds, {
@@ -520,7 +532,9 @@ function ItineraryMap(
       });
     } else if (totalCoords === 1) {
       const center =
-        focusedCoordinateCount > 0 ? focusedBounds.getCenter() : new mapboxgl.LngLat(allCoordinates[0][0], allCoordinates[0][1]);
+        focusedCoordinateCount > 0
+          ? focusedBounds.getCenter()
+          : new mapboxgl.LngLat(allCoordinates[0][0], allCoordinates[0][1]);
       map.flyTo({
         center,
         zoom: 14,

@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import {
+  createAdminBackup,
   createAdminPlace,
+  downloadAdminBackup,
   getAdminAnalytics,
   getAdminAuditLog,
+  getAdminBackups,
   getAdminEmailOps,
   getAdminItineraries,
   getAdminItineraryDetail,
@@ -15,13 +18,15 @@ import {
   getAdminSettings,
   getAdminWeatherOps,
   getAdminUsers,
+  restoreAdminBackupFromHistory,
+  restoreAdminBackupUpload,
   requestAdminRetraining,
-  sendAdminNotification,
   updateAdminPlace,
   updateAdminSetting,
   updateAdminUserRole,
   updateAdminUserStatus,
 } from "../lib/adminApi";
+import { logoutSession } from "../lib/authSession";
 import { getStoredToken, loadUserProfile } from "../lib/storage";
 
 const adminSections = [
@@ -54,7 +59,7 @@ const adminSections = [
     id: "notifications",
     path: "notifications",
     label: "Notifications",
-    title: "Push Operations",
+    title: "Notification Monitoring",
   },
   {
     id: "email",
@@ -67,6 +72,12 @@ const adminSections = [
     path: "weather",
     label: "Weather & Safety",
     title: "Alert review and pivot support",
+  },
+  {
+    id: "backups",
+    path: "backups",
+    label: "Backups",
+    title: "Export, restore, and recovery history",
   },
   {
     id: "ml",
@@ -183,6 +194,34 @@ function Field({ label, children }) {
   );
 }
 
+function Pager({ pageInfo = {}, onPageChange }) {
+  const page = Number(pageInfo.page || 1);
+  const pages = Number(pageInfo.pages || 1);
+  if (pages <= 1) return null;
+
+  return (
+    <div className="admin-pager">
+      <button
+        disabled={page <= 1}
+        onClick={() => onPageChange(page - 1)}
+        type="button"
+      >
+        Previous
+      </button>
+      <span>
+        Page {page} of {pages}
+      </span>
+      <button
+        disabled={page >= pages}
+        onClick={() => onPageChange(page + 1)}
+        type="button"
+      >
+        Next
+      </button>
+    </div>
+  );
+}
+
 function toPlaceForm(place = {}) {
   return {
     ...emptyPlaceForm,
@@ -222,6 +261,7 @@ export default function AdminPanelPage() {
   const navigate = useNavigate();
   const activeNav = getAdminSectionFromPath(location.pathname);
   const rawSection = String(location.pathname || "").split("/")[2] || "";
+  const tablePageSize = 10;
   const [placeQuery, setPlaceQuery] = useState("");
   const [userQuery, setUserQuery] = useState("");
   const [tripQuery, setTripQuery] = useState("");
@@ -239,27 +279,66 @@ export default function AdminPanelPage() {
   const [emailQuery, setEmailQuery] = useState("");
   const [weatherQuery, setWeatherQuery] = useState("");
   const [weatherActiveOnly, setWeatherActiveOnly] = useState("all");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profile] = useState(() => loadUserProfile());
   const [token] = useState(() => getStoredToken());
   const [overview, setOverview] = useState(null);
   const [users, setUsers] = useState([]);
+  const [usersPageInfo, setUsersPageInfo] = useState({
+    page: 1,
+    limit: tablePageSize,
+    total: 0,
+    pages: 1,
+  });
   const [places, setPlaces] = useState([]);
+  const [placesPageInfo, setPlacesPageInfo] = useState({
+    page: 1,
+    limit: tablePageSize,
+    total: 0,
+    pages: 1,
+  });
   const [analytics, setAnalytics] = useState(null);
   const [mlStatus, setMlStatus] = useState(null);
   const [auditEvents, setAuditEvents] = useState([]);
+  const [auditPageInfo, setAuditPageInfo] = useState({
+    page: 1,
+    limit: tablePageSize,
+    total: 0,
+    pages: 1,
+  });
   const [itineraries, setItineraries] = useState([]);
+  const [tripsPageInfo, setTripsPageInfo] = useState({
+    page: 1,
+    limit: tablePageSize,
+    total: 0,
+    pages: 1,
+  });
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [notifications, setNotifications] = useState(null);
   const [emailOps, setEmailOps] = useState(null);
+  const [emailPageInfo, setEmailPageInfo] = useState({
+    page: 1,
+    limit: tablePageSize,
+    total: 0,
+    pages: 1,
+  });
   const [weatherOps, setWeatherOps] = useState(null);
+  const [weatherPageInfo, setWeatherPageInfo] = useState({
+    page: 1,
+    limit: tablePageSize,
+    total: 0,
+    pages: 1,
+  });
+  const [backups, setBackups] = useState([]);
+  const [backupsPageInfo, setBackupsPageInfo] = useState({
+    page: 1,
+    limit: tablePageSize,
+    total: 0,
+    pages: 1,
+  });
+  const [backupUploadFile, setBackupUploadFile] = useState(null);
   const [settings, setSettings] = useState([]);
   const [placeForm, setPlaceForm] = useState(null);
-  const [notificationForm, setNotificationForm] = useState({
-    audience_type: "user",
-    target_user_id: "",
-    title: "",
-    body: "",
-  });
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
@@ -284,6 +363,13 @@ export default function AdminPanelPage() {
     emailSearch = emailQuery,
     weatherSearch = weatherQuery,
     weatherOnlyActive = weatherActiveOnly,
+    usersPage = usersPageInfo.page,
+    placesPage = placesPageInfo.page,
+    tripsPage = tripsPageInfo.page,
+    auditPage = auditPageInfo.page,
+    emailPage = emailPageInfo.page,
+    weatherPage = weatherPageInfo.page,
+    backupsPage = backupsPageInfo.page,
   } = {}) {
     if (!token || !isAdmin) return;
     setError("");
@@ -301,36 +387,99 @@ export default function AdminPanelPage() {
         notificationData,
         emailData,
         weatherData,
+        backupData,
         settingsData,
       ] = await Promise.all([
         getAdminOverview(token),
-        getAdminUsers(token, usersQuery),
-        getAdminPlaces(token, placesQuery),
+        getAdminUsers(token, usersQuery, usersPage, tablePageSize),
+        getAdminPlaces(token, placesQuery, placesPage, tablePageSize),
         getAdminAnalytics(token, analyticsWindow),
         getAdminMlStatus(token),
-        getAdminAuditLog(token, auditWindow),
-        getAdminItineraries(token, tripsQuery, tripsStatus),
+        getAdminAuditLog(token, {
+          ...auditWindow,
+          page: auditPage,
+          limit: tablePageSize,
+        }),
+        getAdminItineraries(
+          token,
+          tripsQuery,
+          tripsStatus,
+          tripsPage,
+          tablePageSize,
+        ),
         getAdminNotifications(token),
-        getAdminEmailOps(token, { q: emailSearch }),
+        getAdminEmailOps(token, {
+          q: emailSearch,
+          page: emailPage,
+          limit: tablePageSize,
+        }),
         getAdminWeatherOps(token, {
           q: weatherSearch,
+          page: weatherPage,
+          limit: tablePageSize,
           activeOnly:
             weatherOnlyActive === "all"
               ? undefined
               : weatherOnlyActive === "active",
         }),
+        getAdminBackups(token, backupsPage, tablePageSize),
         getAdminSettings(token),
       ]);
       setOverview(overviewData);
-      setUsers(usersData.users || []);
-      setPlaces(placesData.places || []);
+      setUsers(usersData.users || usersData.items || []);
+      setUsersPageInfo({
+        page: usersData.page || usersPage,
+        limit: usersData.limit || tablePageSize,
+        total: usersData.total || 0,
+        pages: usersData.pages || 1,
+      });
+      setPlaces(placesData.places || placesData.items || []);
+      setPlacesPageInfo({
+        page: placesData.page || placesPage,
+        limit: placesData.limit || tablePageSize,
+        total: placesData.total || 0,
+        pages: placesData.pages || 1,
+      });
       setAnalytics(analyticsData);
       setMlStatus(mlData);
-      setAuditEvents(auditData.events || overviewData.recent_audit || []);
-      setItineraries(tripsData.itineraries || []);
+      setAuditEvents(
+        auditData.events || auditData.items || overviewData.recent_audit || [],
+      );
+      setAuditPageInfo({
+        page: auditData.page || auditPage,
+        limit: auditData.limit || tablePageSize,
+        total: auditData.total || 0,
+        pages: auditData.pages || 1,
+      });
+      setItineraries(tripsData.itineraries || tripsData.items || []);
+      setTripsPageInfo({
+        page: tripsData.page || tripsPage,
+        limit: tripsData.limit || tablePageSize,
+        total: tripsData.total || 0,
+        pages: tripsData.pages || 1,
+      });
       setNotifications(notificationData);
       setEmailOps(emailData);
+      setEmailPageInfo({
+        page: emailData.page || emailPage,
+        limit: emailData.limit || tablePageSize,
+        total: emailData.totals?.queue || 0,
+        pages: emailData.pages || 1,
+      });
       setWeatherOps(weatherData);
+      setWeatherPageInfo({
+        page: weatherData.page || weatherPage,
+        limit: weatherData.limit || tablePageSize,
+        total: weatherData.total || 0,
+        pages: weatherData.pages || 1,
+      });
+      setBackups(backupData.backups || backupData.items || []);
+      setBackupsPageInfo({
+        page: backupData.page || backupsPage,
+        limit: backupData.limit || tablePageSize,
+        total: backupData.total || 0,
+        pages: backupData.pages || 1,
+      });
       setSettings(settingsData.settings || []);
     } catch (requestError) {
       setError(requestError.message || "Could not load admin data.");
@@ -347,6 +496,95 @@ export default function AdminPanelPage() {
     // The initial load should only depend on the authenticated session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, isAdmin]);
+
+  async function handleLogout() {
+    await logoutSession();
+    navigate("/login");
+  }
+
+  async function handleCreateBackup() {
+    if (!window.confirm("Create a full database backup now?")) {
+      return;
+    }
+    await refreshWithMutation(
+      async () => {
+        const backup = await createAdminBackup(token);
+        const archive = await downloadAdminBackup(token, backup.id);
+        const archiveUrl = window.URL.createObjectURL(archive);
+        const anchor = document.createElement("a");
+        anchor.href = archiveUrl;
+        anchor.download = backup.file_name || `${backup.backup_label}.zip`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.URL.revokeObjectURL(archiveUrl);
+      },
+      { backupsPage: backupsPageInfo.page },
+    );
+  }
+
+  async function handleDownloadBackup(backup) {
+    const archive = await downloadAdminBackup(token, backup.id);
+    const archiveUrl = window.URL.createObjectURL(archive);
+    const anchor = document.createElement("a");
+    anchor.href = archiveUrl;
+    anchor.download = backup.file_name || `${backup.backup_label}.zip`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(archiveUrl);
+  }
+
+  async function handleRestoreBackupFromHistory(backup) {
+    if (
+      !window.confirm(
+        `Restore the database from ${backup.file_name}? This is destructive.`,
+      )
+    ) {
+      return;
+    }
+    await refreshWithMutation(
+      async () => {
+        await restoreAdminBackupFromHistory(token, backup.id);
+      },
+      { backupsPage: backupsPageInfo.page },
+    );
+  }
+
+  async function handleRestoreBackupUpload(event) {
+    event.preventDefault();
+    if (!backupUploadFile) {
+      setError("Choose a backup archive before restoring.");
+      return;
+    }
+    if (
+      !window.confirm(
+        "Restore the uploaded backup? This will replace the database contents.",
+      )
+    ) {
+      return;
+    }
+    await refreshWithMutation(
+      async () => {
+        await restoreAdminBackupUpload(token, backupUploadFile);
+        setBackupUploadFile(null);
+      },
+      { backupsPage: backupsPageInfo.page },
+    );
+  }
+
+  function updateSectionPage(section, nextPage) {
+    const page = Math.max(1, Number(nextPage || 1));
+    loadAdminData({
+      usersPage: section === "users" ? page : usersPageInfo.page,
+      placesPage: section === "places" ? page : placesPageInfo.page,
+      tripsPage: section === "trips" ? page : tripsPageInfo.page,
+      auditPage: section === "audit" ? page : auditPageInfo.page,
+      emailPage: section === "email" ? page : emailPageInfo.page,
+      weatherPage: section === "weather" ? page : weatherPageInfo.page,
+      backupsPage: section === "backups" ? page : backupsPageInfo.page,
+    });
+  }
 
   const filteredPlaces = useMemo(() => {
     const query = placeQuery.trim().toLowerCase();
@@ -452,25 +690,6 @@ export default function AdminPanelPage() {
     );
   }
 
-  function handleSendNotification(event) {
-    event.preventDefault();
-    refreshWithMutation(async () => {
-      await sendAdminNotification(token, {
-        ...notificationForm,
-        target_user_id:
-          notificationForm.audience_type === "user"
-            ? notificationForm.target_user_id
-            : null,
-      });
-      setNotificationForm({
-        audience_type: "user",
-        target_user_id: "",
-        title: "",
-        body: "",
-      });
-    });
-  }
-
   if (shouldRedirectToDashboard) {
     return <Navigate to="/admin/dashboard" replace />;
   }
@@ -481,7 +700,14 @@ export default function AdminPanelPage() {
 
   return (
     <main className="admin-page">
-      <aside className="admin-sidebar glass-card" aria-label="Admin navigation">
+      <aside
+        className={
+          sidebarOpen
+            ? "admin-sidebar glass-card admin-sidebar--open"
+            : "admin-sidebar glass-card"
+        }
+        aria-label="Admin navigation"
+      >
         <div>
           <p className="eyebrow">Ano Tara Admin</p>
           <h1>Operations Console</h1>
@@ -510,14 +736,26 @@ export default function AdminPanelPage() {
           <span>Signed in as</span>
           <strong>{profile?.name || profile?.role || "Admin"}</strong>
           <StatusPill status={profile?.role}>{profile?.role}</StatusPill>
+          <button onClick={handleLogout} type="button">
+            Log out
+          </button>
         </div>
       </aside>
 
       <section className="admin-workspace">
         <header className="admin-topbar glass-card">
-          <div>
-            <p className="eyebrow">{activeItem.label}</p>
-            <h2>{activeItem.title}</h2>
+          <div className="admin-topbar__titleblock">
+            <button
+              className="admin-topbar__menu-toggle"
+              onClick={() => setSidebarOpen((value) => !value)}
+              type="button"
+            >
+              Menu
+            </button>
+            <div>
+              <p className="eyebrow">{activeItem.label}</p>
+              <h2>{activeItem.title}</h2>
+            </div>
           </div>
           <div className="admin-topbar__actions">
             <button
@@ -526,6 +764,9 @@ export default function AdminPanelPage() {
               type="button"
             >
               Refresh
+            </button>
+            <button onClick={handleLogout} type="button">
+              Log out
             </button>
             {activeNav === "ml" || activeNav === "dashboard" ? (
               <button
@@ -539,6 +780,25 @@ export default function AdminPanelPage() {
             ) : null}
           </div>
         </header>
+
+        <section className="admin-hero glass-card">
+          <div>
+            <p className="eyebrow">Welcome back</p>
+            <h3>{profile?.name || profile?.role || "Operations admin"}</h3>
+            <p className="muted">
+              Use this workspace to review live operations, monitor delivery,
+              manage content, and keep the platform recoverable.
+            </p>
+          </div>
+          <div className="admin-hero__actions">
+            <StatusPill status={overview?.model_status?.status || "healthy"}>
+              {overview?.model_status?.status || "healthy"}
+            </StatusPill>
+            <button onClick={() => loadAdminData()} type="button">
+              Reload live data
+            </button>
+          </div>
+        </section>
 
         {error ? (
           <div className="admin-notice admin-notice--error">{error}</div>
@@ -581,11 +841,15 @@ export default function AdminPanelPage() {
             filteredPlaces={filteredPlaces}
             isMutating={isMutating}
             onOpenPlaceForm={handleOpenPlaceForm}
-            onSearch={() => loadAdminData({ placesQuery: placeQuery })}
+            onPageChange={(nextPage) => updateSectionPage("places", nextPage)}
+            onSearch={() =>
+              loadAdminData({ placesQuery: placeQuery, placesPage: 1 })
+            }
             placeQuery={placeQuery}
             setPlaceQuery={setPlaceQuery}
             token={token}
             refreshWithMutation={refreshWithMutation}
+            pageInfo={placesPageInfo}
           />
         ) : null}
 
@@ -605,12 +869,16 @@ export default function AdminPanelPage() {
             filteredUsers={filteredUsers}
             isMutating={isMutating}
             isSuperAdmin={isSuperAdmin}
-            onSearch={() => loadAdminData({ usersQuery: userQuery })}
+            onPageChange={(nextPage) => updateSectionPage("users", nextPage)}
+            onSearch={() =>
+              loadAdminData({ usersQuery: userQuery, usersPage: 1 })
+            }
             onSuspendUser={handleSuspendUser}
             refreshWithMutation={refreshWithMutation}
             setUserQuery={setUserQuery}
             token={token}
             userQuery={userQuery}
+            pageInfo={usersPageInfo}
           />
         ) : null}
 
@@ -620,25 +888,24 @@ export default function AdminPanelPage() {
             selectedTrip={selectedTrip}
             isMutating={isMutating}
             onInspect={handleLoadTripDetail}
+            onPageChange={(nextPage) => updateSectionPage("trips", nextPage)}
             onSearch={() =>
-              loadAdminData({ tripsQuery: tripQuery, tripsStatus: tripStatus })
+              loadAdminData({
+                tripsQuery: tripQuery,
+                tripsStatus: tripStatus,
+                tripsPage: 1,
+              })
             }
             setTripQuery={setTripQuery}
             setTripStatus={setTripStatus}
             tripQuery={tripQuery}
             tripStatus={tripStatus}
+            pageInfo={tripsPageInfo}
           />
         ) : null}
 
         {activeNav === "notifications" ? (
-          <NotificationsPanel
-            form={notificationForm}
-            notifications={notifications}
-            onSubmit={handleSendNotification}
-            setForm={setNotificationForm}
-            users={users}
-            isMutating={isMutating}
-          />
+          <NotificationsPanel notifications={notifications} />
         ) : null}
 
         {activeNav === "email" ? (
@@ -648,6 +915,8 @@ export default function AdminPanelPage() {
             isMutating={isMutating}
             loadAdminData={loadAdminData}
             setEmailQuery={setEmailQuery}
+            onPageChange={(nextPage) => updateSectionPage("email", nextPage)}
+            pageInfo={emailPageInfo}
           />
         ) : null}
 
@@ -660,6 +929,23 @@ export default function AdminPanelPage() {
             weatherActiveOnly={weatherActiveOnly}
             weatherOps={weatherOps}
             weatherQuery={weatherQuery}
+            onPageChange={(nextPage) => updateSectionPage("weather", nextPage)}
+            pageInfo={weatherPageInfo}
+          />
+        ) : null}
+
+        {activeNav === "backups" ? (
+          <BackupPanel
+            backups={backups}
+            backupUploadFile={backupUploadFile}
+            isMutating={isMutating}
+            onCreateBackup={handleCreateBackup}
+            onDownloadBackup={handleDownloadBackup}
+            onPageChange={(nextPage) => updateSectionPage("backups", nextPage)}
+            onRestoreFromHistory={handleRestoreBackupFromHistory}
+            onRestoreUpload={handleRestoreBackupUpload}
+            pageInfo={backupsPageInfo}
+            setBackupUploadFile={setBackupUploadFile}
           />
         ) : null}
 
@@ -747,7 +1033,11 @@ export default function AdminPanelPage() {
                 </Field>
               </div>
             </div>
-            <AuditPanel events={auditEvents} />
+            <AuditPanel
+              events={auditEvents}
+              onPageChange={(nextPage) => updateSectionPage("audit", nextPage)}
+              pageInfo={auditPageInfo}
+            />
           </section>
         ) : null}
       </section>
@@ -765,7 +1055,13 @@ export default function AdminPanelPage() {
   );
 }
 
-function AuditPanel({ events, compact = false, onOpenAudit }) {
+function AuditPanel({
+  events,
+  compact = false,
+  onOpenAudit,
+  pageInfo,
+  onPageChange,
+}) {
   return (
     <article className="glass-card admin-panel">
       <div className="admin-panel__header">
@@ -816,6 +1112,9 @@ function AuditPanel({ events, compact = false, onOpenAudit }) {
           </tbody>
         </table>
       </div>
+      {!compact ? (
+        <Pager pageInfo={pageInfo} onPageChange={onPageChange} />
+      ) : null}
     </article>
   );
 }
@@ -909,7 +1208,9 @@ function PlacesPanel({
   isMutating,
   onOpenPlaceForm,
   onSearch,
+  onPageChange,
   placeQuery,
+  pageInfo,
   setPlaceQuery,
   token,
   refreshWithMutation,
@@ -1008,6 +1309,7 @@ function PlacesPanel({
           </tbody>
         </table>
       </div>
+      <Pager pageInfo={pageInfo} onPageChange={onPageChange} />
     </section>
   );
 }
@@ -1018,10 +1320,12 @@ function UsersPanel({
   isSuperAdmin,
   onSearch,
   onSuspendUser,
+  onPageChange,
   refreshWithMutation,
   setUserQuery,
   token,
   userQuery,
+  pageInfo,
 }) {
   return (
     <section className="glass-card admin-panel">
@@ -1122,6 +1426,7 @@ function UsersPanel({
           </tbody>
         </table>
       </div>
+      <Pager pageInfo={pageInfo} onPageChange={onPageChange} />
       {!isSuperAdmin ? (
         <p className="muted">
           Only super admins can grant or revoke admin roles.
@@ -1137,10 +1442,12 @@ function TripsPanel({
   isMutating,
   onInspect,
   onSearch,
+  onPageChange,
   setTripQuery,
   setTripStatus,
   tripQuery,
   tripStatus,
+  pageInfo,
 }) {
   return (
     <section className="admin-grid admin-grid--two">
@@ -1218,6 +1525,7 @@ function TripsPanel({
             </tbody>
           </table>
         </div>
+        <Pager pageInfo={pageInfo} onPageChange={onPageChange} />
       </article>
       <article className="glass-card admin-panel">
         <div className="admin-panel__header">
@@ -1275,89 +1583,55 @@ function TripsPanel({
   );
 }
 
-function NotificationsPanel({
-  form,
-  notifications,
-  onSubmit,
-  setForm,
-  users,
-  isMutating,
-}) {
+function NotificationsPanel({ notifications }) {
+  const summary = notifications?.summary || {};
   return (
     <section className="admin-grid admin-grid--two">
       <article className="glass-card admin-panel">
         <div className="admin-panel__header">
           <div>
-            <p className="eyebrow">Push Operations</p>
-            <h3>Send Notification</h3>
+            <p className="eyebrow">Notification Monitoring</p>
+            <h3>Coverage and delivery health</h3>
           </div>
           <StatusPill status="healthy">
             {formatNumber(notifications?.reachable_users || 0)} reachable users
           </StatusPill>
         </div>
-        <form className="admin-form" onSubmit={onSubmit}>
-          <Field label="Audience">
-            <select
-              value={form.audience_type}
-              onChange={(event) =>
-                setForm({ ...form, audience_type: event.target.value })
-              }
-            >
-              <option value="user">Single user</option>
-              <option value="all">All reachable users</option>
-            </select>
-          </Field>
-          {form.audience_type === "user" ? (
-            <Field label="Target user">
-              <select
-                value={form.target_user_id}
-                onChange={(event) =>
-                  setForm({ ...form, target_user_id: event.target.value })
-                }
-                required
-              >
-                <option value="">Choose a user</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.username} · {user.email}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : null}
-          <Field label="Title">
-            <input
-              value={form.title}
-              onChange={(event) =>
-                setForm({ ...form, title: event.target.value })
-              }
-              maxLength="140"
-              required
-            />
-          </Field>
-          <Field label="Body">
-            <textarea
-              value={form.body}
-              onChange={(event) =>
-                setForm({ ...form, body: event.target.value })
-              }
-              rows="4"
-              required
-            />
-          </Field>
-          <button className="primary" disabled={isMutating} type="submit">
-            Send notification
-          </button>
-        </form>
+        <div className="admin-metric-grid">
+          <MetricCard
+            label="Tokens"
+            value={notifications?.token_count || 0}
+            delta="registered devices"
+            tone="positive"
+          />
+          <MetricCard
+            label="Reachable"
+            value={notifications?.reachable_users || 0}
+            delta="distinct users"
+            tone="positive"
+          />
+          <MetricCard
+            label="Sent"
+            value={summary.sent_notifications || 0}
+            delta="monitoring records"
+            tone="positive"
+          />
+          <MetricCard
+            label="Failed"
+            value={summary.failed_notifications || 0}
+            delta="delivery gaps"
+            tone="warning"
+          />
+        </div>
       </article>
       <article className="glass-card admin-panel">
         <div className="admin-panel__header">
           <div>
-            <p className="eyebrow">Delivery History</p>
-            <h3>Recent Sends</h3>
+            <p className="eyebrow">Recent Activity</p>
+            <h3>Latest notification records</h3>
           </div>
           <StatusPill status="ready">
-            {formatNumber(notifications?.token_count || 0)} tokens
+            {formatNumber(summary.total_notifications || 0)} records
           </StatusPill>
         </div>
         <div className="admin-event-list">
@@ -1387,7 +1661,9 @@ function EmailOpsPanel({
   emailQuery,
   isMutating,
   loadAdminData,
+  onPageChange,
   setEmailQuery,
+  pageInfo,
 }) {
   const summary = emailOps?.summary || {};
   return (
@@ -1408,7 +1684,9 @@ function EmailOpsPanel({
             />
             <button
               disabled={isMutating}
-              onClick={() => loadAdminData({ emailSearch: emailQuery })}
+              onClick={() =>
+                loadAdminData({ emailSearch: emailQuery, emailPage: 1 })
+              }
               type="button"
             >
               Refresh
@@ -1451,7 +1729,7 @@ function EmailOpsPanel({
               <h3>Pending email jobs</h3>
             </div>
             <StatusPill status="ready">
-              {formatNumber(emailOps?.queue?.length || 0)} shown
+              {formatNumber(emailOps?.totals?.queue || 0)} total
             </StatusPill>
           </div>
           <div className="admin-table-wrap">
@@ -1494,6 +1772,7 @@ function EmailOpsPanel({
               </tbody>
             </table>
           </div>
+          <Pager pageInfo={pageInfo} onPageChange={onPageChange} />
         </article>
 
         <article className="glass-card admin-panel">
@@ -1503,7 +1782,7 @@ function EmailOpsPanel({
               <h3>Review and compliance</h3>
             </div>
             <StatusPill status="healthy">
-              {formatNumber(emailOps?.suppressions?.length || 0)} shown
+              {formatNumber(emailOps?.totals?.suppressions || 0)} total
             </StatusPill>
           </div>
           <div className="admin-event-list">
@@ -1551,6 +1830,8 @@ function EmailOpsPanel({
 function WeatherOpsPanel({
   isMutating,
   loadAdminData,
+  onPageChange,
+  pageInfo,
   setWeatherActiveOnly,
   setWeatherQuery,
   weatherActiveOnly,
@@ -1588,6 +1869,7 @@ function WeatherOpsPanel({
                 loadAdminData({
                   weatherSearch: weatherQuery,
                   weatherOnlyActive: weatherActiveOnly,
+                  weatherPage: 1,
                 })
               }
               type="button"
@@ -1681,6 +1963,112 @@ function WeatherOpsPanel({
             </tbody>
           </table>
         </div>
+        <Pager pageInfo={pageInfo} onPageChange={onPageChange} />
+      </article>
+    </section>
+  );
+}
+
+function BackupPanel({
+  backups,
+  backupUploadFile,
+  isMutating,
+  onCreateBackup,
+  onDownloadBackup,
+  onPageChange,
+  onRestoreFromHistory,
+  onRestoreUpload,
+  pageInfo,
+  setBackupUploadFile,
+}) {
+  return (
+    <section className="admin-grid admin-grid--two">
+      <article className="glass-card admin-panel">
+        <div className="admin-panel__header">
+          <div>
+            <p className="eyebrow">Recovery Operations</p>
+            <h3>Export or restore the full database</h3>
+          </div>
+          <StatusPill status="high">destructive actions guarded</StatusPill>
+        </div>
+        <div className="admin-notice">
+          Backups are full database archives. Restores replace current data and
+          should only be performed by a super admin after validation.
+        </div>
+        <div className="admin-action-strip">
+          <button
+            className="primary"
+            disabled={isMutating}
+            onClick={onCreateBackup}
+            type="button"
+          >
+            Create backup
+          </button>
+        </div>
+        <form
+          className="admin-form admin-section-gap"
+          onSubmit={onRestoreUpload}
+        >
+          <Field label="Restore from upload">
+            <input
+              accept=".zip"
+              onChange={(event) =>
+                setBackupUploadFile(event.target.files?.[0] || null)
+              }
+              type="file"
+            />
+          </Field>
+          <button className="primary" disabled={isMutating} type="submit">
+            Restore uploaded archive
+          </button>
+          {backupUploadFile ? (
+            <p className="muted">Selected file: {backupUploadFile.name}</p>
+          ) : null}
+        </form>
+      </article>
+
+      <article className="glass-card admin-panel">
+        <div className="admin-panel__header">
+          <div>
+            <p className="eyebrow">Backup History</p>
+            <h3>Recent exports and restores</h3>
+          </div>
+          <StatusPill status="ready">
+            {formatNumber(pageInfo?.total || 0)} records
+          </StatusPill>
+        </div>
+        <div className="admin-event-list">
+          {backups.map((backup) => (
+            <div className="admin-event admin-event--stacked" key={backup.id}>
+              <div>
+                <strong>{backup.backup_label}</strong>
+                <span>
+                  {backup.action_type} · {backup.status} · {backup.file_name}
+                </span>
+              </div>
+              <div className="admin-inline-controls">
+                <button
+                  disabled={isMutating}
+                  onClick={() => onDownloadBackup(backup)}
+                  type="button"
+                >
+                  Download
+                </button>
+                <button
+                  disabled={isMutating}
+                  onClick={() => onRestoreFromHistory(backup)}
+                  type="button"
+                >
+                  Restore
+                </button>
+              </div>
+            </div>
+          ))}
+          {backups.length === 0 ? (
+            <p className="muted">No backup history exists yet.</p>
+          ) : null}
+        </div>
+        <Pager pageInfo={pageInfo} onPageChange={onPageChange} />
       </article>
     </section>
   );
@@ -1783,6 +2171,18 @@ function AnalyticsPanel({ analytics, filters, setFilters, onApply }) {
             delta="training history"
             tone="positive"
           />
+          <MetricCard
+            label="Notifications"
+            value={analytics?.totals?.notification_total || 0}
+            delta="monitoring records"
+            tone="positive"
+          />
+          <MetricCard
+            label="Notification failures"
+            value={analytics?.totals?.notification_failed || 0}
+            delta="delivery health"
+            tone="warning"
+          />
         </div>
       </article>
       <section className="admin-grid admin-grid--three">
@@ -1808,6 +2208,14 @@ function AnalyticsPanel({ analytics, filters, setFilters, onApply }) {
           <ChartBars
             data={analytics?.top_categories || []}
             label="Top place categories"
+          />
+        </article>
+        <article className="glass-card admin-panel">
+          <p className="eyebrow">Audience Growth</p>
+          <h3>User Growth</h3>
+          <ChartBars
+            data={analytics?.user_growth || []}
+            label="User growth trend"
           />
         </article>
       </section>

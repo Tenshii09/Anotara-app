@@ -1,14 +1,16 @@
 """Admin operations routes for secure Ano-Tara management."""
 
 from functools import wraps
+from pathlib import Path
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from train_model import train_model
 from webapp.services.email_service import list_admin_email_ops, queue_email
 from webapp.services.database import (
     ADMIN_ROLES,
+    create_admin_backup,
     create_admin_place,
     create_admin_notification_log,
     create_ml_training_run,
@@ -17,10 +19,12 @@ from webapp.services.database import (
     finish_ml_training_run,
     get_admin_analytics,
     get_admin_audit_log,
+    get_admin_backup_record,
     get_admin_itinerary_detail,
     get_admin_notification_overview,
     get_admin_overview,
     get_latest_ml_training_run,
+    list_admin_backups,
     list_admin_weather_alerts,
     get_user_role,
     list_admin_itineraries,
@@ -30,6 +34,7 @@ from webapp.services.database import (
     list_admin_users,
     list_ml_training_runs,
     log_admin_action,
+    restore_admin_backup,
     update_admin_setting,
     update_admin_place,
     update_admin_user_role,
@@ -109,9 +114,10 @@ def api_admin_users():
     """Return searchable user and admin account rows."""
     users = list_admin_users(
         search_query=request.args.get('q', ''),
+        page=request.args.get('page', 1),
         limit=request.args.get('limit', 50),
     )
-    return jsonify({'users': users}), 200
+    return jsonify(users), 200
 
 
 @admin_bp.route('/api/admin/users/<int:user_id>/role', methods=['PATCH'])
@@ -167,9 +173,10 @@ def api_admin_places():
     """Return searchable destination/content records."""
     places = list_admin_places(
         search_query=request.args.get('q', ''),
+        page=request.args.get('page', 1),
         limit=request.args.get('limit', 80),
     )
-    return jsonify({'places': places}), 200
+    return jsonify(places), 200
 
 
 @admin_bp.route('/api/admin/places', methods=['POST'])
@@ -214,13 +221,12 @@ def api_admin_analytics():
 @admin_required
 def api_admin_itineraries():
     """Return searchable saved-trip rows for admin inspection."""
-    return jsonify({
-        'itineraries': list_admin_itineraries(
+    return jsonify(list_admin_itineraries(
             search_query=request.args.get('q', ''),
             status=request.args.get('status', ''),
+            page=request.args.get('page', 1),
             limit=request.args.get('limit', 60),
-        )
-    }), 200
+        )), 200
 
 
 @admin_bp.route('/api/admin/itineraries/<int:itinerary_id>', methods=['GET'])
@@ -240,12 +246,100 @@ def api_admin_notifications():
     return jsonify(get_admin_notification_overview()), 200
 
 
+@admin_bp.route('/api/admin/backups', methods=['GET'])
+@admin_required
+def api_admin_backups():
+    """Return backup history for export and restore operations."""
+    return jsonify(list_admin_backups(
+        page=request.args.get('page', 1),
+        limit=request.args.get('limit', 10),
+    )), 200
+
+
+@admin_bp.route('/api/admin/backups', methods=['POST'])
+@admin_required
+def api_admin_create_backup():
+    """Create a full database backup and register it in history."""
+    actor_id = get_jwt_identity()
+    backup = create_admin_backup(actor_id)
+    _log_action(actor_id, 'backup.export', 'backup', backup['id'], backup)
+    return jsonify(backup), 201
+
+
+@admin_bp.route('/api/admin/backups/<int:backup_id>/download', methods=['GET'])
+@admin_required
+def api_admin_download_backup(backup_id):
+    """Download a previously exported backup archive."""
+    record = get_admin_backup_record(backup_id)
+    if not record:
+        return jsonify({'error': 'Backup not found'}), 404
+
+    file_path = Path(record.get('file_path') or '')
+    if not file_path.exists():
+        return jsonify({'error': 'Backup file is no longer available.'}), 404
+
+    return send_file(
+        file_path,
+        as_attachment=True,
+        download_name=record.get('file_name') or file_path.name,
+        mimetype='application/zip',
+    )
+
+
+@admin_bp.route('/api/admin/backups/<int:backup_id>/restore', methods=['POST'])
+@admin_required
+def api_admin_restore_backup_from_history(backup_id):
+    """Restore the database from a stored backup archive."""
+    actor_id = get_jwt_identity()
+    record = get_admin_backup_record(backup_id)
+    if not record:
+        return jsonify({'error': 'Backup not found'}), 404
+
+    file_path = record.get('file_path')
+    if not file_path:
+        return jsonify({'error': 'Backup file is not available.'}), 404
+
+    restored = restore_admin_backup(actor_id, file_path)
+    _log_action(actor_id, 'backup.restore', 'backup', backup_id, restored)
+    return jsonify(restored), 200
+
+
+@admin_bp.route('/api/admin/backups/restore', methods=['POST'])
+@admin_required
+def api_admin_restore_backup_upload():
+    """Restore the database from an uploaded backup archive."""
+    actor_id = get_jwt_identity()
+    backup_file = request.files.get('backup_file')
+    if not backup_file:
+        return jsonify({'error': 'A backup_file upload is required.'}), 400
+
+    suffix = Path(backup_file.filename or '').suffix.lower()
+    if suffix not in {'.zip'}:
+        return jsonify({'error': 'Backups must be uploaded as .zip archives.'}), 400
+
+    upload_dir = Path(current_app.config.get('ADMIN_BACKUP_DIR') or (Path(current_app.root_path).resolve().parent / 'admin_backups'))
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    uploaded_name = Path(backup_file.filename or 'backup.zip').name
+    uploaded_path = upload_dir / f"uploaded-{uploaded_name}"
+    backup_file.save(uploaded_path)
+
+    try:
+        restored = restore_admin_backup(actor_id, uploaded_path)
+    finally:
+        if uploaded_path.exists():
+            uploaded_path.unlink(missing_ok=True)
+
+    _log_action(actor_id, 'backup.restore', 'backup', restored['id'], restored)
+    return jsonify(restored), 200
+
+
 @admin_bp.route('/api/admin/email', methods=['GET'])
 @admin_required
 def api_admin_email_ops():
     """Return email queue, delivery logs, and suppression records."""
     return jsonify(list_admin_email_ops(
         search_query=request.args.get('q', ''),
+        page=request.args.get('page', 1),
         limit=request.args.get('limit', 30),
     )), 200
 
@@ -262,6 +356,7 @@ def api_admin_weather_ops():
     return jsonify(list_admin_weather_alerts(
         search_query=request.args.get('q', ''),
         active_only=active_flag,
+        page=request.args.get('page', 1),
         limit=request.args.get('limit', 50),
     )), 200
 
@@ -393,13 +488,15 @@ def api_admin_ml_retrain():
 @admin_required
 def api_admin_audit_log():
     """Return privileged-action audit events."""
+    page = max(1, int(request.args.get('page', 1)))
+    limit = max(1, int(request.args.get('limit', 30)))
     events = get_admin_audit_log(
-        limit=request.args.get('limit', 30),
-        offset=request.args.get('offset', 0),
+        limit=limit,
+        offset=(page - 1) * limit,
         action=request.args.get('action', ''),
         target_type=request.args.get('target_type', ''),
         actor_id=request.args.get('actor_id'),
         start_date=request.args.get('start_date'),
         end_date=request.args.get('end_date'),
     )
-    return jsonify({'events': events}), 200
+    return jsonify(events), 200

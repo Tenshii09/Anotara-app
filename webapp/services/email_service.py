@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import smtplib
 from datetime import datetime
@@ -503,11 +504,17 @@ def _coerce_json_field(value, fallback=None):
     return dict(fallback)
 
 
-def list_admin_email_queue(search_query='', limit=30):
+def _email_page(page=1, limit=30, maximum=100):
+    safe_limit = max(1, min(int(limit or 30), int(maximum or 100)))
+    safe_page = max(1, int(page or 1))
+    return safe_page, safe_limit, (safe_page - 1) * safe_limit
+
+
+def list_admin_email_queue(search_query='', page=1, limit=30):
     """Return the current email queue for admin operations."""
     ensure_email_tables()
     safe_query = _normalize_text(search_query)
-    safe_limit = max(1, min(int(limit or 30), 100))
+    safe_page, safe_limit, safe_offset = _email_page(page=page, limit=limit)
     conditions = []
     params = []
     if safe_query:
@@ -521,6 +528,15 @@ def list_admin_email_queue(search_query='', limit=30):
     db = get_db()
     cursor = db.cursor(dictionary=True)
     try:
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS value
+            FROM email_queue
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        total = int((cursor.fetchone() or {}).get('value') or 0)
         cursor.execute(
             f"""
             SELECT
@@ -548,20 +564,27 @@ def list_admin_email_queue(search_query='', limit=30):
             {where_sql}
             ORDER BY queued_at DESC, id DESC
             LIMIT %s
+            OFFSET %s
             """,
-            tuple(params + [safe_limit]),
+            tuple(params + [safe_limit, safe_offset]),
         )
-        return cursor.fetchall()
+        return {
+            'rows': cursor.fetchall(),
+            'page': safe_page,
+            'limit': safe_limit,
+            'total': total,
+            'pages': max(1, math.ceil(total / safe_limit)) if total else 1,
+        }
     finally:
         cursor.close()
         db.close()
 
 
-def list_admin_email_logs(search_query='', limit=30):
+def list_admin_email_logs(search_query='', page=1, limit=30):
     """Return recent email delivery logs for the admin console."""
     ensure_email_tables()
     safe_query = _normalize_text(search_query)
-    safe_limit = max(1, min(int(limit or 30), 100))
+    safe_page, safe_limit, safe_offset = _email_page(page=page, limit=limit)
     conditions = []
     params = []
     if safe_query:
@@ -575,6 +598,16 @@ def list_admin_email_logs(search_query='', limit=30):
     db = get_db()
     cursor = db.cursor(dictionary=True)
     try:
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS value
+            FROM email_logs logs
+            LEFT JOIN users ON users.id = logs.recipient_user_id
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        total = int((cursor.fetchone() or {}).get('value') or 0)
         cursor.execute(
             f"""
             SELECT
@@ -599,23 +632,30 @@ def list_admin_email_logs(search_query='', limit=30):
             {where_sql}
             ORDER BY logs.created_at DESC, logs.id DESC
             LIMIT %s
+            OFFSET %s
             """,
-            tuple(params + [safe_limit]),
+            tuple(params + [safe_limit, safe_offset]),
         )
         rows = cursor.fetchall()
         for row in rows:
             row['payload'] = _coerce_json_field(row.get('payload'), {})
-        return rows
+        return {
+            'rows': rows,
+            'page': safe_page,
+            'limit': safe_limit,
+            'total': total,
+            'pages': max(1, math.ceil(total / safe_limit)) if total else 1,
+        }
     finally:
         cursor.close()
         db.close()
 
 
-def list_admin_email_suppressions(search_query='', limit=30):
+def list_admin_email_suppressions(search_query='', page=1, limit=30):
     """Return active and inactive suppression rows for review."""
     ensure_email_tables()
     safe_query = _normalize_text(search_query)
-    safe_limit = max(1, min(int(limit or 30), 100))
+    safe_page, safe_limit, safe_offset = _email_page(page=page, limit=limit)
     conditions = []
     params = []
     if safe_query:
@@ -627,6 +667,15 @@ def list_admin_email_suppressions(search_query='', limit=30):
     db = get_db()
     cursor = db.cursor(dictionary=True)
     try:
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS value
+            FROM email_suppression
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        total = int((cursor.fetchone() or {}).get('value') or 0)
         cursor.execute(
             f"""
             SELECT
@@ -642,24 +691,31 @@ def list_admin_email_suppressions(search_query='', limit=30):
             {where_sql}
             ORDER BY updated_at DESC, id DESC
             LIMIT %s
+            OFFSET %s
             """,
-            tuple(params + [safe_limit]),
+            tuple(params + [safe_limit, safe_offset]),
         )
         rows = cursor.fetchall()
         for row in rows:
             row['details'] = _coerce_json_field(row.get('details'), {})
-        return rows
+        return {
+            'rows': rows,
+            'page': safe_page,
+            'limit': safe_limit,
+            'total': total,
+            'pages': max(1, math.ceil(total / safe_limit)) if total else 1,
+        }
     finally:
         cursor.close()
         db.close()
 
 
-def list_admin_email_ops(search_query='', limit=30):
+def list_admin_email_ops(search_query='', page=1, limit=30):
     """Return the email operations dashboard payload for admin review."""
     ensure_email_tables()
-    queue = list_admin_email_queue(search_query=search_query, limit=limit)
-    logs = list_admin_email_logs(search_query=search_query, limit=limit)
-    suppressions = list_admin_email_suppressions(search_query=search_query, limit=limit)
+    queue = list_admin_email_queue(search_query=search_query, page=page, limit=limit)
+    logs = list_admin_email_logs(search_query=search_query, page=page, limit=limit)
+    suppressions = list_admin_email_suppressions(search_query=search_query, page=page, limit=limit)
 
     db = get_db()
     cursor = db.cursor(dictionary=True)
@@ -686,9 +742,17 @@ def list_admin_email_ops(search_query='', limit=30):
                 'active_suppressions': active_suppressions,
                 'suppression_total': suppression_total,
             },
-            'queue': queue,
-            'logs': logs,
-            'suppressions': suppressions,
+            'page': max(1, int(page or 1)),
+            'limit': max(1, min(int(limit or 30), 100)),
+            'pages': max(queue['pages'], logs['pages'], suppressions['pages']),
+            'totals': {
+                'queue': queue['total'],
+                'logs': logs['total'],
+                'suppressions': suppressions['total'],
+            },
+            'queue': queue['rows'],
+            'logs': logs['rows'],
+            'suppressions': suppressions['rows'],
         }
     finally:
         cursor.close()

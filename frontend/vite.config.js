@@ -4,6 +4,12 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // https://vite.dev/config/
 export default defineConfig({
+  build: {
+    // Mapbox GL is intentionally code-split into its own route chunk, but it
+    // still exceeds Vite's default warning threshold. Raise the threshold so
+    // the build stays clean without collapsing the split bundle back into the app shell.
+    chunkSizeWarningLimit: 2000,
+  },
   plugins: [
     react(),
     VitePWA({

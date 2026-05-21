@@ -50,3 +50,5 @@ class Config:
     MAIL_SMTP_USERNAME = os.environ.get('MAIL_SMTP_USERNAME', '')
     MAIL_SMTP_PASSWORD = os.environ.get('MAIL_SMTP_PASSWORD', '')
     MAIL_SMTP_USE_TLS = os.environ.get('MAIL_SMTP_USE_TLS', 'true').lower() == 'true'
+
+    ADMIN_BACKUP_DIR = os.environ.get('ADMIN_BACKUP_DIR', os.path.join(os.path.dirname(__file__), 'admin_backups'))

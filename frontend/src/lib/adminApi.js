@@ -4,8 +4,12 @@ export function getAdminOverview(token) {
   return apiRequest("/api/admin/overview", { token });
 }
 
-export function getAdminUsers(token, query = "") {
-  const params = new URLSearchParams({ q: query, limit: "50" });
+export function getAdminUsers(token, query = "", page = 1, limit = 10) {
+  const params = new URLSearchParams({
+    q: query,
+    page: String(page),
+    limit: String(limit),
+  });
   return apiRequest(`/api/admin/users?${params.toString()}`, { token });
 }
 
@@ -32,8 +36,12 @@ export function updateAdminUserStatus(
   });
 }
 
-export function getAdminPlaces(token, query = "") {
-  const params = new URLSearchParams({ q: query, limit: "80" });
+export function getAdminPlaces(token, query = "", page = 1, limit = 12) {
+  const params = new URLSearchParams({
+    q: query,
+    page: String(page),
+    limit: String(limit),
+  });
   return apiRequest(`/api/admin/places?${params.toString()}`, { token });
 }
 
@@ -76,8 +84,19 @@ export function requestAdminRetraining(token) {
   });
 }
 
-export function getAdminItineraries(token, query = "", status = "") {
-  const params = new URLSearchParams({ q: query, status, limit: "60" });
+export function getAdminItineraries(
+  token,
+  query = "",
+  status = "",
+  page = 1,
+  limit = 10,
+) {
+  const params = new URLSearchParams({
+    q: query,
+    status,
+    page: String(page),
+    limit: String(limit),
+  });
   return apiRequest(`/api/admin/itineraries?${params.toString()}`, { token });
 }
 
@@ -89,14 +108,59 @@ export function getAdminNotifications(token) {
   return apiRequest("/api/admin/notifications", { token });
 }
 
+export function getAdminBackups(token, page = 1, limit = 10) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  return apiRequest(`/api/admin/backups?${params.toString()}`, { token });
+}
+
+export function createAdminBackup(token) {
+  return apiRequest("/api/admin/backups", {
+    token,
+    method: "POST",
+  });
+}
+
+export function downloadAdminBackup(token, backupId) {
+  return apiRequest(`/api/admin/backups/${backupId}/download`, {
+    token,
+    responseType: "blob",
+  });
+}
+
+export function restoreAdminBackupFromHistory(token, backupId) {
+  return apiRequest(`/api/admin/backups/${backupId}/restore`, {
+    token,
+    method: "POST",
+  });
+}
+
+export function restoreAdminBackupUpload(token, file) {
+  const formData = new FormData();
+  formData.append("backup_file", file);
+  return apiRequest("/api/admin/backups/restore", {
+    token,
+    method: "POST",
+    body: formData,
+  });
+}
+
 export function getAdminEmailOps(token, filters = {}) {
-  const params = new URLSearchParams({ limit: "30" });
+  const params = new URLSearchParams({
+    limit: String(filters.limit || 30),
+    page: String(filters.page || 1),
+  });
   if (filters.q) params.set("q", filters.q);
   return apiRequest(`/api/admin/email?${params.toString()}`, { token });
 }
 
 export function getAdminWeatherOps(token, filters = {}) {
-  const params = new URLSearchParams({ limit: "50" });
+  const params = new URLSearchParams({
+    limit: String(filters.limit || 50),
+    page: String(filters.page || 1),
+  });
   if (filters.q) params.set("q", filters.q);
   if (filters.activeOnly !== undefined)
     params.set("active_only", filters.activeOnly ? "true" : "false");
@@ -126,7 +190,10 @@ export function updateAdminSetting(token, settingKey, settingValue) {
 }
 
 export function getAdminAuditLog(token, filters = {}) {
-  const params = new URLSearchParams({ limit: "30" });
+  const params = new URLSearchParams({
+    limit: String(filters.limit || 30),
+    page: String(filters.page || 1),
+  });
   if (filters.action) params.set("action", filters.action);
   if (filters.targetType) params.set("target_type", filters.targetType);
   if (filters.startDate) params.set("start_date", filters.startDate);

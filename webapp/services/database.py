@@ -7,7 +7,9 @@ focused on request/response logic.
 import hashlib
 import json
 import csv
+import math
 import tempfile
+import zipfile
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +27,79 @@ def get_db():
         database=current_app.config['DB_NAME'],
         port=current_app.config.get('DB_PORT', '3306'),
     )
+
+
+def _normalize_pagination(page=1, limit=20, maximum=100):
+    safe_limit = max(1, min(int(limit or 20), int(maximum or 100)))
+    safe_page = max(1, int(page or 1))
+    offset = (safe_page - 1) * safe_limit
+    return safe_page, safe_limit, offset
+
+
+def _build_page_payload(rows, *, row_key, page, limit, total):
+    total = max(0, int(total or 0))
+    limit = max(1, int(limit or 1))
+    page = max(1, int(page or 1))
+    pages = max(1, math.ceil(total / limit)) if total else 1
+    return {
+        row_key: rows,
+        'items': rows,
+        'page': page,
+        'limit': limit,
+        'total': total,
+        'pages': pages,
+    }
+
+
+def _admin_backup_dir():
+    backup_dir = Path(
+        current_app.config.get('ADMIN_BACKUP_DIR')
+        or (Path(current_app.root_path).resolve().parent / 'admin_backups')
+    )
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    return backup_dir
+
+
+def _admin_backup_label(prefix='anotara-backup'):
+    return f"{prefix}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+
+
+def _safe_table_name(table_name):
+    table_name = str(table_name or '').strip()
+    if not table_name or not table_name.replace('_', '').isalnum():
+        raise ValueError(f'Invalid table name: {table_name}')
+    return table_name
+
+
+def _sql_literal(value):
+    if value is None:
+        return 'NULL'
+    if isinstance(value, bool):
+        return '1' if value else '0'
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return f"'{value.isoformat(sep=' ')}'"
+    if isinstance(value, (dict, list, tuple, set)):
+        json_value = json.dumps(_json_safe(value), default=str)
+        escaped = json_value.replace('\\', '\\\\').replace("'", "''")
+        return f"'{escaped}'"
+    text = str(value)
+    return f"'{text.replace('\\', '\\\\').replace("'", "''")}'"
+
+
+def _json_column_value(value):
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed
+        except (TypeError, ValueError):
+            return value
+    return value
 
 
 def get_table_columns(table_name):
@@ -1272,11 +1347,11 @@ def get_weather_alert_history(itinerary_id):
     return list_weather_alerts(itinerary_id, active_only=False)
 
 
-def list_admin_weather_alerts(search_query='', active_only=None, limit=50):
+def list_admin_weather_alerts(search_query='', active_only=None, page=1, limit=50):
     """Return weather alerts across itineraries for admin review."""
     ensure_weather_alert_columns()
     safe_query = str(search_query or '').strip()
-    safe_limit = max(1, min(int(limit or 50), 100))
+    safe_page, safe_limit, safe_offset = _normalize_pagination(page=page, limit=limit, maximum=100)
     conditions = []
     params = []
 
@@ -1298,6 +1373,22 @@ def list_admin_weather_alerts(search_query='', active_only=None, limit=50):
     cursor = db.cursor(dictionary=True)
 
     try:
+        cursor.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total_alerts,
+                SUM(CASE WHEN weather_alerts.is_active = TRUE THEN 1 ELSE 0 END) AS active_alerts,
+                SUM(CASE WHEN weather_alerts.is_active = FALSE THEN 1 ELSE 0 END) AS resolved_alerts,
+                COUNT(DISTINCT weather_alerts.itinerary_id) AS affected_itineraries
+            FROM weather_alerts
+            LEFT JOIN itineraries ON itineraries.id = weather_alerts.itinerary_id
+            LEFT JOIN users ON users.id = itineraries.user_id
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        summary = cursor.fetchone() or {}
+        total = int(summary.get('total_alerts') or 0)
         cursor.execute(
             f"""
             SELECT
@@ -1325,21 +1416,354 @@ def list_admin_weather_alerts(search_query='', active_only=None, limit=50):
             {where_sql}
             ORDER BY weather_alerts.updated_at DESC, weather_alerts.id DESC
             LIMIT %s
+            OFFSET %s
             """,
-            tuple(params + [safe_limit]),
+            tuple(params + [safe_limit, safe_offset]),
         )
         rows = cursor.fetchall()
         for row in rows:
             row['payload'] = _coerce_json_value(row.get('payload'), {})
-        return {
+        return _build_page_payload(
+            [_json_safe(row) for row in rows],
+            row_key='alerts',
+            page=safe_page,
+            limit=safe_limit,
+            total=total,
+        ) | {
             'summary': {
-                'total_alerts': len(rows),
-                'active_alerts': sum(1 for row in rows if row.get('is_active')),
-                'resolved_alerts': sum(1 for row in rows if not row.get('is_active')),
-                'affected_itineraries': len({row.get('itinerary_id') for row in rows if row.get('itinerary_id')}),
+                'total_alerts': total,
+                'active_alerts': int(summary.get('active_alerts') or 0),
+                'resolved_alerts': int(summary.get('resolved_alerts') or 0),
+                'affected_itineraries': int(summary.get('affected_itineraries') or 0),
             },
-            'alerts': [_json_safe(row) for row in rows],
         }
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_backups(page=1, limit=10):
+    """Return the most recent admin backup operations."""
+    ensure_admin_tables()
+    safe_page, safe_limit, safe_offset = _normalize_pagination(page=page, limit=limit, maximum=50)
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute("SELECT COUNT(*) AS value FROM admin_backup_log")
+        total = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute(
+            """
+            SELECT
+                id,
+                actor_id,
+                action_type,
+                backup_label,
+                file_name,
+                file_path,
+                status,
+                summary,
+                error_message,
+                created_at,
+                completed_at
+            FROM admin_backup_log
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s OFFSET %s
+            """,
+            (safe_limit, safe_offset),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            row['summary'] = _coerce_json_value(row.get('summary'), {})
+        return _build_page_payload(
+            [_json_safe(row) for row in rows],
+            row_key='backups',
+            page=safe_page,
+            limit=safe_limit,
+            total=total,
+        )
+    finally:
+        cursor.close()
+        db.close()
+
+
+def _backup_table_names():
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute('SHOW TABLES')
+        return [str(row[0]) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+        db.close()
+
+
+def _read_backup_snapshot():
+    tables = []
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        for table_name in _backup_table_names():
+            safe_table = _safe_table_name(table_name)
+            cursor.execute(f'SHOW CREATE TABLE `{safe_table}`')
+            create_row = cursor.fetchone() or {}
+            create_sql = create_row.get('Create Table') or create_row.get('Create View') or ''
+            cursor.execute(f'SELECT * FROM `{safe_table}`')
+            rows = cursor.fetchall()
+            tables.append(
+                {
+                    'table_name': safe_table,
+                    'create_sql': create_sql,
+                    'columns': list(rows[0].keys()) if rows else list(create_row.keys()),
+                    'rows': [_json_safe(row) for row in rows],
+                }
+            )
+        return tables
+    finally:
+        cursor.close()
+        db.close()
+
+
+def create_admin_backup(actor_id):
+    """Export the full application database into a versioned backup archive."""
+    ensure_admin_tables()
+    backup_label = _admin_backup_label()
+    backup_dir = _admin_backup_dir()
+    file_name = f'{backup_label}.zip'
+    file_path = backup_dir / file_name
+    table_snapshots = _read_backup_snapshot()
+
+    db = get_db()
+    cursor = db.cursor()
+    log_id = None
+    try:
+        cursor.execute(
+            """
+            INSERT INTO admin_backup_log
+                (actor_id, action_type, backup_label, file_name, file_path, status, summary)
+            VALUES (%s, %s, %s, %s, %s, 'running', %s)
+            """,
+            (
+                int(actor_id),
+                'export',
+                backup_label,
+                file_name,
+                str(file_path),
+                json.dumps({'table_count': len(table_snapshots)}),
+            ),
+        )
+        db.commit()
+        log_id = cursor.lastrowid
+
+        manifest = {
+            'database': current_app.config['DB_NAME'],
+            'backup_label': backup_label,
+            'created_at': datetime.utcnow().isoformat(),
+            'table_count': len(table_snapshots),
+            'tables': [snapshot['table_name'] for snapshot in table_snapshots],
+        }
+
+        with zipfile.ZipFile(file_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('manifest.json', json.dumps(_json_safe(manifest), indent=2, default=str))
+            for snapshot in table_snapshots:
+                archive.writestr(
+                    f"tables/{snapshot['table_name']}.json",
+                    json.dumps(_json_safe(snapshot), indent=2, default=str),
+                )
+
+        cursor.execute(
+            """
+            UPDATE admin_backup_log
+            SET status = 'completed',
+                summary = %s,
+                completed_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (
+                json.dumps(
+                    {
+                        'table_count': len(table_snapshots),
+                        'file_path': str(file_path),
+                    }
+                ),
+                int(log_id),
+            ),
+        )
+        db.commit()
+        return {
+            'id': log_id,
+            'backup_label': backup_label,
+            'file_name': file_name,
+            'file_path': str(file_path),
+            'status': 'completed',
+            'table_count': len(table_snapshots),
+        }
+    except Exception as error:
+        if log_id is not None:
+            cursor.execute(
+                """
+                UPDATE admin_backup_log
+                SET status = 'failed',
+                    error_message = %s,
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (str(error), int(log_id)),
+            )
+            db.commit()
+        raise
+    finally:
+        cursor.close()
+        db.close()
+
+
+def _load_backup_archive(backup_file_path):
+    backup_path = Path(backup_file_path)
+    if not backup_path.exists():
+        raise FileNotFoundError(f'Backup file not found: {backup_file_path}')
+
+    with zipfile.ZipFile(backup_path, 'r') as archive:
+        manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
+        snapshots = []
+        for table_name in manifest.get('tables', []):
+            snapshot_path = f'tables/{table_name}.json'
+            snapshot = json.loads(archive.read(snapshot_path).decode('utf-8'))
+            snapshots.append(snapshot)
+        return manifest, snapshots
+
+
+def restore_admin_backup(actor_id, backup_file_path):
+    """Restore the application database from a previously exported backup archive."""
+    ensure_admin_tables()
+    backup_path = Path(backup_file_path)
+    manifest, snapshots = _load_backup_archive(backup_path)
+
+    db = get_db()
+    cursor = db.cursor()
+    log_id = None
+    try:
+        cursor.execute(
+            """
+            INSERT INTO admin_backup_log
+                (actor_id, action_type, backup_label, file_name, file_path, status, summary)
+            VALUES (%s, %s, %s, %s, %s, 'running', %s)
+            """,
+            (
+                int(actor_id),
+                'restore',
+                str(manifest.get('backup_label') or backup_path.stem),
+                backup_path.name,
+                str(backup_path),
+                json.dumps({'source': str(backup_path)}),
+            ),
+        )
+        db.commit()
+        log_id = cursor.lastrowid
+
+        cursor.execute('SET FOREIGN_KEY_CHECKS = 0')
+        for snapshot in reversed(snapshots):
+            table_name = _safe_table_name(snapshot['table_name'])
+            cursor.execute(f'DROP TABLE IF EXISTS `{table_name}`')
+
+        for snapshot in snapshots:
+            table_name = _safe_table_name(snapshot['table_name'])
+            create_sql = str(snapshot.get('create_sql') or '')
+            if not create_sql.upper().startswith('CREATE TABLE'):
+                raise ValueError(f'Backup snapshot for {table_name} is missing CREATE TABLE SQL.')
+            cursor.execute(create_sql)
+
+        for snapshot in snapshots:
+            table_name = _safe_table_name(snapshot['table_name'])
+            rows = snapshot.get('rows') or []
+            if not rows:
+                continue
+            columns = snapshot.get('columns') or list(rows[0].keys())
+            column_sql = ', '.join(f'`{column}`' for column in columns)
+            placeholder_sql = ', '.join(['%s'] * len(columns))
+            insert_sql = f'INSERT INTO `{table_name}` ({column_sql}) VALUES ({placeholder_sql})'
+            values = []
+            for row in rows:
+                values.append(tuple(_json_column_value(row.get(column)) for column in columns))
+            cursor.executemany(insert_sql, values)
+
+        cursor.execute('SET FOREIGN_KEY_CHECKS = 1')
+        db.commit()
+        cursor.execute(
+            """
+            UPDATE admin_backup_log
+            SET status = 'completed',
+                summary = %s,
+                completed_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (
+                json.dumps({'source': str(backup_path), 'table_count': len(snapshots)}),
+                int(log_id),
+            ),
+        )
+        db.commit()
+        return {
+            'id': log_id,
+            'backup_label': str(manifest.get('backup_label') or backup_path.stem),
+            'file_name': backup_path.name,
+            'file_path': str(backup_path),
+            'status': 'completed',
+            'table_count': len(snapshots),
+        }
+    except Exception as error:
+        try:
+            cursor.execute('SET FOREIGN_KEY_CHECKS = 1')
+            db.commit()
+        except Exception:
+            pass
+        if log_id is not None:
+            cursor.execute(
+                """
+                UPDATE admin_backup_log
+                SET status = 'failed',
+                    error_message = %s,
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (str(error), int(log_id)),
+            )
+            db.commit()
+        raise
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_admin_backup_record(backup_id):
+    """Return one backup log row for downloads and restore operations."""
+    ensure_admin_tables()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                actor_id,
+                action_type,
+                backup_label,
+                file_name,
+                file_path,
+                status,
+                summary,
+                error_message,
+                created_at,
+                completed_at
+            FROM admin_backup_log
+            WHERE id = %s
+            """,
+            (int(backup_id),),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        row['summary'] = _coerce_json_value(row.get('summary'), {})
+        return _json_safe(row)
     finally:
         cursor.close()
         db.close()
@@ -1679,6 +2103,24 @@ def ensure_admin_tables():
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_backup_log (
+                id             INT AUTO_INCREMENT PRIMARY KEY,
+                actor_id       INT NOT NULL,
+                action_type    VARCHAR(20) NOT NULL,
+                backup_label   VARCHAR(140) NOT NULL,
+                file_name      VARCHAR(255) NOT NULL,
+                file_path      VARCHAR(512) NULL,
+                status         VARCHAR(20) NOT NULL DEFAULT 'running',
+                summary        JSON,
+                error_message  TEXT,
+                created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                completed_at   DATETIME NULL,
+                FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
         cursor.executemany(
             """
             INSERT IGNORE INTO admin_settings
@@ -1765,8 +2207,11 @@ def _append_date_filters(conditions, params, column_name, start_date=None, end_d
 def get_admin_audit_log(limit=30, offset=0, action='', target_type='', actor_id=None, start_date=None, end_date=None):
     """Return paginated privileged-action history."""
     ensure_admin_tables()
-    safe_limit = max(1, min(int(limit or 30), 100))
-    safe_offset = max(0, int(offset or 0))
+    safe_page, safe_limit, safe_offset = _normalize_pagination(
+        page=(int(offset or 0) // max(1, int(limit or 30))) + 1,
+        limit=limit,
+        maximum=100,
+    )
     conditions = []
     params = []
     if action:
@@ -1784,6 +2229,16 @@ def get_admin_audit_log(limit=30, offset=0, action='', target_type='', actor_id=
     cursor = db.cursor(dictionary=True)
 
     try:
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS value
+            FROM admin_audit_log audit
+            LEFT JOIN users ON users.id = audit.actor_id
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        total = int((cursor.fetchone() or {}).get('value') or 0)
         cursor.execute(
             f"""
             SELECT
@@ -1809,7 +2264,13 @@ def get_admin_audit_log(limit=30, offset=0, action='', target_type='', actor_id=
         rows = cursor.fetchall()
         for row in rows:
             row['payload'] = _coerce_json_value(row.get('payload'), {})
-        return [_json_safe(row) for row in rows]
+        return _build_page_payload(
+            [_json_safe(row) for row in rows],
+            row_key='events',
+            page=safe_page,
+            limit=safe_limit,
+            total=total,
+        )
     finally:
         cursor.close()
         db.close()
@@ -1853,11 +2314,11 @@ def get_admin_overview():
         db.close()
 
 
-def list_admin_users(search_query='', limit=50):
+def list_admin_users(search_query='', page=1, limit=50):
     """Return a searchable user-management list."""
     ensure_user_columns()
     safe_query = str(search_query or '').strip()
-    safe_limit = max(1, min(int(limit or 50), 100))
+    safe_page, safe_limit, safe_offset = _normalize_pagination(page=page, limit=limit, maximum=100)
     db = get_db()
     cursor = db.cursor(dictionary=True)
 
@@ -1868,6 +2329,17 @@ def list_admin_users(search_query='', limit=50):
             where_sql = 'WHERE username LIKE %s OR email LIKE %s OR role LIKE %s OR account_status LIKE %s'
             like_value = f'%{safe_query}%'
             params.extend([like_value, like_value, like_value, like_value])
+
+        cursor.execute(
+            f"""
+            SELECT COUNT(DISTINCT users.id) AS value
+            FROM users
+            LEFT JOIN itineraries ON itineraries.user_id = users.id
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        total = int((cursor.fetchone() or {}).get('value') or 0)
 
         cursor.execute(
             f"""
@@ -1889,10 +2361,17 @@ def list_admin_users(search_query='', limit=50):
                      users.suspended_at, users.suspended_reason, users.created_at
             ORDER BY users.created_at DESC, users.id DESC
             LIMIT %s
+            OFFSET %s
             """,
-            tuple(params + [safe_limit]),
+            tuple(params + [safe_limit, safe_offset]),
         )
-        return [_json_safe(row) for row in cursor.fetchall()]
+        return _build_page_payload(
+            [_json_safe(row) for row in cursor.fetchall()],
+            row_key='users',
+            page=safe_page,
+            limit=safe_limit,
+            total=total,
+        )
     finally:
         cursor.close()
         db.close()
@@ -1986,11 +2465,11 @@ def update_admin_user_status(actor_id, target_user_id, status, reason=''):
         db.close()
 
 
-def list_admin_places(search_query='', limit=80):
+def list_admin_places(search_query='', page=1, limit=80):
     """Return content-management rows from the places catalog."""
     ensure_place_metadata_columns()
     safe_query = str(search_query or '').strip()
-    safe_limit = max(1, min(int(limit or 80), 150))
+    safe_page, safe_limit, safe_offset = _normalize_pagination(page=page, limit=limit, maximum=150)
     db = get_db()
     cursor = db.cursor(dictionary=True)
 
@@ -2004,6 +2483,16 @@ def list_admin_places(search_query='', limit=80):
 
         cursor.execute(
             f"""
+            SELECT COUNT(*) AS value
+            FROM places
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        total = int((cursor.fetchone() or {}).get('value') or 0)
+
+        cursor.execute(
+            f"""
             SELECT
                 id, name, category, latitude, longitude, rating, city, tags,
                 environment_type, physical_intensity, status, curation_notes,
@@ -2012,10 +2501,17 @@ def list_admin_places(search_query='', limit=80):
             {where_sql}
             ORDER BY updated_at DESC, rating DESC, name ASC
             LIMIT %s
+            OFFSET %s
             """,
-            tuple(params + [safe_limit]),
+            tuple(params + [safe_limit, safe_offset]),
         )
-        return [_json_safe(row) for row in cursor.fetchall()]
+        return _build_page_payload(
+            [_json_safe(row) for row in cursor.fetchall()],
+            row_key='places',
+            page=safe_page,
+            limit=safe_limit,
+            total=total,
+        )
     finally:
         cursor.close()
         db.close()
@@ -2122,12 +2618,12 @@ def update_admin_place(actor_id, place_id, payload):
         db.close()
 
 
-def list_admin_itineraries(search_query='', status='', limit=60):
+def list_admin_itineraries(search_query='', status='', page=1, limit=60):
     """Return searchable itinerary rows for admin inspection."""
     ensure_admin_tables()
     safe_query = str(search_query or '').strip()
     safe_status = str(status or '').strip()
-    safe_limit = max(1, min(int(limit or 60), 150))
+    safe_page, safe_limit, safe_offset = _normalize_pagination(page=page, limit=limit, maximum=150)
     conditions = []
     params = []
     if safe_query:
@@ -2145,6 +2641,18 @@ def list_admin_itineraries(search_query='', status='', limit=60):
     cursor = db.cursor(dictionary=True)
 
     try:
+        cursor.execute(
+            f"""
+            SELECT COUNT(DISTINCT itineraries.id) AS value
+            FROM itineraries
+            LEFT JOIN users ON users.id = itineraries.user_id
+            LEFT JOIN itinerary_items ON itinerary_items.itinerary_id = itineraries.id
+            LEFT JOIN trip_feedback ON trip_feedback.itinerary_id = itineraries.id
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        total = int((cursor.fetchone() or {}).get('value') or 0)
         cursor.execute(
             f"""
             SELECT
@@ -2176,10 +2684,17 @@ def list_admin_itineraries(search_query='', status='', limit=60):
                 itineraries.created_at, users.id, users.username, users.email
             ORDER BY itineraries.created_at DESC, itineraries.id DESC
             LIMIT %s
+            OFFSET %s
             """,
-            tuple(params + [safe_limit]),
+            tuple(params + [safe_limit, safe_offset]),
         )
-        return [_json_safe(row) for row in cursor.fetchall()]
+        return _build_page_payload(
+            [_json_safe(row) for row in cursor.fetchall()],
+            row_key='itineraries',
+            page=safe_page,
+            limit=safe_limit,
+            total=total,
+        )
     finally:
         cursor.close()
         db.close()
@@ -2285,11 +2800,28 @@ def get_admin_notification_overview():
         recent = cursor.fetchall()
         for row in recent:
             row['result'] = _coerce_json_value(row.get('result'), {})
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS total_notifications,
+                SUM(CASE WHEN JSON_EXTRACT(result, '$.sent') > 0 THEN 1 ELSE 0 END) AS sent_notifications,
+                SUM(CASE WHEN JSON_EXTRACT(result, '$.failed') > 0 THEN 1 ELSE 0 END) AS failed_notifications,
+                SUM(CASE WHEN JSON_EXTRACT(result, '$.skipped') > 0 THEN 1 ELSE 0 END) AS skipped_notifications
+            FROM admin_notification_log
+            """
+        )
+        summary = cursor.fetchone() or {}
         return _json_safe({
             'token_count': token_count,
             'reachable_users': reachable_users,
             'active_users': active_users,
             'recent': recent,
+            'summary': {
+                'total_notifications': int(summary.get('total_notifications') or 0),
+                'sent_notifications': int(summary.get('sent_notifications') or 0),
+                'failed_notifications': int(summary.get('failed_notifications') or 0),
+                'skipped_notifications': int(summary.get('skipped_notifications') or 0),
+            },
         })
     finally:
         cursor.close()
@@ -2499,6 +3031,17 @@ def get_admin_analytics(start_date=None, end_date=None):
         cursor.execute("SELECT COUNT(*) AS value FROM ml_training_runs")
         ml_runs = int((cursor.fetchone() or {}).get('value') or 0)
 
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS total_notifications,
+                SUM(CASE WHEN JSON_EXTRACT(result, '$.sent') > 0 THEN 1 ELSE 0 END) AS sent_notifications,
+                SUM(CASE WHEN JSON_EXTRACT(result, '$.failed') > 0 THEN 1 ELSE 0 END) AS failed_notifications
+            FROM admin_notification_log
+            """
+        )
+        notification_health = cursor.fetchone() or {}
+
         return _json_safe({
             'itinerary_trend': itinerary_trend,
             'feedback_labels': feedback_labels,
@@ -2507,6 +3050,9 @@ def get_admin_analytics(start_date=None, end_date=None):
             'totals': {
                 'push_tokens': push_tokens,
                 'ml_runs': ml_runs,
+                'notification_total': int(notification_health.get('total_notifications') or 0),
+                'notification_sent': int(notification_health.get('sent_notifications') or 0),
+                'notification_failed': int(notification_health.get('failed_notifications') or 0),
             },
         })
     finally:
