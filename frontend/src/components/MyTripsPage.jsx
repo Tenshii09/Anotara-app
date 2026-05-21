@@ -359,7 +359,7 @@ export default function MyTripsPage() {
               Manage every itinerary from draft to recap, all in one command center.
             </p>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          <div className="my-trips-header-actions">
             <span
               className="badge-pill"
               title={typeof navigator !== "undefined" && navigator.onLine ? "Synced with cloud" : "Offline mode"}
@@ -483,9 +483,8 @@ export default function MyTripsPage() {
                     </div>
                   ) : (
                     <button
-                      className="top-action-link"
+                      className="top-action-link trip-card__primary-action"
                       type="button"
-                      style={{ marginTop: 8 }}
                       onClick={() => navigate(`/itinerary/${trip.id}`)}
                     >
                       View itinerary →

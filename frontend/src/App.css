@@ -2978,6 +2978,8 @@ h1.serif,
 
   .trip-card__menu {
     grid-column: auto;
+    justify-self: stretch;
+    width: 100%;
   }
 }
 
@@ -4374,6 +4376,13 @@ h1.serif,
 /* ------------------------------------------------------------------ */
 /* My Trips                                                           */
 /* ------------------------------------------------------------------ */
+.my-trips-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
 .trip-segmented {
   position: sticky;
   top: var(--mobile-sticky-offset);
@@ -4413,6 +4422,17 @@ h1.serif,
 }
 
 @media (max-width: 540px) {
+  .my-trips-header-actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .my-trips-header-actions .badge-pill,
+  .my-trips-header-actions .top-action-link {
+    justify-content: center;
+    width: 100%;
+  }
+
   .trip-segmented {
     top: calc(env(safe-area-inset-top, 0px) + 10px);
     margin-inline: calc(var(--page-gutter) * -0.35);
@@ -4472,6 +4492,12 @@ h1.serif,
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.trip-card__primary-action {
+  justify-content: center;
+  margin-top: 8px;
+  width: 100%;
 }
 
 .trip-card__title {
@@ -7240,20 +7266,19 @@ a:hover > .anotara-icon,
 /* Public landing page                                                */
 /* ------------------------------------------------------------------ */
 .landing-page {
-  --landing-ocean: #0077b6;
-  --landing-ocean-deep: #005f8f;
-  --landing-ocean-soft: rgba(0, 119, 182, 0.14);
-  --landing-sunset: #ff7a3d;
-  --landing-sunset-deep: #e85d2a;
-  --landing-ink: #102a43;
-  --landing-muted: #5d7083;
+  --landing-primary: var(--accent);
+  --landing-secondary: var(--accent-alt);
+  --landing-soft: var(--accent-soft);
+  --landing-ink: var(--text);
+  --landing-muted: var(--muted);
   position: relative;
   min-height: 100vh;
   overflow-x: clip;
   background:
-    radial-gradient(circle at 12% 8%, rgba(0, 119, 182, 0.18), transparent 28%),
-    radial-gradient(circle at 84% 18%, rgba(255, 122, 61, 0.18), transparent 30%),
-    linear-gradient(180deg, #fafafa 0%, #f4fbff 48%, #fff7ef 100%);
+    radial-gradient(circle at 12% 8%, rgba(252, 213, 227, 0.45), transparent 28%),
+    radial-gradient(circle at 84% 18%, rgba(217, 200, 255, 0.48), transparent 30%),
+    radial-gradient(circle at 58% 78%, rgba(196, 223, 251, 0.4), transparent 32%),
+    linear-gradient(180deg, rgba(255, 247, 239, 0.72) 0%, rgba(255, 255, 255, 0.28) 48%, rgba(217, 200, 255, 0.18) 100%);
   color: var(--landing-ink);
   font-family: var(--font-sans);
   padding: 20px var(--page-gutter) 34px;
@@ -7265,8 +7290,8 @@ a:hover > .anotara-icon,
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(0, 119, 182, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 119, 182, 0.045) 1px, transparent 1px);
+    linear-gradient(rgba(74, 58, 138, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74, 58, 138, 0.04) 1px, transparent 1px);
   background-size: 56px 56px;
   mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), transparent 75%);
 }
@@ -7282,13 +7307,15 @@ a:hover > .anotara-icon,
   align-items: center;
   gap: 18px;
   padding: 12px 14px 12px 18px;
-  background: rgba(255, 255, 255, 0.62);
-  border-color: rgba(255, 255, 255, 0.78);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.46)),
+    var(--glass-bg);
+  border-color: var(--glass-border-strong);
 }
 
 .landing-nav__brand {
   display: inline-flex;
-  color: var(--landing-ocean);
+  color: var(--landing-primary);
   text-decoration: none;
 }
 
@@ -7300,7 +7327,7 @@ a:hover > .anotara-icon,
 
 .landing-nav__links a,
 .landing-secondary-link {
-  color: rgba(16, 42, 67, 0.76);
+  color: var(--text-soft);
   text-decoration: none;
   font-weight: 800;
   font-size: 0.92rem;
@@ -7311,7 +7338,7 @@ a:hover > .anotara-icon,
 
 .landing-nav__links a:hover,
 .landing-secondary-link:hover {
-  color: var(--landing-ocean);
+  color: var(--landing-primary);
   transform: translateY(-1px);
 }
 
@@ -7322,8 +7349,8 @@ a:hover > .anotara-icon,
   cursor: pointer;
   color: #fff;
   font-weight: 900;
-  background: linear-gradient(135deg, var(--landing-ocean) 0%, var(--landing-sunset) 100%);
-  box-shadow: 0 18px 38px -22px rgba(0, 95, 143, 0.74);
+  background: linear-gradient(135deg, var(--landing-primary) 0%, var(--landing-secondary) 100%);
+  box-shadow: 0 18px 38px -22px rgba(74, 58, 138, 0.74);
   transition:
     transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
     box-shadow 220ms ease;
@@ -7336,13 +7363,13 @@ a:hover > .anotara-icon,
 .landing-nav__cta:hover,
 .landing-install-button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 24px 48px -22px rgba(232, 93, 42, 0.58);
+  box-shadow: 0 24px 48px -22px rgba(196, 79, 138, 0.58);
 }
 
 .landing-hero {
   position: relative;
   width: min(1180px, 100%);
-  min-height: clamp(660px, 86vh, 840px);
+  min-height: clamp(620px, 82vh, 790px);
   margin: 18px auto 0;
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.65fr);
@@ -7357,12 +7384,12 @@ a:hover > .anotara-icon,
   overflow: hidden;
   border-radius: 44px;
   background:
-    linear-gradient(180deg, rgba(0, 119, 182, 0.12), rgba(255, 255, 255, 0.12)),
-    radial-gradient(circle at 68% 28%, rgba(255, 122, 61, 0.4), transparent 16%),
-    linear-gradient(135deg, #dff8ff 0%, #fef7ea 44%, #bfefff 100%);
+    linear-gradient(180deg, rgba(217, 200, 255, 0.22), rgba(255, 255, 255, 0.14)),
+    radial-gradient(circle at 68% 28%, rgba(252, 213, 227, 0.58), transparent 16%),
+    linear-gradient(135deg, rgba(196, 223, 251, 0.82) 0%, rgba(255, 247, 239, 0.86) 44%, rgba(200, 240, 219, 0.72) 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 34px 90px -52px rgba(0, 95, 143, 0.62);
+    0 34px 90px -52px rgba(74, 58, 138, 0.58);
   animation: landingPan 24s ease-in-out infinite alternate;
 }
 
@@ -7389,7 +7416,7 @@ a:hover > .anotara-icon,
   right: 13%;
   top: 12%;
   border-radius: 50%;
-  background: radial-gradient(circle, #ffd28d 0%, var(--landing-sunset) 58%, rgba(255, 122, 61, 0) 70%);
+  background: radial-gradient(circle, var(--pastel-peach) 0%, var(--pastel-pink) 58%, rgba(252, 213, 227, 0) 70%);
   filter: blur(1px);
   opacity: 0.84;
 }
@@ -7397,7 +7424,7 @@ a:hover > .anotara-icon,
 .landing-hero__island {
   height: 80px;
   border-radius: 50% 50% 18px 18px;
-  background: linear-gradient(135deg, rgba(15, 118, 110, 0.74), rgba(0, 119, 182, 0.62));
+  background: linear-gradient(135deg, rgba(74, 58, 138, 0.64), rgba(196, 79, 138, 0.42));
   filter: blur(0.2px);
 }
 
@@ -7423,7 +7450,7 @@ a:hover > .anotara-icon,
   border-radius: 50% 50% 0 0;
   background: repeating-linear-gradient(
     90deg,
-    rgba(0, 119, 182, 0.18) 0 44px,
+    rgba(74, 58, 138, 0.14) 0 44px,
     rgba(255, 255, 255, 0.38) 44px 84px
   );
   opacity: 0.64;
@@ -7449,7 +7476,7 @@ a:hover > .anotara-icon,
 
 .landing-kicker {
   margin: 0 0 14px;
-  color: var(--landing-ocean-deep);
+  color: var(--landing-primary);
   font-size: 0.78rem;
   font-weight: 900;
   letter-spacing: 0.18em;
@@ -7460,6 +7487,7 @@ a:hover > .anotara-icon,
 .landing-section h2 {
   margin: 0;
   color: var(--landing-ink);
+  font-family: var(--font-serif);
   letter-spacing: -0.065em;
   line-height: 0.92;
 }
@@ -7495,10 +7523,10 @@ a:hover > .anotara-icon,
   cursor: pointer;
   font-size: 1rem;
   font-weight: 950;
-  background: linear-gradient(135deg, var(--landing-ocean) 0%, var(--landing-sunset) 100%);
+  background: linear-gradient(135deg, var(--landing-primary) 0%, var(--landing-secondary) 100%);
   box-shadow:
-    0 0 0 0 rgba(255, 122, 61, 0.44),
-    0 28px 62px -24px rgba(0, 95, 143, 0.75);
+    0 0 0 0 rgba(196, 79, 138, 0.36),
+    0 28px 62px -24px rgba(74, 58, 138, 0.72);
   animation: landingPulse 2.8s ease-in-out infinite;
   transition:
     transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
@@ -7514,13 +7542,15 @@ a:hover > .anotara-icon,
   z-index: 2;
   align-self: center;
   padding: clamp(20px, 3vw, 30px);
-  background: rgba(255, 255, 255, 0.58);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.46)),
+    var(--glass-bg);
   animation: landingFloat 5s ease-in-out infinite alternate;
 }
 
 .landing-trip-card__eyebrow {
   margin: 0 0 10px;
-  color: var(--landing-sunset-deep);
+  color: var(--landing-secondary);
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -7549,7 +7579,7 @@ a:hover > .anotara-icon,
   top: 8px;
   bottom: 8px;
   width: 2px;
-  background: linear-gradient(var(--landing-ocean), var(--landing-sunset));
+  background: linear-gradient(var(--landing-primary), var(--landing-secondary));
 }
 
 .landing-route-line span {
@@ -7567,7 +7597,7 @@ a:hover > .anotara-icon,
   height: 10px;
   border-radius: 999px;
   background: #fff;
-  border: 3px solid var(--landing-ocean);
+  border: 3px solid var(--landing-primary);
 }
 
 .landing-trip-card__stats {
@@ -7580,8 +7610,8 @@ a:hover > .anotara-icon,
 .landing-bento-card span {
   border-radius: 999px;
   padding: 8px 11px;
-  color: var(--landing-ocean-deep);
-  background: rgba(0, 119, 182, 0.1);
+  color: var(--landing-primary);
+  background: var(--landing-soft);
   font-size: 0.78rem;
   font-weight: 900;
 }
@@ -7630,7 +7660,9 @@ a:hover > .anotara-icon,
 
 .landing-step {
   padding: clamp(20px, 2.8vw, 30px);
-  background: rgba(255, 255, 255, 0.56);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.42)),
+    var(--glass-bg);
   animation: landingFadeUp 720ms ease both;
   animation-delay: var(--landing-delay, 0ms);
 }
@@ -7638,7 +7670,7 @@ a:hover > .anotara-icon,
 .landing-step span {
   display: inline-flex;
   margin-bottom: 34px;
-  color: var(--landing-sunset-deep);
+  color: var(--landing-secondary);
   font-weight: 950;
   letter-spacing: 0.14em;
 }
@@ -7685,8 +7717,9 @@ a:hover > .anotara-icon,
   overflow: hidden;
   padding: clamp(20px, 2.8vw, 30px);
   background:
-    radial-gradient(circle at 82% 14%, rgba(255, 122, 61, 0.2), transparent 28%),
-    rgba(255, 255, 255, 0.58);
+    radial-gradient(circle at 82% 14%, rgba(217, 200, 255, 0.44), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.4)),
+    var(--glass-bg);
 }
 
 .landing-bento-card::after {
@@ -7697,7 +7730,7 @@ a:hover > .anotara-icon,
   width: 150px;
   height: 150px;
   border-radius: 46px;
-  background: linear-gradient(135deg, rgba(0, 119, 182, 0.18), rgba(255, 122, 61, 0.18));
+  background: linear-gradient(135deg, rgba(74, 58, 138, 0.14), rgba(196, 79, 138, 0.14));
   transform: rotate(18deg);
 }
 
@@ -7705,9 +7738,9 @@ a:hover > .anotara-icon,
 .landing-step:hover,
 .landing-trip-tile:hover {
   transform: translateY(-8px);
-  border-color: rgba(0, 119, 182, 0.22);
+  border-color: var(--control-border);
   box-shadow:
-    0 44px 94px -42px rgba(0, 95, 143, 0.5),
+    0 44px 94px -42px rgba(74, 58, 138, 0.46),
     inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
@@ -7728,8 +7761,9 @@ a:hover > .anotara-icon,
 .landing-bento-card--tall {
   grid-column: span 2;
   background:
-    radial-gradient(circle at 76% 20%, rgba(0, 119, 182, 0.24), transparent 30%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 248, 241, 0.48));
+    radial-gradient(circle at 76% 20%, rgba(196, 223, 251, 0.55), transparent 30%),
+    radial-gradient(circle at 12% 84%, rgba(252, 213, 227, 0.42), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.68), rgba(255, 248, 241, 0.48));
 }
 
 .landing-carousel {
@@ -7749,7 +7783,9 @@ a:hover > .anotara-icon,
   overflow: hidden;
   min-height: 430px;
   padding: 16px;
-  background: rgba(255, 255, 255, 0.58);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.42)),
+    var(--glass-bg);
 }
 
 .landing-trip-tile__image {
@@ -7757,12 +7793,12 @@ a:hover > .anotara-icon,
   border-radius: 20px;
   background:
     radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.82), transparent 14%),
-    linear-gradient(135deg, rgba(0, 119, 182, 0.78), rgba(58, 179, 190, 0.64) 42%, rgba(255, 122, 61, 0.74));
+    linear-gradient(135deg, rgba(74, 58, 138, 0.76), rgba(217, 200, 255, 0.74) 42%, rgba(196, 79, 138, 0.64));
 }
 
 .landing-trip-tile p {
   margin: 18px 0 10px;
-  color: var(--landing-sunset-deep);
+  color: var(--landing-secondary);
   font-size: 0.8rem;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -7788,7 +7824,9 @@ a:hover > .anotara-icon,
   gap: 24px;
   margin-top: clamp(72px, 10vw, 130px);
   padding: clamp(22px, 3vw, 34px);
-  background: rgba(255, 255, 255, 0.62);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.46)),
+    var(--glass-bg);
 }
 
 .landing-footer p {
@@ -7802,7 +7840,7 @@ a:hover > .anotara-icon,
 }
 
 .landing-install-message {
-  color: var(--landing-sunset-deep) !important;
+  color: var(--landing-secondary) !important;
   font-weight: 800 !important;
 }
 
@@ -7828,13 +7866,13 @@ a:hover > .anotara-icon,
   0%,
   100% {
     box-shadow:
-      0 0 0 0 rgba(255, 122, 61, 0.44),
-      0 28px 62px -24px rgba(0, 95, 143, 0.75);
+      0 0 0 0 rgba(196, 79, 138, 0.36),
+      0 28px 62px -24px rgba(74, 58, 138, 0.72);
   }
   50% {
     box-shadow:
-      0 0 0 12px rgba(255, 122, 61, 0),
-      0 32px 74px -24px rgba(0, 95, 143, 0.82);
+      0 0 0 12px rgba(196, 79, 138, 0),
+      0 32px 74px -24px rgba(74, 58, 138, 0.78);
   }
 }
 
@@ -7870,14 +7908,15 @@ a:hover > .anotara-icon,
   .landing-hero {
     grid-template-columns: 1fr;
     min-height: auto;
-    padding-top: 48px;
+    padding-top: 34px;
   }
 
   .landing-hero__visual {
-    height: 680px;
+    height: min(680px, calc(100% - 16px));
   }
 
   .landing-trip-card {
+    width: min(100%, 520px);
     max-width: 520px;
     margin-bottom: 34px;
   }
@@ -7894,12 +7933,13 @@ a:hover > .anotara-icon,
 
 @media (max-width: 620px) {
   .landing-page {
-    padding-inline: 14px;
+    padding: 12px 14px 28px;
   }
 
   .landing-nav {
     top: 10px;
     padding: 10px;
+    gap: 10px;
   }
 
   .landing-nav__brand .brand-logo__wordmark {
@@ -7907,11 +7947,34 @@ a:hover > .anotara-icon,
   }
 
   .landing-hero h1 {
-    font-size: clamp(3rem, 17vw, 5.5rem);
+    font-size: clamp(2.7rem, 15vw, 4.8rem);
+    line-height: 0.96;
   }
 
   .landing-hero__subhead {
     font-size: 1rem;
+    margin-top: 18px;
+  }
+
+  .landing-hero {
+    gap: 18px;
+    padding-top: 26px;
+  }
+
+  .landing-hero__content {
+    padding: 36px 0 8px;
+  }
+
+  .landing-hero__visual {
+    inset: 14px -10px auto;
+    height: 100%;
+    min-height: 560px;
+    border-radius: 28px;
+  }
+
+  .landing-hero__actions {
+    gap: 10px;
+    margin-top: 24px;
   }
 
   .landing-primary-cta,
@@ -7929,6 +7992,7 @@ a:hover > .anotara-icon,
   .landing-steps,
   .landing-bento-grid {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .landing-bento-card--wide,
@@ -7942,5 +8006,6 @@ a:hover > .anotara-icon,
 
   .landing-footer {
     grid-template-columns: 1fr;
+    gap: 18px;
   }
 }
