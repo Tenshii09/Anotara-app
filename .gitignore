@@ -2,3 +2,9 @@
 .env
 __pycache__/
 anotarasystem-firebase-adminsdk-fbsvc-68333f97d3.json
+ano-tara-96543-firebase-adminsdk-fbsvc-9262d55094.json
+ano-tara-96543-firebase-adminsdk-fbsvc-2e147530f9.json
+firebase-service-account.json
+firebase-adminsdk.json
+*firebase*adminsdk*.json
+*service*account*.json

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -31,7 +31,10 @@ import {
   persistTheme,
   THEMES,
 } from "../lib/theme";
-import { triggerTestPushNotification } from "../lib/pushNotifications";
+import {
+  hardResetPush,
+  triggerTestPushNotification,
+} from "../lib/pushNotifications";
 import Avatar from "./common/Avatar";
 import BottomSheet from "./common/BottomSheet";
 import Icon from "./common/Icon";
@@ -79,6 +82,14 @@ const DEFAULT_EMAIL_PREFERENCES = {
   marketing: false,
 };
 
+const MAX_PROFILE_IMAGE_BYTES = 500 * 1024;
+const ALLOWED_PROFILE_IMAGE_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+];
+
 const EMAIL_PREFERENCE_OPTIONS = [
   { key: "security", label: "Security alerts" },
   { key: "collaboration", label: "Collaboration updates" },
@@ -122,6 +133,7 @@ function formatBytes(bytes) {
 
 export default function ProfilePage() {
   const navigate = useNavigate();
+  const avatarInputRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [trips, setTrips] = useState([]);
@@ -129,6 +141,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState(null);
   const [draftName, setDraftName] = useState("");
   const [savingName, setSavingName] = useState(false);
+  const [savingAvatar, setSavingAvatar] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [defaultBudget, setDefaultBudget] = useState("comfort");
   const [companionVector, setCompanionVector] = useState(["Solo"]);
@@ -151,6 +164,7 @@ export default function ProfilePage() {
   const [passwordResetOpen, setPasswordResetOpen] = useState(false);
   const [theme, setTheme] = useState(() => getInitialTheme());
   const [testPushBusy, setTestPushBusy] = useState(false);
+  const [hardResetBusy, setHardResetBusy] = useState(false);
 
   useEffect(() => {
     async function loadProfile() {
@@ -169,7 +183,10 @@ export default function ProfilePage() {
         setProfile(profileData || null);
         const safeName = profileData?.username || "Traveler";
         setDraftName(safeName);
-        saveUserProfile({ name: safeName });
+        saveUserProfile({
+          name: safeName,
+          profileImage: profileData?.profile_image || "",
+        });
         setTrips(Array.isArray(tripData) ? tripData : []);
         setDefaultBudget(profileData?.default_budget || "comfort");
         setCompanionVector(
@@ -342,8 +359,15 @@ export default function ProfilePage() {
         username: draftName.trim(),
       });
       const nextName = updated?.username || draftName.trim();
-      setProfile((current) => ({ ...(current || {}), username: nextName }));
-      saveUserProfile({ name: nextName });
+      setProfile((current) => ({
+        ...(current || {}),
+        username: nextName,
+        profile_image: updated?.profile_image ?? current?.profile_image ?? "",
+      }));
+      saveUserProfile({
+        name: nextName,
+        profileImage: updated?.profile_image || profile?.profile_image || "",
+      });
       successHaptic();
       setSaveMessage("Profile updated.");
     } catch (requestError) {
@@ -356,6 +380,84 @@ export default function ProfilePage() {
       setSaveMessage(requestError.message || "Could not update profile.");
     } finally {
       setSavingName(false);
+    }
+  }
+
+  function openAvatarPicker() {
+    tapHaptic();
+    avatarInputRef.current?.click();
+  }
+
+  function readImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Could not read that image."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function persistProfileImage(profileImage) {
+    const token = getStoredToken();
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    try {
+      setSavingAvatar(true);
+      setError("");
+      setSaveMessage("");
+      const updated = await updateProfile(token, {
+        profile_image: profileImage,
+      });
+      const nextImage = updated?.profile_image || "";
+      setProfile((current) => ({
+        ...(current || {}),
+        profile_image: nextImage,
+        username: updated?.username || current?.username || displayName,
+      }));
+      saveUserProfile({
+        name: updated?.username || displayName,
+        profileImage: nextImage,
+      });
+      successHaptic();
+      setSaveMessage(
+        nextImage ? "Profile picture updated." : "Profile picture removed.",
+      );
+    } catch (requestError) {
+      if (requestError.status === 401 || requestError.status === 422) {
+        clearStoredToken();
+        clearUserProfile();
+        navigate("/login");
+        return;
+      }
+      setError(requestError.message || "Could not update profile picture.");
+    } finally {
+      setSavingAvatar(false);
+    }
+  }
+
+  async function handleProfileImageChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!ALLOWED_PROFILE_IMAGE_TYPES.includes(file.type)) {
+      setError("Please choose a JPG, PNG, WebP, or GIF image.");
+      return;
+    }
+
+    if (file.size > MAX_PROFILE_IMAGE_BYTES) {
+      setError("Profile picture must be 500 KB or smaller.");
+      return;
+    }
+
+    try {
+      const imageDataUrl = await readImageFile(file);
+      await persistProfileImage(imageDataUrl);
+    } catch (imageError) {
+      setError(imageError.message || "Could not prepare that image.");
     }
   }
 
@@ -410,11 +512,7 @@ export default function ProfilePage() {
       }
 
       successHaptic();
-      setSaveMessage(
-        result.remotePushReady
-          ? "Test push notification sent. This device is registered for admin push notifications."
-          : result.message,
-      );
+      setSaveMessage(result.message);
     } catch (pushError) {
       warningHaptic();
       setError(
@@ -423,6 +521,28 @@ export default function ProfilePage() {
       );
     } finally {
       setTestPushBusy(false);
+    }
+  }
+
+  async function handleHardResetPush() {
+    tapHaptic();
+    setError("");
+    setSaveMessage("");
+    setHardResetBusy(true);
+
+    try {
+      const result = await hardResetPush();
+      successHaptic();
+      setSaveMessage(
+        result.steps?.length
+          ? `${result.message} ${result.steps.join(" ")}`
+          : result.message,
+      );
+    } catch (resetError) {
+      warningHaptic();
+      setError(resetError.message || "Could not hard reset push notifications.");
+    } finally {
+      setHardResetBusy(false);
     }
   }
 
@@ -529,19 +649,32 @@ export default function ProfilePage() {
   const displayName = profile?.username || "Traveler";
   const email = profile?.email || "";
   const memberSince = profile?.member_since;
+  const profileImage = profile?.profile_image || "";
 
   return (
     <main className="app-page">
       <section className="dashboard-shell">
         {/* Identity, Account Maturity, Gamification Engine */}
         <article className="glass-card profile-identity">
-          <Avatar
-            name={displayName}
-            level={explorerRank.level}
-            progress={explorerRank.progress}
-            ariaLabel={`${displayName}, Explorer level ${explorerRank.level}`}
-            size={72}
-          />
+          <div className="profile-identity__avatar">
+            <Avatar
+              name={displayName}
+              imageUrl={profileImage}
+              level={explorerRank.level}
+              progress={explorerRank.progress}
+              onClick={openAvatarPicker}
+              ariaLabel={`Change ${displayName}'s profile picture`}
+              size={72}
+            />
+            <input
+              ref={avatarInputRef}
+              className="profile-identity__file"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={handleProfileImageChange}
+              aria-label="Choose profile picture"
+            />
+          </div>
           <div className="profile-identity__text">
             <p className="dashboard-kicker">
               Digital twin · {explorerRank.label}
@@ -572,8 +705,28 @@ export default function ProfilePage() {
         <article className="glass-card" style={{ padding: 20 }}>
           <p className="dashboard-kicker">Identity</p>
           <h3 className="serif" style={{ margin: "4px 0 12px" }}>
-            Edit display name
+            Edit profile
           </h3>
+          <div className="profile-picture-controls">
+            <button
+              className="btn-outline-luxury profile-picture-controls__button"
+              type="button"
+              onClick={openAvatarPicker}
+              disabled={savingAvatar}
+            >
+              {savingAvatar ? "Uploading..." : "Change profile picture"}
+            </button>
+            {profileImage ? (
+              <button
+                className="btn-outline-luxury profile-picture-controls__button"
+                type="button"
+                onClick={() => persistProfileImage("")}
+                disabled={savingAvatar}
+              >
+                Remove photo
+              </button>
+            ) : null}
+          </div>
           <form
             onSubmit={handleSaveProfile}
             style={{ display: "grid", gap: 10 }}
@@ -732,15 +885,27 @@ export default function ProfilePage() {
               worker to verify mobile push permissions and payload rendering.
             </p>
           </div>
-          <button
-            className="btn-luxury profile-push-card__button"
-            type="button"
-            onClick={handleTestPushNotification}
-            disabled={testPushBusy}
-          >
-            <Icon name="bell" size={16} />
-            {testPushBusy ? "Sending..." : "Test Push Notification"}
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <button
+              className="btn-luxury profile-push-card__button"
+              type="button"
+              onClick={handleTestPushNotification}
+              disabled={testPushBusy || hardResetBusy}
+            >
+              <Icon name="bell" size={16} />
+              {testPushBusy ? "Sending..." : "Test Push Notification"}
+            </button>
+            <button
+              className="btn-luxury profile-push-card__button"
+              type="button"
+              onClick={handleHardResetPush}
+              disabled={testPushBusy || hardResetBusy}
+              style={{ background: "rgba(153, 27, 27, 0.18)" }}
+            >
+              <Icon name="arrowRight" size={16} />
+              {hardResetBusy ? "Resetting..." : "Hard Reset Push (temp)"}
+            </button>
+          </div>
         </article>
 
         {/* Email notifications */}

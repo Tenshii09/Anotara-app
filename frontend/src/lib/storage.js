@@ -1,5 +1,6 @@
 import {
   DISCOVER_RECENT_SEARCHES_KEY,
+  NOTIFICATION_DELETED_STATE_KEY,
   NOTIFICATION_READ_STATE_KEY,
   PROFILE_STORAGE_KEY,
   TOKEN_STORAGE_KEY,
@@ -140,4 +141,15 @@ export function loadNotificationReadState() {
 
 export function saveNotificationReadState(readState) {
   writeJSON(NOTIFICATION_READ_STATE_KEY, readState || {});
+}
+
+export function loadNotificationDeletedState() {
+  const deletedState = readJSON(NOTIFICATION_DELETED_STATE_KEY, {});
+  return deletedState && typeof deletedState === "object" && !Array.isArray(deletedState)
+    ? deletedState
+    : {};
+}
+
+export function saveNotificationDeletedState(deletedState) {
+  writeJSON(NOTIFICATION_DELETED_STATE_KEY, deletedState || {});
 }

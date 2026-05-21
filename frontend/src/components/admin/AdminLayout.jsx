@@ -19,6 +19,7 @@ export default function AdminLayout({
   profile,
   sidebarOpen,
   setSidebarOpen,
+  success,
   overview,
 }) {
   const displayName = profile?.name || profile?.role || "Operations admin";
@@ -154,6 +155,11 @@ export default function AdminLayout({
 
         {error ? (
           <div className="admin-notice admin-notice--error">{error}</div>
+        ) : null}
+        {success ? (
+          <div className="admin-toast" role="status" aria-live="polite">
+            {success}
+          </div>
         ) : null}
         {isLoading ? (
           <div className="admin-notice">

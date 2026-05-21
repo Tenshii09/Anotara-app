@@ -15,6 +15,7 @@ from webapp.routes.admin_routes import admin_bp
 from webapp.services.trip_planning import ml_columns, ml_model
 from webapp.services.email_service import process_queue as process_email_queue
 from webapp.services.email_service import send_email
+from webapp.services.push_notifications import send_push_to_user
 from webapp.services.weather_monitor import run_weather_monitor
 
 app = Flask(__name__)
@@ -85,6 +86,20 @@ def send_test_email_command(recipient_email):
         'template_name': 'email_test',
         'category': 'security',
         'context': {'recipient_email': recipient_email},
+    })
+    click.echo(json.dumps(result, indent=2, default=str))
+
+
+@app.cli.command('send-test-push')
+@click.argument('user_id', type=int)
+def send_test_push_command(user_id):
+    """Send one immediate FCM push to a user's registered device tokens."""
+    result = send_push_to_user(user_id, {
+        'title': 'Ano-Tara! System Alert',
+        'body': 'Remote push test from the Ano Tara backend.',
+        'url': '/profile',
+        'source': 'cli-test',
+        'tag': 'anotara-cli-test-push',
     })
     click.echo(json.dumps(result, indent=2, default=str))
 

@@ -38,7 +38,7 @@ from webapp.services.database import (
     update_admin_user_role,
     update_admin_user_status,
 )
-from webapp.services.push_notifications import send_push_to_user
+from webapp.services.push_notifications import send_push_to_topic, send_push_to_user
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -339,12 +339,27 @@ def api_admin_weather_ops():
 @admin_required
 def api_admin_send_notification():
     """Send a targeted or broad operational push notification."""
+    return _send_admin_notification()
+
+
+@admin_bp.route('/api/send-notification', methods=['POST'])
+@admin_required
+def api_send_notification():
+    """Send the Admin UI notification payload through Firebase."""
+    return _send_admin_notification()
+
+
+def _send_admin_notification():
+    """Send a targeted token push or all-user topic broadcast."""
     actor_id = get_jwt_identity()
     data = request.get_json() or {}
     title = str(data.get('title') or '').strip()
     body = str(data.get('body') or '').strip()
-    audience_type = str(data.get('audience_type') or 'user').strip().lower()
+    audience_type = str(data.get('audience_type') or data.get('audience') or 'all').strip().lower()
     target_user_id = data.get('target_user_id')
+
+    if audience_type in ('all_users', 'all reachable users', 'all-reachable-users'):
+        audience_type = 'all'
 
     if not title or not body:
         return jsonify({'error': 'Notification title and body are required.'}), 400
@@ -353,9 +368,8 @@ def api_admin_send_notification():
     if audience_type == 'user' and not target_user_id:
         return jsonify({'error': 'Target user is required for targeted notifications.'}), 400
 
-    recipient_ids = list_admin_push_recipient_ids(audience_type, target_user_id)
     result = {
-        'recipient_count': len(recipient_ids),
+        'recipient_count': 0,
         'sent': 0,
         'failed': 0,
         'skipped': 0,
@@ -364,17 +378,31 @@ def api_admin_send_notification():
     payload = {
         'title': title[:140],
         'body': body,
-        'source': 'admin',
+        'source': 'system',
         'audience_type': audience_type,
+        'url': '/notifications',
+        'tag': 'anotara-admin-broadcast',
+        'icon': '/ano-tara-notification-icon.png',
+        'badge': '/ano-tara-notification-icon.png',
     }
 
-    for recipient_id in recipient_ids:
-        delivery = send_push_to_user(recipient_id, payload)
+    if audience_type == 'all':
+        delivery = send_push_to_topic('all_users', payload)
         result['sent'] += int(delivery.get('sent') or 0)
         result['failed'] += int(delivery.get('failed') or 0)
         if delivery.get('skipped'):
             result['skipped'] += 1
-        result['details'].append({'user_id': recipient_id, **delivery})
+        result['details'].append(delivery)
+    else:
+        recipient_ids = list_admin_push_recipient_ids(audience_type, target_user_id)
+        result['recipient_count'] = len(recipient_ids)
+        for recipient_id in recipient_ids:
+            delivery = send_push_to_user(recipient_id, payload)
+            result['sent'] += int(delivery.get('sent') or 0)
+            result['failed'] += int(delivery.get('failed') or 0)
+            if delivery.get('skipped'):
+                result['skipped'] += 1
+            result['details'].append({'user_id': recipient_id, **delivery})
 
     log_id = create_admin_notification_log(
         actor_id,
@@ -388,7 +416,8 @@ def api_admin_send_notification():
         'audience_type': audience_type,
         'target_user_id': target_user_id,
         'title': title,
-        'recipient_count': len(recipient_ids),
+        'recipient_count': result['recipient_count'],
+        'topic': 'all_users' if audience_type == 'all' else None,
     })
     return jsonify({'id': log_id, 'result': result}), 200
 

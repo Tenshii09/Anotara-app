@@ -58,6 +58,25 @@ export default function AuthPage({ initialMode = "login" }) {
   const navigate = useNavigate();
   const selectedLegalCopy = activeLegalModal ? legalCopy[activeLegalModal] : null;
 
+  function getDiagnosticAuthErrorMessage(requestError) {
+    const firebaseCode =
+      requestError?.code ||
+      requestError?.payload?.code ||
+      requestError?.payload?.error?.code;
+    const firebaseMessage =
+      requestError?.message ||
+      requestError?.payload?.error ||
+      requestError?.payload?.message ||
+      requestError?.payload?.detail;
+
+    const parts = [];
+    if (firebaseCode) parts.push(`[${firebaseCode}]`);
+    if (firebaseMessage) parts.push(String(firebaseMessage));
+    if (requestError?.status) parts.push(`(HTTP ${requestError.status})`);
+
+    return parts.join(" ").trim() || "Unknown authentication error.";
+  }
+
   // Send the form data to the Flask API and branch the result depending on
   // whether the user is creating an account or logging in.
   const handleAuth = async (event) => {
@@ -71,6 +90,13 @@ export default function AuthPage({ initialMode = "login" }) {
     const payload = isRegistering
       ? { username, email, password, legal_consent: true }
       : { identifier, password };
+
+    console.log("[Auth Debug] API Key exists:", !!import.meta.env.VITE_FIREBASE_API_KEY);
+    console.log(
+      "[Auth Debug] Firebase project loaded:",
+      import.meta.env.VITE_FIREBASE_PROJECT_ID || "(missing)",
+    );
+    console.log("[Auth Debug] Auth endpoint:", `/api/${endpoint}`);
 
     try {
       const data = await apiRequest(`/api/${endpoint}`, {
@@ -93,8 +119,13 @@ export default function AuthPage({ initialMode = "login" }) {
       persistSession(data);
       navigate(["admin", "super_admin"].includes(data.role) ? "/admin" : "/dashboard");
     } catch (requestError) {
-      // Any network or backend failure ends up here.
-      setMessage(requestError.message || "Connection error.");
+      console.error("[Auth Debug] Raw auth error object:", requestError);
+      console.error("[Auth Debug] error.code:", requestError?.code);
+      console.error("[Auth Debug] error.message:", requestError?.message);
+      console.error("[Auth Debug] error.status:", requestError?.status);
+      console.error("[Auth Debug] error.payload:", requestError?.payload);
+
+      setMessage(getDiagnosticAuthErrorMessage(requestError));
     }
   };
 

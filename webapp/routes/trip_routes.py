@@ -5,12 +5,14 @@ generated trips back to the database.
 """
 # TODO: Add error handling for geocoding failures, no places found, and DB issues.
 from datetime import datetime
+import json
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from webapp.services.email_service import queue_email
 from webapp.services.database import (
+    create_admin_notification_log,
     delete_itinerary_for_user,
     duplicate_itinerary_for_user,
     get_discover_feed,
@@ -22,6 +24,7 @@ from webapp.services.database import (
     get_user_travel_stats,
     get_weather_alert_history,
     get_indoor_place_alternatives,
+    list_user_notification_events,
     save_itinerary,
     save_place_feedback,
     save_push_token,
@@ -36,6 +39,7 @@ from webapp.services.weather_monitor import build_weather_suggestion
 from webapp.services.pitch_generator import generate_itinerary_pitch
 from webapp.services.llm_itinerary import generate_llm_itinerary
 from webapp.security_utils import sanitize_user_text
+from webapp.services.push_notifications import send_push_to_user, subscribe_token_to_topic
 from webapp.services.trip_planning import (
     build_itinerary,
     fetch_places,
@@ -68,6 +72,17 @@ def api_discover_feed():
         return jsonify(feed), 200
     except ValueError:
         return jsonify({'error': 'Invalid discover feed parameters'}), 400
+
+
+@trip_bp.route('/api/notifications', methods=['GET'])
+@jwt_required()
+def api_user_notifications():
+    """Return notification-center events visible to the current user."""
+    current_user_id = get_jwt_identity()
+    return jsonify(list_user_notification_events(
+        current_user_id,
+        limit=request.args.get('limit', 30),
+    )), 200
 
 # The /api/itinerary route is for generating a preview without saving, while /api/generate saves the itinerary to the DB and returns an ID for future reference.    
 @trip_bp.route('/api/itinerary', methods=['POST'])
@@ -410,7 +425,16 @@ def api_update_itinerary_start_date(itinerary_id):
 @jwt_required()
 def api_swap_itinerary_item(itinerary_id, item_id):
     """Replace a single itinerary stop with a nearby stronger candidate."""
-    swapped_item, error_message = swap_itinerary_item(itinerary_id, item_id)
+    data = request.get_json(silent=True) or {}
+    preferred_place_id = data.get('preferred_place_id')
+    prefer_indoor = bool(data.get('prefer_indoor'))
+
+    swapped_item, error_message = swap_itinerary_item(
+        itinerary_id,
+        item_id,
+        preferred_place_id=preferred_place_id,
+        prefer_indoor=prefer_indoor,
+    )
     if error_message:
         return jsonify({'error': error_message}), 400
 
@@ -465,6 +489,12 @@ def api_save_push_token():
     """Store a Firebase Cloud Messaging token for the current user."""
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
+    print(f"PUSH TOKEN RECEIVED FROM FRONTEND: {json.dumps(data, default=str)}")
+    current_app.logger.info(
+        'Push token registration payload received for user_id=%s: %s',
+        current_user_id,
+        json.dumps(data, default=str),
+    )
     token = (data.get('token') or '').strip()
 
     if not token:
@@ -476,7 +506,56 @@ def api_save_push_token():
         user_agent=request.user_agent.string,
         platform=data.get('platform', 'web'),
     )
-    return jsonify({'message': 'Push token saved.'}), 200
+    topic_subscription = subscribe_token_to_topic(token, 'all_users')
+    return jsonify({
+        'message': 'Push token saved.',
+        'topic_subscription': topic_subscription,
+    }), 200
+
+
+@trip_bp.route('/api/push-tokens/test', methods=['POST'])
+@jwt_required()
+def api_send_test_push():
+    """Send a real Firebase push notification to the current user's devices."""
+    current_user_id = get_jwt_identity()
+    payload = {
+        'title': 'Ano-Tara! System Alert',
+        'body': 'Test successful! Your push notifications are working perfectly.',
+        'url': '/profile',
+        'source': 'test',
+        'tag': 'anotara-test-push',
+        'icon': '/ano-tara-notification-icon.png',
+        'badge': '/ano-tara-notification-icon.png',
+    }
+    delivery = send_push_to_user(current_user_id, payload)
+
+    if delivery.get('skipped'):
+        return jsonify({
+            'error': delivery.get('reason') or 'Push delivery was skipped.',
+            'delivery': delivery,
+        }), 503
+
+    if int(delivery.get('sent') or 0) == 0:
+        delivery_errors = delivery.get('errors') or []
+        first_error = delivery_errors[0].get('client_message') if delivery_errors else None
+        return jsonify({
+            'error': first_error or 'Firebase did not accept delivery for any registered device token.',
+            'delivery': delivery,
+        }), 502
+
+    notification_id = create_admin_notification_log(
+        current_user_id,
+        'user',
+        current_user_id,
+        payload['title'],
+        payload['body'],
+        delivery,
+    )
+    return jsonify({
+        'message': 'Remote push notification sent through Firebase.',
+        'delivery': delivery,
+        'notification_id': notification_id,
+    }), 200
 
 
 @trip_bp.route('/api/push-tokens', methods=['DELETE'])

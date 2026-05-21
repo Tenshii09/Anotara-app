@@ -2,10 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { PH_DESTINATIONS } from "../data/phDestinations";
-import { getUnreadNotifications } from "../data/notifications";
+import {
+  NOTIFICATION_EVENTS,
+  getUnreadNotifications,
+  getVisibleNotifications,
+  normalizeNotificationEvents,
+} from "../data/notifications";
 import { PROFILE_STORAGE_KEY } from "../lib/config";
 import {
   getDashboardSummary,
+  getNotificationEvents,
   getSmartSuggestion,
   getSavedItineraries,
   updateTripStartDate,
@@ -13,6 +19,7 @@ import {
 import {
   clearStoredToken,
   getStoredToken,
+  loadNotificationDeletedState,
   loadNotificationReadState,
   loadDiscoverRecentSearches,
   saveDiscoverSearch,
@@ -172,21 +179,35 @@ function decodeJwtPayload(token) {
   }
 }
 
-function getDisplayName() {
-  if (typeof window === "undefined") return "Traveler";
+function getStoredDashboardProfile() {
+  if (typeof window === "undefined") return { name: "", profileImage: "" };
   try {
     const rawProfile = window.localStorage.getItem(PROFILE_STORAGE_KEY);
     if (rawProfile) {
       const profile = JSON.parse(rawProfile);
-      if (profile?.name) return String(profile.name);
+      return {
+        name: profile?.name ? String(profile.name) : "",
+        profileImage: profile?.profileImage || "",
+      };
     }
   } catch {
     /* ignore */
   }
+  return { name: "", profileImage: "" };
+}
+
+function getDisplayName() {
+  const profile = getStoredDashboardProfile();
+  if (profile.name) return profile.name;
+
   const token = getStoredToken();
   const payload = decodeJwtPayload(token);
   // Avoid surfacing the bare subject id from the JWT as a name — fall back to a friendly default.
   return payload?.name || payload?.username || "Traveler";
+}
+
+function getProfileImage() {
+  return getStoredDashboardProfile().profileImage;
 }
 
 // Derive a coarse Explorer Level from total saved trips so the gamification
@@ -209,14 +230,19 @@ export default function DashboardPage() {
   const [savedTrips, setSavedTrips] = useState([]);
   const [smartSuggestion, setSmartSuggestion] = useState(null);
   const [dashboardSummary, setDashboardSummary] = useState(null);
+  const [serverNotifications, setServerNotifications] = useState([]);
   // Lazy initializer keeps the localStorage access out of an effect, so the
   // greeting renders correctly on first paint without triggering a cascading
   // re-render that the React Compiler-flavored lint rule disallows.
   const [displayName] = useState(() => getDisplayName());
+  const [profileImage] = useState(() => getProfileImage());
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentSearches, setRecentSearches] = useState(() => loadDiscoverRecentSearches());
   const [notificationReadState, setNotificationReadState] = useState(() =>
     loadNotificationReadState(),
+  );
+  const [notificationDeletedState, setNotificationDeletedState] = useState(() =>
+    loadNotificationDeletedState(),
   );
   const [revealedReason, setRevealedReason] = useState(null);
 
@@ -241,6 +267,15 @@ export default function DashboardPage() {
           setDashboardSummary(summary || null);
         } catch {
           setDashboardSummary(null);
+        }
+
+        try {
+          const notifications = await getNotificationEvents(token, 20);
+          setServerNotifications(
+            normalizeNotificationEvents(notifications?.notifications || []),
+          );
+        } catch {
+          setServerNotifications([]);
         }
 
         if (normalizedTrips[0]?.id) {
@@ -269,6 +304,7 @@ export default function DashboardPage() {
   useEffect(() => {
     function syncNotificationState() {
       setNotificationReadState(loadNotificationReadState());
+      setNotificationDeletedState(loadNotificationDeletedState());
     }
 
     window.addEventListener("focus", syncNotificationState);
@@ -285,8 +321,15 @@ export default function DashboardPage() {
   );
 
   const hasUnreadNotifications = useMemo(
-    () => getUnreadNotifications(notificationReadState).length > 0,
-    [notificationReadState],
+    () =>
+      getUnreadNotifications(
+        notificationReadState,
+        getVisibleNotifications(notificationDeletedState, [
+          ...serverNotifications,
+          ...NOTIFICATION_EVENTS,
+        ]),
+      ).length > 0,
+    [notificationDeletedState, notificationReadState, serverNotifications],
   );
 
   const normalizedTrips = useMemo(
@@ -627,6 +670,7 @@ export default function DashboardPage() {
               </button>
               <Avatar
                 name={displayName}
+                imageUrl={profileImage}
                 level={explorerRank.level}
                 progress={explorerRank.progress}
                 ariaLabel={`${displayName}, Explorer level ${explorerRank.level} — ${explorerRank.label}`}

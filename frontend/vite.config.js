@@ -18,7 +18,12 @@ export default defineConfig({
       filename: "push-sw.js",
       registerType: "autoUpdate",
       injectRegister: "auto",
-      includeAssets: ["favicon.svg", "pwa-icon.svg", "pwa-maskable.svg"],
+      includeAssets: [
+        "favicon.svg",
+        "pwa-icon.svg",
+        "pwa-maskable.svg",
+        "ano-tara-notification-icon.png",
+      ],
       manifest: {
         name: "Tara! — Ano Tara Travel Planner",
         short_name: "Tara!",
@@ -68,6 +73,10 @@ export default defineConfig({
         // so the Service Worker can still precache the full app shell for
         // genuine offline use in the provinces.
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+      },
+      devOptions: {
+        enabled: true,
+        type: "module",
       },
     }),
   ],

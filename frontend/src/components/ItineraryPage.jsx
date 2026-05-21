@@ -19,7 +19,7 @@ import {
 } from "../lib/config";
 import { apiRequest } from "../lib/apiClient";
 import { decodeJwtPayload } from "../lib/authSession";
-import { getFirebasePushToken } from "../lib/firebase";
+import { registerDeviceForRemotePush } from "../lib/pushNotifications";
 import {
   clearStoredToken,
   getStoredToken,
@@ -49,7 +49,7 @@ const PRESENCE_INTERVAL_MS = 25_000;
 const ACTIVITY_POLL_MS = 6_000;
 const DRAWER_SNAP_ORDER = ["collapsed", "half", "expanded"];
 const DRAWER_SNAP_HEIGHTS = {
-  collapsed: "clamp(132px, 18dvh, 176px)",
+  collapsed: "clamp(230px, 34dvh, 290px)",
   half: "min(58dvh, 560px)",
   expanded: "calc(100dvh - max(108px, env(safe-area-inset-top, 0px) + 92px))",
 };
@@ -321,6 +321,19 @@ export default function ItineraryPage() {
   );
 
   const tripDates = useMemo(() => getConfirmedTripDates(trip), [trip]);
+
+  const affectedWeatherStops = useMemo(() => {
+    const focusDay = smartSuggestion?.focus_day ? Number(smartSuggestion.focus_day) : null;
+    if (!smartSuggestion?.alert || !focusDay) return [];
+    return (localItinerary[focusDay] || []).filter(
+      (place) => String(place.environment_type || "").toLowerCase() === "outdoor",
+    );
+  }, [localItinerary, smartSuggestion?.alert, smartSuggestion?.focus_day]);
+
+  const weatherAlternatives = useMemo(
+    () => (Array.isArray(smartSuggestion?.indoor_alternatives) ? smartSuggestion.indoor_alternatives : []),
+    [smartSuggestion?.indoor_alternatives],
+  );
 
   const focusPlaceOnMap = useCallback((place, placeKey) => {
     const latitude = Number(place?.latitude ?? place?.lat);
@@ -620,10 +633,14 @@ export default function ItineraryPage() {
     setPushError("");
     setPushStatus("loading");
 
+    console.log("[Push Debug] Requesting itinerary push notification permission.", {
+      currentPermission: window.Notification.permission,
+    });
     const permission =
       window.Notification.permission === "granted"
         ? "granted"
         : await window.Notification.requestPermission();
+    console.log("[Push Debug] Itinerary push permission result:", permission);
     setNotificationPermission(permission);
 
     if (permission !== "granted") {
@@ -632,22 +649,17 @@ export default function ItineraryPage() {
     }
 
     try {
-      const firebaseToken = await getFirebasePushToken();
-      if (!firebaseToken) {
+      const token = getStoredToken();
+      const registration = await registerDeviceForRemotePush(token);
+      if (!registration.ok) {
         setPushStatus("error");
-        setPushError("Could not create a Firebase push token.");
+        setPushError(registration.reason || "Could not enable device push alerts.");
         return;
       }
-      const token = getStoredToken();
-      await apiRequest("/api/push-tokens", {
-        method: "POST",
-        token,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: firebaseToken, platform: "web", user_agent: navigator.userAgent }),
-      });
       setPushStatus("subscribed");
       if (smartSuggestion?.alert) maybeNotifyWeatherAlert(smartSuggestion);
     } catch (requestError) {
+      console.error("[Push Debug] Itinerary push registration failed:", requestError);
       setPushStatus("error");
       setPushError(requestError.message || "Could not enable device push alerts.");
     }
@@ -707,19 +719,13 @@ export default function ItineraryPage() {
     const controller = new AbortController();
     async function sync() {
       try {
-        const firebaseToken = await getFirebasePushToken();
-        if (!firebaseToken) return;
         const token = getStoredToken();
-        await apiRequest("/api/push-tokens", {
-          method: "POST",
-          token,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: firebaseToken, platform: "web", user_agent: navigator.userAgent }),
-          signal: controller.signal,
-        });
+        const registration = await registerDeviceForRemotePush(token);
+        if (!registration.ok) return;
         setPushStatus("subscribed");
       } catch (syncError) {
         if (syncError?.name === "AbortError") return;
+        console.error("[Push Debug] Background push-token sync failed:", syncError);
         setPushStatus((current) => (current === "subscribed" ? current : "idle"));
       }
     }
@@ -795,7 +801,7 @@ export default function ItineraryPage() {
     await updateDayPlaces(dayNumber, nextPlaces);
   };
 
-  const handleSwapPlace = async (dayNumber, index) => {
+  const handleSwapPlace = async (dayNumber, index, preferredPlaceId = null) => {
     const place = localItinerary[dayNumber]?.[index];
     if (!place?.item_id || !trip?.itineraryId || swappingItemId === place.item_id) return;
     setFeedbackError("");
@@ -806,7 +812,10 @@ export default function ItineraryPage() {
         method: "POST",
         token,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          ...(preferredPlaceId ? { preferred_place_id: preferredPlaceId } : {}),
+          prefer_indoor: Boolean(smartSuggestion?.alert),
+        }),
       });
       const replacementPlace = normalizeItineraryPlaces({
         1: [
@@ -826,6 +835,16 @@ export default function ItineraryPage() {
       const nextPlaces = (localItinerary[dayNumber] || []).slice();
       nextPlaces[index] = replacementPlace;
       updateTripState({ ...localItinerary, [dayNumber]: nextPlaces });
+      setSmartSuggestion((current) =>
+        current?.indoor_alternatives
+          ? {
+              ...current,
+              indoor_alternatives: current.indoor_alternatives.filter(
+                (candidate) => Number(candidate.id) !== Number(replacementPlace.id),
+              ),
+            }
+          : current,
+      );
       try {
         await postTripActivity(token, trip.itineraryId, "swapped_stop", {
           item_id: replacementPlace.item_id,
@@ -1180,7 +1199,7 @@ export default function ItineraryPage() {
           </button>
         </div>
 
-        <div className="itinerary-drawer__body">
+        <div className="itinerary-drawer__quick-controls">
           <div className="pill-row">
             {(Array.isArray(trip.preferences)
               ? trip.preferences
@@ -1208,7 +1227,9 @@ export default function ItineraryPage() {
             onViewAll={handleViewAllDays}
             showViewAll={sortedDays.length > 1}
           />
+        </div>
 
+        <div className="itinerary-drawer__body">
           <div className="itinerary-sidebar__alerts">
             {feedbackError ? <div className="error-banner">{feedbackError}</div> : null}
             {smartSuggestionError && !smartSuggestion ? (
@@ -1217,26 +1238,20 @@ export default function ItineraryPage() {
 
             {smartSuggestion ? (
               <div
-                className="glass-card itinerary-sidebar__suggestion"
-                style={{
-                  border: smartSuggestion.alert
-                    ? "1px solid rgba(225, 29, 72, 0.32)"
-                    : "1px solid rgba(59, 130, 246, 0.18)",
-                  background: smartSuggestion.alert
-                    ? "linear-gradient(135deg, rgba(225, 29, 72, 0.12), rgba(255, 255, 255, 0.92))"
-                    : "linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.92))",
-                }}
+                className={`glass-card itinerary-sidebar__suggestion${
+                  smartSuggestion.alert ? " itinerary-sidebar__suggestion--alert" : ""
+                }`}
               >
-                <p className="hero-chip" style={{ marginBottom: 10 }}>
+                <p className="hero-chip itinerary-sidebar__suggestion-chip">
                   <Icon name="alert" size={14} /> Smart Suggestion
                 </p>
-                <h3 className="serif" style={{ marginTop: 0, marginBottom: 8 }}>
+                <h3 className="serif itinerary-sidebar__suggestion-title">
                   {smartSuggestion.headline}
                 </h3>
-                <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+                <p className="itinerary-sidebar__suggestion-copy">
                   {smartSuggestion.message}
                 </p>
-                <p className="muted" style={{ marginTop: 0 }}>
+                <p className="itinerary-sidebar__suggestion-meta">
                   Rain chance: {smartSuggestion.precipitation_probability || 0}%
                 </p>
                 {smartSuggestion.focus_day ? (
@@ -1247,6 +1262,55 @@ export default function ItineraryPage() {
                   >
                     View Day {smartSuggestion.focus_day}
                   </button>
+                ) : null}
+                {smartSuggestion.alert && affectedWeatherStops.length > 0 ? (
+                  <div className="weather-pivot">
+                    <p className="weather-pivot__label">Affected outdoor stops</p>
+                    <div className="weather-pivot__chips">
+                      {affectedWeatherStops.slice(0, 3).map((place) => (
+                        <span key={place.item_id || place.place_id || place.name}>
+                          {place.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {smartSuggestion.alert && weatherAlternatives.length > 0 ? (
+                  <div className="weather-alternatives">
+                    <p className="weather-pivot__label">Indoor alternatives</p>
+                    {weatherAlternatives.slice(0, 4).map((candidate, candidateIndex) => {
+                      const targetStop = affectedWeatherStops[candidateIndex % affectedWeatherStops.length];
+                      const targetIndex = targetStop
+                        ? (localItinerary[Number(smartSuggestion.focus_day)] || []).findIndex(
+                            (place) => place.item_id === targetStop.item_id,
+                          )
+                        : -1;
+                      return (
+                        <article key={candidate.id} className="weather-alternative-card">
+                          <div>
+                            <strong>{candidate.name}</strong>
+                            <span>
+                              {candidate.category || "Indoor stop"} · {Number(candidate.rating || 0).toFixed(1)}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="top-action-link"
+                            disabled={!targetStop || targetIndex < 0 || swappingItemId === targetStop.item_id}
+                            onClick={() =>
+                              handleSwapPlace(
+                                Number(smartSuggestion.focus_day),
+                                targetIndex,
+                                candidate.id,
+                              )
+                            }
+                          >
+                            {targetStop ? `Replace ${targetStop.name}` : "No outdoor stop"}
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
                 ) : null}
               </div>
             ) : null}

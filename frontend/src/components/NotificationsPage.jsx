@@ -1,17 +1,26 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { NOTIFICATION_EVENTS, getUnreadNotifications } from "../data/notifications";
 import {
+  NOTIFICATION_EVENTS,
+  getUnreadNotifications,
+  getVisibleNotifications,
+  normalizeNotificationEvents,
+} from "../data/notifications";
+import { getNotificationEvents } from "../lib/tripsApi";
+import {
+  getStoredToken,
+  loadNotificationDeletedState,
   loadNotificationReadState,
+  saveNotificationDeletedState,
   saveNotificationReadState,
 } from "../lib/storage";
 import { successHaptic, tapHaptic } from "../lib/haptics";
 import BrandLogo from "./common/BrandLogo";
 import Icon from "./common/Icon";
 
-function buildAllReadState() {
-  return NOTIFICATION_EVENTS.reduce((nextState, event) => {
+function buildAllReadState(events) {
+  return events.reduce((nextState, event) => {
     nextState[event.id] = true;
     return nextState;
   }, {});
@@ -20,27 +29,76 @@ function buildAllReadState() {
 export default function NotificationsPage() {
   const navigate = useNavigate();
   const [readState, setReadState] = useState(() => loadNotificationReadState());
+  const [deletedState, setDeletedState] = useState(() =>
+    loadNotificationDeletedState(),
+  );
+  const [serverNotifications, setServerNotifications] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const allNotificationEvents = useMemo(
+    () => [...serverNotifications, ...NOTIFICATION_EVENTS],
+    [serverNotifications],
+  );
+
+  const notificationEvents = useMemo(
+    () => getVisibleNotifications(deletedState, allNotificationEvents),
+    [allNotificationEvents, deletedState],
+  );
 
   const unreadNotifications = useMemo(
-    () => getUnreadNotifications(readState),
-    [readState],
+    () => getUnreadNotifications(readState, notificationEvents),
+    [notificationEvents, readState],
   );
   const unreadCount = unreadNotifications.length;
+
+  useEffect(() => {
+    async function loadServerNotifications() {
+      const token = getStoredToken();
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const response = await getNotificationEvents(token);
+        setServerNotifications(
+          normalizeNotificationEvents(response?.notifications || []),
+        );
+      } catch (error) {
+        console.warn("Could not load backend notifications:", error);
+        setServerNotifications([]);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadServerNotifications();
+  }, []);
 
   function updateReadState(nextState) {
     setReadState(nextState);
     saveNotificationReadState(nextState);
   }
 
+  function updateDeletedState(nextState) {
+    setDeletedState(nextState);
+    saveNotificationDeletedState(nextState);
+  }
+
   function markAllAsRead() {
     if (unreadCount === 0) return;
     successHaptic();
-    updateReadState(buildAllReadState());
+    updateReadState(buildAllReadState(notificationEvents));
   }
 
   function markNotificationAsRead(notification) {
     if (readState[notification.id]) return;
     updateReadState({ ...readState, [notification.id]: true });
+  }
+
+  function deleteNotification(notification) {
+    tapHaptic();
+    updateDeletedState({ ...deletedState, [notification.id]: true });
   }
 
   function openNotification(notification) {
@@ -93,7 +151,10 @@ export default function NotificationsPage() {
         </header>
 
         <section className="notifications-feed" aria-label="System notifications">
-          {NOTIFICATION_EVENTS.map((notification) => {
+          {isLoading ? (
+            <div className="admin-notice">Loading notification center...</div>
+          ) : null}
+          {notificationEvents.map((notification) => {
             const isUnread = !readState[notification.id];
 
             return (
@@ -137,6 +198,14 @@ export default function NotificationsPage() {
                         Read
                       </span>
                     )}
+                    <button
+                      type="button"
+                      className="notification-card__text-button notification-card__delete-button"
+                      onClick={() => deleteNotification(notification)}
+                      aria-label={`Delete notification: ${notification.title}`}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
                 {isUnread ? (

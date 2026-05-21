@@ -53,6 +53,50 @@ export const NOTIFICATION_EVENTS = [
   },
 ];
 
-export function getUnreadNotifications(readState = {}) {
-  return NOTIFICATION_EVENTS.filter((event) => !readState[event.id]);
+function formatNotificationTimestamp(value) {
+  if (!value) return "Just now";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const eventDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today - eventDay) / 86400000);
+  const time = date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (diffDays === 0) return `Today, ${time}`;
+  if (diffDays === 1) return `Yesterday, ${time}`;
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function normalizeNotificationEvents(events = []) {
+  return events.map((event) => ({
+    id: event.id,
+    type: event.type || "system",
+    icon: event.icon || "sparkles",
+    title: event.title || "Ano-Tara update",
+    message: event.message || event.body || "",
+    timestamp: formatNotificationTimestamp(event.timestamp || event.created_at),
+    source: event.source || "Ano-Tara System",
+    tone: event.tone || "system",
+    actionLabel: event.actionLabel || event.action_label || "Open dashboard",
+    actionPath: event.actionPath || event.action_path || "/dashboard",
+  }));
+}
+
+export function getUnreadNotifications(readState = {}, events = NOTIFICATION_EVENTS) {
+  return events.filter((event) => !readState[event.id]);
+}
+
+export function getVisibleNotifications(deletedState = {}, events = NOTIFICATION_EVENTS) {
+  return events.filter((event) => !deletedState[event.id]);
 }

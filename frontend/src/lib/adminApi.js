@@ -168,11 +168,33 @@ export function getAdminWeatherOps(token, filters = {}) {
 }
 
 export function sendAdminNotification(token, payload) {
-  return apiRequest("/api/admin/notifications/send", {
-    token,
+  const baseURL = String(
+    import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5000",
+  ).replace(/\/+$/, "");
+
+  return fetch(`${baseURL}/api/send-notification`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(payload),
+  }).then(async (response) => {
+    const payload = response.headers
+      .get("content-type")
+      ?.toLowerCase()
+      .includes("application/json")
+      ? await response.json()
+      : null;
+
+    if (!response.ok) {
+      throw new Error(
+        payload?.error || payload?.message || "Could not send notification.",
+      );
+    }
+
+    return payload;
   });
 }
 

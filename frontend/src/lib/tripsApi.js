@@ -12,6 +12,11 @@ export function getDashboardSummary(token) {
   return apiRequest("/api/dashboard/summary", { token });
 }
 
+export function getNotificationEvents(token, limit = 30) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return apiRequest(`/api/notifications?${params.toString()}`, { token });
+}
+
 export function getDiscoverFeed(token, { tag = "all", query = "", limit = 18 } = {}) {
   const params = new URLSearchParams({
     tag,

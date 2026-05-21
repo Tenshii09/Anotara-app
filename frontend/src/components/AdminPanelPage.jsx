@@ -109,6 +109,7 @@ export default function AdminPanelPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const isSuperAdmin = profile?.role === "super_admin";
   const isAdmin = profile?.role === "admin" || isSuperAdmin;
@@ -143,6 +144,7 @@ export default function AdminPanelPage() {
   ) {
     if (!token || !isAdmin) return;
     setError("");
+    setSuccess("");
     setIsLoading(true);
 
     try {
@@ -388,10 +390,13 @@ export default function AdminPanelPage() {
     setError("");
     setIsMutating(true);
     try {
-      await action();
+      const result = await action();
       await loadAdminData(section, reloadOptions);
+      return result;
     } catch (requestError) {
+      setSuccess("");
       setError(requestError.message || "Admin action failed.");
+      throw requestError;
     } finally {
       setIsMutating(false);
     }
@@ -485,6 +490,7 @@ export default function AdminPanelPage() {
       profile={profile}
       setSidebarOpen={setSidebarOpen}
       sidebarOpen={sidebarOpen}
+      success={success}
     >
       {renderActivePage()}
       {placeForm ? (
@@ -605,6 +611,7 @@ export default function AdminPanelPage() {
           notifications={notifications}
           onSent={(action) => refreshWithMutation(action, "notifications")}
           setError={setError}
+          setSuccess={setSuccess}
           token={token}
         />
       );

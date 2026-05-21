@@ -33,9 +33,9 @@ from webapp.services.database import (
     get_user_auth_record_by_email,
     get_user_auth_record_by_id_and_email,
     get_user_profile,
+    update_user_profile,
     update_user_preferences,
     update_user_password,
-    update_user_profile_name,
 )
 
 auth_bp = Blueprint('auth', __name__)
@@ -346,16 +346,41 @@ def api_update_profile():
     """Update editable profile fields for the current user."""
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
-    username = str(data.get('username') or '').strip()
+    has_username = 'username' in data
+    username = str(data.get('username') or '').strip() if has_username else None
+    has_profile_image = 'profile_image' in data
+    profile_image = data.get('profile_image')
 
-    if not username:
+    if not has_username and not has_profile_image:
+        return jsonify({'error': 'No profile fields supplied'}), 400
+
+    if has_username and not username:
         return jsonify({'error': 'username is required'}), 400
 
-    if len(username) < 3:
+    if has_username and len(username) < 3:
         return jsonify({'error': 'username must be at least 3 characters'}), 400
 
+    if has_profile_image:
+        if profile_image is not None and not isinstance(profile_image, str):
+            return jsonify({'error': 'profile_image must be a string'}), 400
+        allowed_image_prefixes = (
+            'data:image/jpeg;',
+            'data:image/png;',
+            'data:image/webp;',
+            'data:image/gif;',
+        )
+        if profile_image and not profile_image.startswith(allowed_image_prefixes):
+            return jsonify({'error': 'profile_image must be a JPG, PNG, WebP, or GIF data URL'}), 400
+        if profile_image and len(profile_image) > 750000:
+            return jsonify({'error': 'profile_image is too large'}), 413
+
     try:
-        profile = update_user_profile_name(current_user_id, username)
+        profile = update_user_profile(
+            current_user_id,
+            username=username,
+            profile_image=profile_image,
+            profile_image_provided=has_profile_image,
+        )
     except mysql.connector.IntegrityError:
         return jsonify({'error': 'username is already taken'}), 409
 

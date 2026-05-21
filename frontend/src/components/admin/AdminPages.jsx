@@ -627,9 +627,11 @@ export function NotificationsPage({
   notifications,
   onSent,
   setError,
+  setSuccess,
   token,
 }) {
   const summary = notifications?.summary || {};
+  const [isSending, setIsSending] = useState(false);
   const [form, setForm] = useState({
     audience_type: "all",
     target_user_id: "",
@@ -643,16 +645,35 @@ export function NotificationsPage({
       setError("Notification title and body are required.");
       return;
     }
-    await onSent(async () => {
-      await sendAdminNotification(token, {
-        audience_type: form.audience_type,
-        target_user_id:
-          form.audience_type === "user" ? form.target_user_id : undefined,
-        title: form.title.trim(),
-        body: form.body.trim(),
+    setError("");
+    setSuccess("");
+    setIsSending(true);
+    try {
+      const response = await onSent(async () => {
+        return sendAdminNotification(token, {
+          audience_type: form.audience_type,
+          audience: form.audience_type,
+          target_user_id:
+            form.audience_type === "user" ? form.target_user_id : undefined,
+          title: form.title.trim(),
+          body: form.body.trim(),
+        });
       });
-      setForm({ audience_type: "all", target_user_id: "", title: "", body: "" });
-    });
+      const sentCount = Number(response?.result?.sent || 0);
+      setSuccess(
+        sentCount > 0
+          ? "Notification sent through Firebase."
+          : "Notification request completed, but Firebase reported no delivered sends.",
+      );
+      setForm({
+        audience_type: "all",
+        target_user_id: "",
+        title: "",
+        body: "",
+      });
+    } finally {
+      setIsSending(false);
+    }
   }
 
   return (
@@ -703,6 +724,7 @@ export function NotificationsPage({
           <div className="admin-form-grid">
             <Field label="Audience">
               <select
+                disabled={isMutating || isSending}
                 value={form.audience_type}
                 onChange={(event) =>
                   setForm({ ...form, audience_type: event.target.value })
@@ -715,6 +737,7 @@ export function NotificationsPage({
             {form.audience_type === "user" ? (
               <Field label="Target user ID">
                 <input
+                  disabled={isMutating || isSending}
                   value={form.target_user_id}
                   onChange={(event) =>
                     setForm({ ...form, target_user_id: event.target.value })
@@ -725,6 +748,7 @@ export function NotificationsPage({
             ) : null}
             <Field label="Title">
               <input
+                disabled={isMutating || isSending}
                 maxLength="140"
                 value={form.title}
                 onChange={(event) =>
@@ -735,6 +759,7 @@ export function NotificationsPage({
             </Field>
             <Field label="Body">
               <textarea
+                disabled={isMutating || isSending}
                 rows="3"
                 value={form.body}
                 onChange={(event) =>
@@ -744,8 +769,8 @@ export function NotificationsPage({
               />
             </Field>
           </div>
-          <button className="primary" disabled={isMutating} type="submit">
-            Send notification
+          <button className="primary" disabled={isMutating || isSending} type="submit">
+            {isMutating || isSending ? "Sending..." : "Send notification"}
           </button>
         </form>
       </article>

@@ -143,6 +143,8 @@ def ensure_user_columns():
         missing_columns.append("ADD COLUMN vibe_weights JSON NULL")
     if 'email_preferences' not in existing_columns:
         missing_columns.append("ADD COLUMN email_preferences JSON NULL")
+    if 'profile_image' not in existing_columns:
+        missing_columns.append("ADD COLUMN profile_image LONGTEXT NULL")
     if 'biometric_enabled' not in existing_columns:
         missing_columns.append("ADD COLUMN biometric_enabled BOOLEAN DEFAULT FALSE")
     if 'account_status' not in existing_columns:
@@ -269,7 +271,7 @@ def get_user_profile(user_id):
     try:
         cursor.execute(
             """
-                 SELECT id, username, email, default_budget, companion_vector,
+                 SELECT id, username, email, profile_image, default_budget, companion_vector,
                      vibe_weights, email_preferences, biometric_enabled, role, created_at,
                      terms_accepted_at, privacy_accepted_at
             FROM users
@@ -371,6 +373,41 @@ def update_user_profile_name(user_id, username):
             WHERE id = %s
             """,
             (username, int(user_id)),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+    return get_user_profile(user_id)
+
+
+def update_user_profile(user_id, *, username=None, profile_image=None, profile_image_provided=False):
+    """Update editable identity fields and return the new profile row."""
+    ensure_user_columns()
+
+    assignments = []
+    params = []
+
+    if username is not None:
+        assignments.append('username = %s')
+        params.append(username)
+
+    if profile_image_provided:
+        assignments.append('profile_image = %s')
+        params.append(profile_image or None)
+
+    if not assignments:
+        return get_user_profile(user_id)
+
+    params.append(int(user_id))
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            f"UPDATE users SET {', '.join(assignments)} WHERE id = %s",
+            tuple(params),
         )
         db.commit()
     finally:
@@ -1970,7 +2007,7 @@ def _haversine(lat1, lon1, lat2, lon2):
     return radius * 2 * math.asin(math.sqrt(a))
 
 
-def swap_itinerary_item(itinerary_id, item_id):
+def swap_itinerary_item(itinerary_id, item_id, preferred_place_id=None, prefer_indoor=False):
     """Replace a place inside an itinerary with the next-best nearby candidate."""
     context = get_itinerary_item_context(itinerary_id, item_id)
     if not context:
@@ -1992,6 +2029,62 @@ def swap_itinerary_item(itinerary_id, item_id):
             (itinerary_id, item_id),
         )
         used_place_ids = {row['place_id'] for row in cursor.fetchall()}
+
+        if preferred_place_id is not None:
+            preferred_place_id = int(preferred_place_id)
+            if preferred_place_id in used_place_ids or preferred_place_id == context['place_id']:
+                return None, 'That replacement is already in this itinerary.'
+
+            cursor.execute(
+                """
+                SELECT id, name, category, latitude, longitude, rating, city, tags, environment_type, physical_intensity
+                FROM places
+                WHERE id = %s AND city = %s
+                """,
+                (preferred_place_id, context['city']),
+            )
+            preferred_candidate = cursor.fetchone()
+            if not preferred_candidate:
+                return None, 'Selected replacement is not available for this itinerary.'
+
+            companion_type = str(context.get('companion_type') or 'Solo').lower()
+            if (
+                companion_type in ['family_kids', 'seniors']
+                and str(preferred_candidate.get('physical_intensity') or '').lower() == 'high'
+            ):
+                return None, 'Selected replacement is too intense for this trip profile.'
+
+            cursor.execute(
+                """
+                UPDATE itinerary_items
+                SET place_id = %s, swap_history = COALESCE(swap_history, 0) + 1
+                WHERE id = %s AND itinerary_id = %s
+                """,
+                (preferred_candidate['id'], item_id, itinerary_id),
+            )
+            db.commit()
+
+            updated_item = get_itinerary_item_context(itinerary_id, item_id)
+            return {
+                'item_id': updated_item['item_id'],
+                'day_number': updated_item['day_number'],
+                'sequence_order': updated_item['sequence_order'],
+                'estimated_duration': updated_item['estimated_duration'],
+                'is_locked': bool(updated_item['is_locked']),
+                'swap_history': updated_item['swap_history'],
+                'place': {
+                    'id': updated_item['place_id'],
+                    'name': updated_item['place_name'],
+                    'category': updated_item['place_category'],
+                    'latitude': updated_item['latitude'],
+                    'longitude': updated_item['longitude'],
+                    'rating': updated_item['rating'],
+                    'city': updated_item['city'],
+                    'tags': updated_item['tags'],
+                    'environment_type': updated_item['environment_type'],
+                    'physical_intensity': updated_item['physical_intensity'],
+                },
+            }, None
 
         cursor.execute(
             """
@@ -2028,9 +2121,12 @@ def swap_itinerary_item(itinerary_id, item_id):
             if distance_km > 3.0:
                 continue
 
+            candidate_env = str(candidate.get('environment_type') or '').lower()
             score = float(candidate.get('rating') or 3.5) * 2.0
-            if str(candidate.get('environment_type') or '').lower() == current_env:
+            if candidate_env == current_env:
                 score += 1.5
+            if prefer_indoor and candidate_env in ['indoor', 'mixed']:
+                score += 4.0
             if str(candidate.get('category') or '').lower() == current_category:
                 score += 1.0
             score -= distance_km
@@ -2916,6 +3012,57 @@ def get_admin_notification_overview():
                 'skipped_notifications': int(summary.get('skipped_notifications') or 0),
             },
         })
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_user_notification_events(user_id, limit=30):
+    """Return admin notification records visible in the user notification center."""
+    ensure_admin_tables()
+    safe_limit = max(1, min(int(limit or 30), 100))
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                audience_type,
+                target_user_id,
+                title,
+                body,
+                result,
+                created_at
+            FROM admin_notification_log
+            WHERE audience_type = 'all'
+               OR (audience_type = 'user' AND target_user_id = %s)
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+            """,
+            (int(user_id), safe_limit),
+        )
+        rows = cursor.fetchall()
+        events = []
+        for row in rows:
+            result = _coerce_json_value(row.get('result'), {})
+            events.append({
+                'id': f"admin-{row['id']}",
+                'type': 'admin',
+                'icon': 'sparkles',
+                'title': row.get('title') or 'Ano-Tara update',
+                'message': row.get('body') or '',
+                'timestamp': row.get('created_at'),
+                'source': 'Ano-Tara System',
+                'tone': 'system',
+                'action_label': 'Open dashboard',
+                'action_path': '/dashboard',
+                'audience_type': row.get('audience_type'),
+                'sent': int((result or {}).get('sent') or 0),
+                'failed': int((result or {}).get('failed') or 0),
+            })
+        return _json_safe({'notifications': events})
     finally:
         cursor.close()
         db.close()

@@ -656,6 +656,7 @@ CREATE TABLE `users` (
   `vibe_weights` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`vibe_weights`)),
   `biometric_enabled` tinyint(1) DEFAULT 0,
   `email_preferences` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`email_preferences`)),
+  `profile_image` longtext DEFAULT NULL,
   `legal_consent` tinyint(1) NOT NULL DEFAULT 0,
   `terms_accepted_at` datetime DEFAULT NULL,
   `privacy_accepted_at` datetime DEFAULT NULL
@@ -668,7 +669,8 @@ CREATE TABLE `users` (
 INSERT INTO `users` (`id`, `username`, `email`, `password`, `role`, `account_status`, `suspended_at`, `suspended_reason`, `created_at`, `default_budget`, `companion_vector`, `vibe_weights`, `biometric_enabled`, `email_preferences`) VALUES
 (1, 'geh', 'admin@library.com', '$2b$12$0p7Wbr/.W/6W2kZt5KEaNeauv31tbz51U1W/phYZNvkFHCpeOTvkK', 'admin', 'active', NULL, NULL, '2026-05-19 23:40:44', 'comfort', NULL, NULL, 0, NULL),
 (5, 'Paul', '0323-3883@lspu.edu.ph', '$2b$12$crNCPMpNpCi4zJNrTqZe/OHC21rbOR2St9lE2ItpPQY6ZivnID6VK', 'user', 'active', NULL, NULL, '2026-05-21 00:04:26', 'comfort', NULL, NULL, 1, '{\"security\": true, \"collaboration\": true, \"itinerary_updates\": true, \"weather_alerts\": true, \"messages\": true, \"marketing\": true}'),
-(7, 'pao', 'paolomamugay5@gmail.com', '$2b$12$t5mCWiBNd512CtasDtxvI.b2t/UVH37FccqfGL6shIzEtLhVblkmC', 'user', 'active', NULL, NULL, '2026-05-21 00:07:30', 'comfort', NULL, NULL, 0, NULL);
+(7, 'pao', 'paolomamugay5@gmail.com', '$2b$12$t5mCWiBNd512CtasDtxvI.b2t/UVH37FccqfGL6shIzEtLhVblkmC', 'user', 'active', NULL, NULL, '2026-05-21 00:07:30', 'comfort', NULL, NULL, 0, NULL),
+(9, 'MJFidelino', 'mjbanzuela159@gmail.com', '$2b$12$9PynQqMh4saWJCBJPR3sFO0Rjg/qBqmlPfk/edU90j0MR91XOD3Ru', 'super_admin', 'active', NULL, NULL, '2026-05-22 07:00:00', 'comfort', NULL, NULL, 0, NULL);
 
 -- --------------------------------------------------------
 
@@ -1062,7 +1064,7 @@ ALTER TABLE `trip_feedback`
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
 
 --
 -- AUTO_INCREMENT for table `vote_sessions`

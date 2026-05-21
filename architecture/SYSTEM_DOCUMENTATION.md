@@ -32,8 +32,8 @@ Core Product Features
   - POST /api/password-reset/request (send a 30-minute signed reset link by email)
   - GET /api/password-reset/validate/<token> (validate reset-token freshness)
   - POST /api/password-reset/confirm (bcrypt-hash and persist a new password)
-  - GET /api/profile (fetch current user profile, including algorithmic preferences and member-since timestamp)
-  - PATCH /api/profile (update username)
+  - GET /api/profile (fetch current user profile, including profile image, algorithmic preferences, and member-since timestamp)
+  - PATCH /api/profile (update username and profile image data URL)
   - PATCH /api/profile/preferences (persist default budget, companion vector, vibe weights, email preferences, biometric toggle)
   - DELETE /api/account (multi-stage destructive delete protocol requiring the phrase "delete my account")
 
@@ -119,6 +119,7 @@ Core Product Features
 
 - /itinerary renders a granular day selector, a time-blocked vertical timeline, and the Mapbox view in sync.
 - Timeline cards support map focus, day reordering, stop lock/unlock, stop swap, "best pick" / "not ideal" feedback, and start-time adjustment through a bottom sheet.
+- Weather alerts on /itinerary display affected outdoor stops plus indoor alternatives returned by GET /api/itineraries/<id>/smart-suggestion. Users can apply a suggested alternative directly; POST /api/itineraries/<id>/items/<item_id>/swap accepts `preferred_place_id` for an explicit replacement and `prefer_indoor` to bias generic swaps during weather disruptions.
 - Travel-time blocks are computed in frontend/src/lib/timeBlocks.js and reused by both the timeline and PDF export.
 - Interactive Memory Log allows collaborators to attach note/photo memories to saved itinerary items.
 - Apex Hotel Recommendation Engine returns a cached hotel/basecamp suggestion per day near the final stop, with refresh support and booking search link.
@@ -128,9 +129,10 @@ Core Product Features
 11. Device Push Notifications
 
 - Firebase Cloud Messaging sends weather alerts to registered devices.
-- Frontend registers the FCM token after permission.
-- Backend stores tokens and dispatches alerts. If Firebase credentials are missing, invalid, or point to a non-existent local service-account file, push delivery is skipped with a structured reason instead of crashing the admin notification endpoint.
-- Profile includes a light-mode-friendly "Test Push Notification" settings-card action with a bell icon for panel/demo use. It checks browser notification support, prompts for permission when needed, creates and registers the Firebase token with `/api/push-tokens` when available, then posts an authentic Ano Tara payload to the active service worker for immediate local display with the app icon.
+- Frontend registers the FCM token after permission and asks the backend to enroll it in the `all_users` Firebase topic.
+- Backend stores tokens, subscribes new web tokens to the `all_users` topic through Firebase Admin, and dispatches alerts. If Firebase credentials are missing, invalid, or point to a non-existent local service-account file, push delivery is skipped with a structured reason instead of crashing the admin notification endpoint.
+- The in-app Notification Center calls GET `/api/notifications`, which returns visible admin broadcasts, targeted admin sends, and successful user test-push sends from `admin_notification_log`, then prepends them above the local seeded notification examples.
+- Profile includes a light-mode-friendly "Test Push Notification" settings-card action with a bell icon for panel/demo use. It checks browser notification support, prompts for permission when needed, creates and registers the Firebase token with `/api/push-tokens` when available, subscribes that token server-side to `all_users`, sends an authentic Ano Tara payload through Firebase, and stores successful test sends as targeted Notification Center events.
 - The local test payload uses the "Ano Tara System Alert" title, "Test successful! Your push notifications are working perfectly." body copy, and the app PWA icon/badge assets so the demo notification looks like a real product alert.
 
 12. Dashboard / Home Experience (Aero-Glass)
@@ -160,7 +162,7 @@ Core Product Features
   - GET /api/admin/itineraries returns paginated searchable saved-trip rows for support inspection.
   - GET /api/admin/itineraries/:id returns owner metadata, ordered itinerary stops, and feedback labels.
   - GET /api/admin/notifications returns push-token coverage, delivery health, and recent admin notification sends for read-only monitoring.
-  - POST /api/admin/notifications/send sends targeted or all-user operational push notifications through FCM when credentials and user tokens exist.
+  - POST /api/send-notification and POST /api/admin/notifications/send send operational push notifications through FCM; all-user sends target the Firebase `all_users` topic, while specific-user sends still use stored device tokens.
   - GET /api/admin/weather returns paginated weather-alert inventory across itineraries with owner and trip context.
   - GET /api/admin/settings returns editable operational feature flags.
   - PATCH /api/admin/settings/:key is super-admin-only and updates one setting.
@@ -184,8 +186,8 @@ Core Product Features
 
 14. Profile Tab (Digital Twin Command Center)
 
-- Identity header: Explorer ring avatar, dynamic level label, member-since timestamp, email.
-- Inline editable display name (PATCH /api/profile).
+- Identity header: editable Explorer ring avatar, dynamic level label, member-since timestamp, email.
+- Inline editable display name and profile picture controls (PATCH /api/profile).
 - Algorithmic Preference Tuning Matrix:
   - Default Budget Tier Lock (Backpacker / Comfort / Luxury) — persists via /profile/preferences.
   - Companion Persona Vector — multi-select chips (Solo, Couple, Family/Kids, Friends, Seniors, Corporate).
@@ -286,7 +288,8 @@ Backend Layer
   - PATCH /api/itineraries/items/<item_id>/lock
   - GET /api/itineraries/<id>/smart-suggestion
   - GET /api/itineraries/<id>/weather-alerts
-  - POST / DELETE /api/push-tokens
+  - POST / DELETE /api/push-tokens (POST stores the FCM token and subscribes it to `all_users`)
+  - GET /api/notifications (user-visible admin notification center records)
   - GET /api/itineraries / GET /api/itineraries/<id>
   - DELETE /api/itineraries/<id> (new — used by My Trips quick action)
   - POST /api/itineraries/<id>/duplicate (new — clones a trip into a Draft for the user)
@@ -318,6 +321,7 @@ Backend Layer
   - GET /api/admin/itineraries
   - GET /api/admin/itineraries/<id>
   - GET /api/admin/notifications
+  - POST /api/send-notification
   - POST /api/admin/notifications/send
   - GET /api/admin/email
   - GET /api/admin/weather
@@ -335,7 +339,8 @@ Backend Layer
 - webapp/services/email_service.py
   - queue_email(), send_email(), process_queue(), process_webhook_payload(), and suppression helpers for transactional delivery
 - webapp/services/database.py adds:
-  - ensure_user_preference_columns() — defensively adds default_budget, companion_vector, vibe_weights, email_preferences, biometric_enabled, created_at usage to users.
+  - ensure_user_preference_columns() — defensively adds default_budget, companion_vector, vibe_weights, email_preferences, profile_image, biometric_enabled, created_at usage to users.
+  - update_user_profile(user_id, …)
   - update_user_preferences(user_id, …)
   - delete_user_account(user_id)
   - delete_itinerary_for_user(user_id, itinerary_id)
@@ -352,7 +357,7 @@ Backend Layer
 Data Layer
 
 - MySQL schema:
-  - users (now: default_budget, companion_vector, vibe_weights, email_preferences, biometric_enabled, role, account_status, suspended_at, suspended_reason, legal_consent, terms_accepted_at, privacy_accepted_at)
+  - users (now: default_budget, companion_vector, vibe_weights, email_preferences, profile_image, biometric_enabled, role, account_status, suspended_at, suspended_reason, legal_consent, terms_accepted_at, privacy_accepted_at)
   - places (now: content status, curation notes, source, updated_at, updated_by), itineraries (with trip_start_date), itinerary_items, trip_feedback, weather_alerts, push_tokens
   - admin_audit_log, admin_backup_log, ml_training_runs, admin_settings, and admin_notification_log
   - email_queue, email_logs, and email_suppression back transactional delivery, auditing, and suppression
@@ -402,7 +407,7 @@ Itinerary Collaboration:
 
 Profile Preferences:
 
-1. Mounting fetches /api/profile (now returns default_budget, companion_vector, vibe_weights, biometric_enabled, member_since).
+1. Mounting fetches /api/profile (now returns profile_image, default_budget, companion_vector, vibe_weights, biometric_enabled, member_since).
 2. Tuning controls debounce-PATCH /api/profile/preferences so the ML reranker reflects new weights instantly, including email preference categories.
 
 Appearance:
@@ -430,7 +435,7 @@ Admin Operations:
 Database Schema Highlights
 
 - itineraries has trip_start_date for server-backed countdown / progress timelines and lifecycle segmentation.
-- users has default_budget, companion_vector (JSON), vibe_weights (JSON), biometric_enabled, role, and admin-controlled account_status.
+- users has profile_image, default_budget, companion_vector (JSON), vibe_weights (JSON), biometric_enabled, role, and admin-controlled account_status.
 - places has admin curation metadata for publication workflow and recommendation catalog management.
 - admin_audit_log stores privileged changes; ml_training_runs stores retraining status and model metrics.
 - admin_settings stores operations feature flags; admin_notification_log stores admin-triggered notification delivery attempts.
@@ -446,6 +451,7 @@ Database Schema Highlights
 Recent Changelog
 
 - Added transactional email notifications with queueing, provider adapters, suppression handling, webhook processing, and template rendering.
+- Added editable profile pictures on the Profile tab with client-side image selection, `/api/profile` persistence, and Dashboard avatar reuse.
 - Added SendGrid-backed transactional delivery with verified sender requirements, webhook event tracking, and queue/log tables.
 - Added The Flock social layer: friends, pending requests, itinerary collaborators, presence heartbeats, and activity polling.
 - Added Tara Na! pre-generation voting rooms with join codes, live polling, per-question votes, host step advancement, and resolved wizard payloads.
