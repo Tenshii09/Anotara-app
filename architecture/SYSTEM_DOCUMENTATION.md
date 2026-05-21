@@ -25,6 +25,7 @@ Core Product Features
 - The React API client refreshes access tokens before expiry, retries once after an auth failure, and emits a clean session-expired redirect/toast when renewal is no longer possible.
 - Users have a role column (`user` by default, `admin` for privileged accounts). Login responses include the role and JWTs carry the role as an additional claim.
 - Local admin access can be seeded with `seed_admin_user.py`, which hashes the runtime `ANOTARA_ADMIN_PASSWORD` value before inserting or promoting `juandelacruz@gmail.com`.
+- The dashboard bell opens `/notifications`, a dedicated mobile-first Notification Center for user-facing system events such as trip invitations, itinerary exports, weather alerts, and offline/PWA updates. Until a backend notification inbox exists, seeded frontend events and read/unread state are stored locally under `anotara_notification_read_state`; the dashboard bell red dot reflects unread notification state.
 - Profile management endpoints:
   - POST /api/refresh (exchange HttpOnly refresh cookie for a new access token)
   - POST /api/logout (clear JWT cookies)

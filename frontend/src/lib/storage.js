@@ -1,5 +1,6 @@
 import {
   DISCOVER_RECENT_SEARCHES_KEY,
+  NOTIFICATION_READ_STATE_KEY,
   PROFILE_STORAGE_KEY,
   TOKEN_STORAGE_KEY,
   TRIP_STORAGE_KEY,
@@ -128,4 +129,15 @@ export function clearDiscoverRecentSearches() {
     return;
   }
   window.localStorage.removeItem(DISCOVER_RECENT_SEARCHES_KEY);
+}
+
+export function loadNotificationReadState() {
+  const readState = readJSON(NOTIFICATION_READ_STATE_KEY, {});
+  return readState && typeof readState === "object" && !Array.isArray(readState)
+    ? readState
+    : {};
+}
+
+export function saveNotificationReadState(readState) {
+  writeJSON(NOTIFICATION_READ_STATE_KEY, readState || {});
 }

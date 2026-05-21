@@ -13,6 +13,7 @@ import {
 } from "../lib/storage";
 import { tapHaptic, successHaptic } from "../lib/haptics";
 import BottomSheet from "./common/BottomSheet";
+import Icon from "./common/Icon";
 import PageSkeleton from "./common/PageSkeleton";
 import SearchOverlay from "./common/SearchOverlay";
 
@@ -38,6 +39,26 @@ const WEATHER_FILTERS = [
   { id: "any", label: "Any weather" },
   { id: "sunny", label: "☀️ Sunny" },
   { id: "rainy", label: "🌧️ Rainy-day proof" },
+];
+
+const BUDGET_FILTERS = [
+  { id: "low", label: "Backpacker", description: "Hostels, commute-friendly routes, and budget eats." },
+  { id: "comfort", label: "Comfort", description: "Balanced stays, private transfers when helpful, relaxed costs." },
+  { id: "high", label: "Luxury", description: "Premium stays, curated dining, and private experiences." },
+];
+
+const PACING_FILTERS = [
+  { id: "Relaxed", label: "Relaxed", description: "Fewer stops with space for coffee breaks and slow mornings." },
+  { id: "Moderate", label: "Moderate", description: "A balanced daily rhythm with room for spontaneous detours." },
+  { id: "Packed", label: "Packed", description: "Maximize every day with fuller routes and tighter timing." },
+];
+
+const COMPANION_FILTERS = [
+  { id: "Solo", label: "Solo", description: "Flexible routes and easy transit decisions." },
+  { id: "Couple", label: "Couple", description: "Scenic moments, dining, and relaxed pacing." },
+  { id: "Family", label: "Family", description: "Kid-friendly timing, safer activities, and shorter hops." },
+  { id: "Friends", label: "Friends", description: "Group-friendly food, nightlife, and shared activities." },
+  { id: "Seniors", label: "Seniors", description: "Accessible stops with extra rest buffers." },
 ];
 
 // Lightweight grouping for the Philippine archipelago.  Used both as a filter
@@ -99,8 +120,12 @@ export default function DiscoverPage() {
   const [regionId, setRegionId] = useState("all");
   const [vibeId, setVibeId] = useState("all");
   const [weatherId, setWeatherId] = useState("any");
+  const [budget, setBudget] = useState("comfort");
+  const [pacingStyle, setPacingStyle] = useState("Moderate");
+  const [companionType, setCompanionType] = useState("Solo");
   const [view, setView] = useState("thematic");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [anchorPlace, setAnchorPlace] = useState(null);
   const [recentSearches, setRecentSearches] = useState(() => loadDiscoverRecentSearches());
 
@@ -177,15 +202,20 @@ export default function DiscoverPage() {
       destination: cleaned,
       numDays: 3,
       preferences: vibeId === "all" ? [] : [vibeId === "nightlife" ? "nightlife" : vibeId],
-      budget: "comfort",
-      pacingStyle: "Moderate",
-      companionType: "Solo",
+      budget,
+      pacingStyle,
+      companionType,
       transportMode: "Public",
       accommodation: "",
     });
     setAnchorPlace(null);
     setSearchOpen(false);
     navigate("/generate");
+  }
+
+  function selectFilter(setter, value) {
+    tapHaptic();
+    setter(value);
   }
 
   function handleSearchSubmit(rawValue) {
@@ -275,38 +305,56 @@ export default function DiscoverPage() {
             <span>Search any Philippine destination</span>
           </button>
 
-          <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-            <div className="dashboard-moods" role="tablist" aria-label="Region filter">
+          <div className="discover-filter-panel">
+            <button
+              type="button"
+              className="discover-filter-trigger"
+              onClick={() => {
+                tapHaptic();
+                setFilterSheetOpen(true);
+              }}
+              aria-label="Open planning filters"
+            >
+              <span className="discover-filter-trigger__icon">
+                <Icon name="settings" size={16} />
+              </span>
+              <span>Filters</span>
+              <span className="discover-filter-trigger__meta">
+                {budget === "low" ? "Backpacker" : budget === "high" ? "Luxury" : "Comfort"} · {pacingStyle} · {companionType}
+              </span>
+            </button>
+
+            <div className="dashboard-moods discover-chip-scroll" role="tablist" aria-label="Region filter">
               {REGION_FILTERS.map((option) => (
                 <button
                   key={option.id}
                   type="button"
                   className={`badge-pill dashboard-mood-pill${regionId === option.id ? " is-active" : ""}`}
-                  onClick={() => setRegionId(option.id)}
+                  onClick={() => selectFilter(setRegionId, option.id)}
                 >
                   {option.label}
                 </button>
               ))}
             </div>
-            <div className="dashboard-moods" role="tablist" aria-label="Vibe filter">
+            <div className="dashboard-moods discover-chip-scroll" role="tablist" aria-label="Vibe filter">
               {VIBE_FILTERS.map((option) => (
                 <button
                   key={option.id}
                   type="button"
                   className={`badge-pill dashboard-mood-pill${vibeId === option.id ? " is-active" : ""}`}
-                  onClick={() => setVibeId(option.id)}
+                  onClick={() => selectFilter(setVibeId, option.id)}
                 >
                   {option.label}
                 </button>
               ))}
             </div>
-            <div className="dashboard-moods" role="tablist" aria-label="Weather filter">
+            <div className="dashboard-moods discover-chip-scroll" role="tablist" aria-label="Weather filter">
               {WEATHER_FILTERS.map((option) => (
                 <button
                   key={option.id}
                   type="button"
                   className={`badge-pill dashboard-mood-pill${weatherId === option.id ? " is-active" : ""}`}
-                  onClick={() => setWeatherId(option.id)}
+                  onClick={() => selectFilter(setWeatherId, option.id)}
                 >
                   {option.label}
                 </button>
@@ -451,6 +499,120 @@ export default function DiscoverPage() {
             </p>
           </div>
         ) : null}
+      </BottomSheet>
+
+      <BottomSheet
+        open={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+        title="Filters"
+        size="md"
+        ariaLabel="Planning filters"
+        footer={
+          <>
+            <button
+              type="button"
+              className="top-action-link discover-filter-reset"
+              onClick={() => {
+                tapHaptic();
+                setBudget("comfort");
+                setPacingStyle("Moderate");
+                setCompanionType("Solo");
+              }}
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              className="btn-luxury discover-filter-apply"
+              onClick={() => {
+                successHaptic();
+                setFilterSheetOpen(false);
+              }}
+            >
+              Apply filters
+            </button>
+          </>
+        }
+      >
+        <div className="discover-filter-sheet">
+          <section className="discover-filter-section">
+            <div className="discover-filter-section__head">
+              <span className="discover-filter-section__icon">
+                <Icon name="wallet" size={18} />
+              </span>
+              <div>
+                <h3>Budget</h3>
+                <p>Choose the spending tier for trips started from Discover.</p>
+              </div>
+            </div>
+            <div className="discover-filter-grid">
+              {BUDGET_FILTERS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`discover-filter-option${budget === option.id ? " is-selected" : ""}`}
+                  onClick={() => selectFilter(setBudget, option.id)}
+                  aria-pressed={budget === option.id}
+                >
+                  <span>{option.label}</span>
+                  <small>{option.description}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="discover-filter-section">
+            <div className="discover-filter-section__head">
+              <span className="discover-filter-section__icon">
+                <Icon name="walking" size={18} />
+              </span>
+              <div>
+                <h3>Pacing</h3>
+                <p>Set how full each day should feel.</p>
+              </div>
+            </div>
+            <div className="discover-filter-grid">
+              {PACING_FILTERS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`discover-filter-option${pacingStyle === option.id ? " is-selected" : ""}`}
+                  onClick={() => selectFilter(setPacingStyle, option.id)}
+                  aria-pressed={pacingStyle === option.id}
+                >
+                  <span>{option.label}</span>
+                  <small>{option.description}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="discover-filter-section">
+            <div className="discover-filter-section__head">
+              <span className="discover-filter-section__icon">
+                <Icon name="users" size={18} />
+              </span>
+              <div>
+                <h3>Companion Type</h3>
+                <p>Tailor recommendations for who is coming with you.</p>
+              </div>
+            </div>
+            <div className="discover-filter-grid discover-filter-grid--companions">
+              {COMPANION_FILTERS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`discover-filter-option${companionType === option.id ? " is-selected" : ""}`}
+                  onClick={() => selectFilter(setCompanionType, option.id)}
+                  aria-pressed={companionType === option.id}
+                >
+                  <span>{option.label}</span>
+                  <small>{option.description}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
       </BottomSheet>
 
       <SearchOverlay

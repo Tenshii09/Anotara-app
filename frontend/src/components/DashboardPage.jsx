@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { PH_DESTINATIONS } from "../data/phDestinations";
+import { getUnreadNotifications } from "../data/notifications";
 import { PROFILE_STORAGE_KEY } from "../lib/config";
 import {
   getDashboardSummary,
@@ -12,6 +13,7 @@ import {
 import {
   clearStoredToken,
   getStoredToken,
+  loadNotificationReadState,
   loadDiscoverRecentSearches,
   saveDiscoverSearch,
   clearDiscoverRecentSearches,
@@ -213,6 +215,9 @@ export default function DashboardPage() {
   const [displayName] = useState(() => getDisplayName());
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentSearches, setRecentSearches] = useState(() => loadDiscoverRecentSearches());
+  const [notificationReadState, setNotificationReadState] = useState(() =>
+    loadNotificationReadState(),
+  );
   const [revealedReason, setRevealedReason] = useState(null);
 
   useEffect(() => {
@@ -261,9 +266,27 @@ export default function DashboardPage() {
     loadDashboardData();
   }, [navigate]);
 
+  useEffect(() => {
+    function syncNotificationState() {
+      setNotificationReadState(loadNotificationReadState());
+    }
+
+    window.addEventListener("focus", syncNotificationState);
+    window.addEventListener("storage", syncNotificationState);
+    return () => {
+      window.removeEventListener("focus", syncNotificationState);
+      window.removeEventListener("storage", syncNotificationState);
+    };
+  }, []);
+
   const selectedMood = useMemo(
     () => moodFilters.find((item) => item.id === selectedMoodId) || moodFilters[0],
     [selectedMoodId],
+  );
+
+  const hasUnreadNotifications = useMemo(
+    () => getUnreadNotifications(notificationReadState).length > 0,
+    [notificationReadState],
   );
 
   const normalizedTrips = useMemo(
@@ -603,11 +626,11 @@ export default function DashboardPage() {
               aria-label="Open notifications"
               onClick={() => {
                 tapHaptic();
-                navigate("/my-trips");
+                navigate("/notifications");
               }}
             >
               <Icon name="bell" size={20} tone="accent" />
-              {(smartSuggestion?.alert || (typeof navigator !== "undefined" && !navigator.onLine)) && (
+              {hasUnreadNotifications && (
                 <span className="dashboard-bell-dot" />
               )}
             </button>

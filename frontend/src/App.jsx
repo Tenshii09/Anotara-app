@@ -26,6 +26,7 @@ import "./App.css";
 
 const DashboardPage = lazy(() => import("./components/DashboardPage"));
 const DiscoverPage = lazy(() => import("./components/DiscoverPage"));
+const NotificationsPage = lazy(() => import("./components/NotificationsPage"));
 const ProfilePage = lazy(() => import("./components/ProfilePage"));
 const MyTripsPage = lazy(() => import("./components/MyTripsPage"));
 const ItineraryPage = lazy(() => import("./components/ItineraryPage"));
@@ -194,6 +195,7 @@ function AppRouteFrame() {
             <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
 
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/my-trips" element={<MyTripsPage />} />
             <Route path="/itinerary" element={<ItineraryPage />} />
             <Route path="/itinerary/:itineraryId" element={<ItineraryPage />} />

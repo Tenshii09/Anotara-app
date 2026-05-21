@@ -43,3 +43,4 @@ export const TRIP_STORAGE_KEY = "anotara_trip";
 export const WIZARD_STORAGE_KEY = "anotara_wizard";
 export const PROFILE_STORAGE_KEY = "anotara_user_profile";
 export const DISCOVER_RECENT_SEARCHES_KEY = "anotara_discover_recent_searches";
+export const NOTIFICATION_READ_STATE_KEY = "anotara_notification_read_state";
