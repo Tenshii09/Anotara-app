@@ -67,7 +67,7 @@ export default function NotificationsPage() {
             >
               <Icon name="arrowLeft" size={18} />
             </button>
-            <BrandLogo size={32} />
+            <BrandLogo size={52} />
             <span className="badge-pill notifications-count-pill">
               {unreadCount > 0 ? `${unreadCount} unread` : "All read"}
             </span>

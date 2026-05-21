@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import requests
 from flask import current_app
@@ -23,16 +24,31 @@ def _load_service_account_credentials():
     scopes = ['https://www.googleapis.com/auth/firebase.messaging']
 
     if service_account_json:
-        return service_account.Credentials.from_service_account_info(
-            json.loads(service_account_json),
-            scopes=scopes,
-        )
+        try:
+            return service_account.Credentials.from_service_account_info(
+                json.loads(service_account_json),
+                scopes=scopes,
+            )
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            current_app.logger.warning('Invalid Firebase service account JSON: %s', exc)
+            return None
 
     if service_account_path:
-        return service_account.Credentials.from_service_account_file(
-            service_account_path,
-            scopes=scopes,
-        )
+        if not os.path.exists(service_account_path):
+            current_app.logger.warning(
+                'Firebase service account file does not exist: %s',
+                service_account_path,
+            )
+            return None
+
+        try:
+            return service_account.Credentials.from_service_account_file(
+                service_account_path,
+                scopes=scopes,
+            )
+        except (OSError, ValueError) as exc:
+            current_app.logger.warning('Unable to load Firebase service account file: %s', exc)
+            return None
 
     return None
 

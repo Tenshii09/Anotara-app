@@ -98,7 +98,7 @@ function buildDocumentHtml(trip, options) {
   <html lang="en">
     <head>
       <meta charset="utf-8" />
-      <title>Anotara — ${escapeHtml(trip.destination || "Itinerary")}</title>
+      <title>Ano-Tara! — ${escapeHtml(trip.destination || "Itinerary")}</title>
       <style>
         @page { size: A4; margin: 18mm 16mm; }
         * { box-sizing: border-box; }
@@ -241,7 +241,7 @@ function buildDocumentHtml(trip, options) {
     </head>
     <body>
       <section class="pdf-cover">
-        <p class="pdf-kicker">Ano Tara — Souvenir Itinerary</p>
+        <p class="pdf-kicker">Ano-Tara! — Souvenir Itinerary</p>
         <h1>${escapeHtml(trip.destination || "Your journey")}</h1>
         <div class="pdf-meta-row">
           <span><strong>${escapeHtml(String(trip.numDays || trip.num_days || days.length || 1))}</strong> days</span>
@@ -253,7 +253,7 @@ function buildDocumentHtml(trip, options) {
       </section>
       ${sectionsHtml}
       <footer class="pdf-footer">
-        Printed from Ano Tara — your Philippine travel companion. anotara.app
+        Printed from Ano-Tara! — your Philippine travel companion. anotara.app
       </footer>
     </body>
   </html>`;
@@ -279,7 +279,7 @@ export function exportItineraryToPdf(trip, options = {}) {
 
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
-  iframe.setAttribute("title", "Anotara itinerary export");
+  iframe.setAttribute("title", "Ano-Tara! itinerary export");
   iframe.style.position = "fixed";
   iframe.style.right = "0";
   iframe.style.bottom = "0";

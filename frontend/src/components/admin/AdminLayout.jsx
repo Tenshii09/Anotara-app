@@ -68,7 +68,7 @@ export default function AdminLayout({
           </button>
         </div>
         <div>
-          <p className="eyebrow">Ano Tara Admin</p>
+          <p className="eyebrow">Ano-Tara! Admin</p>
           <h1>Operations Console</h1>
           <p className="muted">
             Secure command center for content operations, account management,

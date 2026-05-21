@@ -12,7 +12,7 @@ const steps = [
   {
     number: "02",
     title: "AI Crafts the Route",
-    text: "Ano Tara ranks places, balances travel time, and builds a practical day-by-day path.",
+    text: "Ano-Tara! ranks places, balances travel time, and builds a practical day-by-day path.",
   },
   {
     number: "03",
@@ -25,7 +25,7 @@ const features = [
   {
     title: "Offline Ready",
     label: "PWA",
-    text: "Install Ano Tara and keep essentials available when the island signal gets spotty.",
+    text: "Install Ano-Tara! and keep essentials available when the island signal gets spotty.",
     className: "landing-bento-card--wide",
   },
   {
@@ -93,7 +93,7 @@ export default function LandingPage() {
 
   const handleInstall = async () => {
     if (!installPrompt) {
-      setInstallMessage("Use your browser menu to install Ano Tara.");
+      setInstallMessage("Use your browser menu to install Ano-Tara!");
       return;
     }
 
@@ -104,9 +104,9 @@ export default function LandingPage() {
 
   return (
     <main className="landing-page">
-      <header className="landing-nav glass-card" aria-label="Ano Tara landing navigation">
-        <Link className="landing-nav__brand" to="/landing" aria-label="Ano Tara landing page">
-          <BrandLogo size={34} />
+      <header className="landing-nav glass-card" aria-label="Ano-Tara! landing navigation">
+        <Link className="landing-nav__brand" to="/landing" aria-label="Ano-Tara! landing page">
+          <BrandLogo size={60} />
         </Link>
         <nav className="landing-nav__links" aria-label="Landing page sections">
           <a href="#how-it-works">How it works</a>
@@ -128,10 +128,12 @@ export default function LandingPage() {
         </div>
         <div className="landing-hero__content">
           <p className="landing-kicker">ML-powered Philippine journeys</p>
-          <h1 id="landing-hero-title">Your Smart Philippine Travel Companion.</h1>
+          <h1 id="landing-hero-title">
+            Ano-Tara! turns Philippine travel dreams into polished itineraries.
+          </h1>
           <p className="landing-hero__subhead">
-            Let our AI craft your perfect itinerary based on your vibe, budget, and
-            schedule.
+            Plan island-hopping escapes, food trails, and city breaks with a
+            flagship SaaS workspace wrapped in soft glass and fluid pastel motion.
           </p>
           <div className="landing-hero__actions">
             <button className="landing-primary-cta" type="button" onClick={handlePlanTrip}>
@@ -225,9 +227,9 @@ export default function LandingPage() {
 
       <footer className="landing-footer glass-card">
         <div>
-          <BrandLogo size={32} />
+          <BrandLogo size={48} />
           <p>
-            Ano Tara keeps your next Philippine journey smart, collaborative, and
+            Ano-Tara! keeps your next Philippine journey smart, collaborative, and
             ready even before you leave home.
           </p>
           {installMessage ? <p className="landing-install-message">{installMessage}</p> : null}

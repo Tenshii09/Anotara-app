@@ -74,7 +74,7 @@ export default function PasswordResetRequestSheet({
         style={{ display: "grid", gap: 14 }}
       >
         <p className="muted" style={{ margin: 0, lineHeight: 1.6 }}>
-          Enter the email address registered to your Ano Tara account. We will
+          Enter the email address registered to your Ano-Tara! account. We will
           send a secure link that expires in 30 minutes.
         </p>
         <div>

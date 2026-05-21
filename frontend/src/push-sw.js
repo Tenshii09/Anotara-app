@@ -14,7 +14,7 @@ function buildNotificationPayload(payload = {}) {
   const notification = payload.notification || {};
 
   return {
-    title: data.title || notification.title || "Anotara weather alert",
+    title: data.title || notification.title || "Ano-Tara! weather alert",
     body:
       data.body ||
       notification.body ||
@@ -27,7 +27,7 @@ function buildNotificationPayload(payload = {}) {
 }
 
 function showAnoTaraNotification(payload = {}) {
-  const title = payload.title || "Ano Tara System Alert";
+  const title = payload.title || "Ano-Tara! System Alert";
 
   return self.registration.showNotification(title, {
     body:

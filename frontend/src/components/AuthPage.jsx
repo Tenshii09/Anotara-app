@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { persistSession } from "../lib/authSession";
 import { apiRequest } from "../lib/apiClient";
 import BottomSheet from "./common/BottomSheet";
+import BrandLogo from "./common/BrandLogo";
 import PasswordResetRequestSheet from "./PasswordResetRequestSheet";
 
 // These cards explain the frontend migration to users and also serve as a
@@ -31,12 +32,12 @@ const legalCopy = {
   terms: {
     title: "Terms of Service",
     body:
-      "These placeholder Terms of Service explain that Ano Tara accounts should be used responsibly, travel plans are provided for planning support, and users remain responsible for verifying routes, prices, availability, and local travel advisories before a trip.",
+      "These placeholder Terms of Service explain that Ano-Tara! accounts should be used responsibly, travel plans are provided for planning support, and users remain responsible for verifying routes, prices, availability, and local travel advisories before a trip.",
   },
   privacy: {
     title: "Privacy Policy",
     body:
-      "This placeholder Privacy Policy explains that Ano Tara collects account and trip-planning information to operate the service, secure user sessions, save itineraries, and improve recommendations. A complete policy will replace this draft before launch.",
+      "This placeholder Privacy Policy explains that Ano-Tara! collects account and trip-planning information to operate the service, secure user sessions, save itineraries, and improve recommendations. A complete policy will replace this draft before launch.",
   },
 };
 
@@ -101,7 +102,7 @@ export default function AuthPage({ initialMode = "login" }) {
     <main className="app-page auth-page">
       <div className="auth-shell auth-grid">
         <section className="auth-intro">
-          <span className="hero-chip">🇵🇭 Ano tara? Travel Planner</span>
+          <span className="hero-chip">Ano-Tara! Travel Planner</span>
           <h1 className="auth-title">
             Plan smarter trips across the Philippines.
           </h1>
@@ -132,7 +133,9 @@ export default function AuthPage({ initialMode = "login" }) {
         <section className="auth-card glass-card">
           {/* The same form switches between login and register based on state. */}
           <div style={{ textAlign: "center", marginBottom: "28px" }}>
-            <div style={{ fontSize: "3rem" }}>🇵🇭</div>
+            <div className="auth-logo-mark" aria-hidden="true">
+              <BrandLogo size={156} showWordmark={false} />
+            </div>
             <h2
               className="serif"
               style={{ fontSize: "2.2rem", margin: "10px 0 8px" }}

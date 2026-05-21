@@ -3,19 +3,30 @@
   <desc id="desc">A vibrant map pin and Filipino Vinta sail mark for Ano-Tara!.</desc>
   <defs>
     <linearGradient id="pinGradient" x1="94" y1="64" x2="416" y2="450" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ff6fae"/><stop offset=".28" stop-color="#9b7cff"/><stop offset=".56" stop-color="#38bdf8"/><stop offset=".78" stop-color="#4ade80"/><stop offset="1" stop-color="#fb923c"/>
+      <stop offset="0" stop-color="#ff6fae"/>
+      <stop offset=".28" stop-color="#9b7cff"/>
+      <stop offset=".56" stop-color="#38bdf8"/>
+      <stop offset=".78" stop-color="#4ade80"/>
+      <stop offset="1" stop-color="#fb923c"/>
     </linearGradient>
     <linearGradient id="sailWarm" x1="185" y1="126" x2="339" y2="315" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fff8fb"/><stop offset=".45" stop-color="#ffe1ef"/><stop offset="1" stop-color="#ffd1b4"/>
+      <stop offset="0" stop-color="#fff8fb"/>
+      <stop offset=".45" stop-color="#ffe1ef"/>
+      <stop offset="1" stop-color="#ffd1b4"/>
     </linearGradient>
     <linearGradient id="sailCool" x1="191" y1="176" x2="363" y2="356" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#eef2ff"/><stop offset=".45" stop-color="#c7d2fe"/><stop offset="1" stop-color="#bae6fd"/>
+      <stop offset="0" stop-color="#eef2ff"/>
+      <stop offset=".45" stop-color="#c7d2fe"/>
+      <stop offset="1" stop-color="#bae6fd"/>
     </linearGradient>
     <radialGradient id="pinHighlight" cx="0" cy="0" r="1" gradientTransform="translate(177 117) rotate(44) scale(228 210)" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#fff" stop-opacity=".88"/><stop offset=".38" stop-color="#fff" stop-opacity=".32"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+      <stop stop-color="#fff" stop-opacity=".88"/>
+      <stop offset=".38" stop-color="#fff" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
     </radialGradient>
     <filter id="logoDepth" x="52" y="42" width="408" height="444" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#20133f" flood-opacity=".24"/><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#ff6fae" flood-opacity=".18"/>
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#20133f" flood-opacity=".24"/>
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#ff6fae" flood-opacity=".18"/>
     </filter>
   </defs>
   <g filter="url(#logoDepth)">

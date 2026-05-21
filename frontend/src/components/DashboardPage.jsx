@@ -606,46 +606,63 @@ export default function DashboardPage() {
   return (
     <main className="app-page">
       <section className="dashboard-shell">
-        {/* Sticky Branded Welcome Component & Global Header */}
+        {/* Sticky Brand & Global Header */}
         <header className="dashboard-header-sticky glass-card">
-          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-            <BrandLogo size={32} />
-            <div style={{ minWidth: 0 }}>
-              <p className="dashboard-header-greeting">
-                {getGreeting()},
-              </p>
-              <p className="dashboard-header-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {displayName}
-              </p>
+          <div className="dashboard-header-topline">
+            <BrandLogo size={56} />
+            <div className="dashboard-header-utility">
+              <button
+                type="button"
+                className="dashboard-bell-button"
+                aria-label="Open notifications"
+                onClick={() => {
+                  tapHaptic();
+                  navigate("/notifications");
+                }}
+              >
+                <Icon name="bell" size={20} tone="accent" />
+                {hasUnreadNotifications && (
+                  <span className="dashboard-bell-dot" />
+                )}
+              </button>
+              <Avatar
+                name={displayName}
+                level={explorerRank.level}
+                progress={explorerRank.progress}
+                ariaLabel={`${displayName}, Explorer level ${explorerRank.level} — ${explorerRank.label}`}
+                onClick={() => {
+                  tapHaptic();
+                  navigate("/profile");
+                }}
+              />
             </div>
           </div>
-          <div className="dashboard-header-utility">
-            <button
-              type="button"
-              className="dashboard-bell-button"
-              aria-label="Open notifications"
-              onClick={() => {
-                tapHaptic();
-                navigate("/notifications");
-              }}
-            >
-              <Icon name="bell" size={20} tone="accent" />
-              {hasUnreadNotifications && (
-                <span className="dashboard-bell-dot" />
-              )}
-            </button>
-            <Avatar
-              name={displayName}
-              level={explorerRank.level}
-              progress={explorerRank.progress}
-              ariaLabel={`${displayName}, Explorer level ${explorerRank.level} — ${explorerRank.label}`}
-              onClick={() => {
-                tapHaptic();
-                navigate("/profile");
-              }}
-            />
-          </div>
         </header>
+
+        <section className="dashboard-welcome-section glass-card" aria-labelledby="dashboard-welcome-title">
+          <div className="dashboard-welcome-copy">
+            <span className="dashboard-welcome-pill">
+              <span className="dashboard-welcome-pill__dot" />
+              System ready
+            </span>
+            <p className="dashboard-header-greeting">{getGreeting()}, {displayName}</p>
+            <h1 id="dashboard-welcome-title" className="dashboard-welcome-title">
+              Welcome back to your travel workspace.
+            </h1>
+            <p className="dashboard-welcome-message">
+              Your dashboard is ready. Review upcoming plans, discover new destinations, and continue building memorable journeys with Ano-Tara!
+            </p>
+          </div>
+          <div className="dashboard-welcome-art" aria-hidden="true">
+            <span className="dashboard-welcome-orbit dashboard-welcome-orbit--outer" />
+            <span className="dashboard-welcome-orbit dashboard-welcome-orbit--inner" />
+            <span className="dashboard-welcome-pin dashboard-welcome-pin--one" />
+            <span className="dashboard-welcome-pin dashboard-welcome-pin--two" />
+            <span className="dashboard-welcome-plane">
+              <Icon name="sparkles" size={22} />
+            </span>
+          </div>
+        </section>
 
         {/* Discovery & Intent Zone: full-screen search trigger + mood pills */}
         <section className="dashboard-hero glass-card">

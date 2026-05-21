@@ -1,7 +1,9 @@
 import { getFirebasePushToken } from "./firebase";
+import { apiRequest } from "./apiClient";
+import { getStoredToken } from "./storage";
 
 export const TEST_PUSH_NOTIFICATION_PAYLOAD = {
-  title: "Ano Tara System Alert",
+  title: "Ano-Tara! System Alert",
   body: "Test successful! Your push notifications are working perfectly.",
   icon: "/pwa-icon.svg",
   badge: "/pwa-maskable.svg",
@@ -48,9 +50,25 @@ export async function triggerTestPushNotification() {
   }
 
   const registration = await navigator.serviceWorker.ready;
+  let remotePushReady = false;
 
   try {
-    await getFirebasePushToken();
+    const firebaseToken = await getFirebasePushToken();
+    const accessToken = getStoredToken();
+
+    if (firebaseToken && accessToken) {
+      await apiRequest("/api/push-tokens", {
+        method: "POST",
+        token: accessToken,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: firebaseToken,
+          platform: "web",
+          user_agent: navigator.userAgent,
+        }),
+      });
+      remotePushReady = true;
+    }
   } catch {
     // Local demos should still prove the service worker notification path even
     // when FCM token creation is unavailable on the current network/device.
@@ -74,6 +92,9 @@ export async function triggerTestPushNotification() {
   return {
     ok: true,
     permission,
-    message: "Test push notification sent.",
+    remotePushReady,
+    message: remotePushReady
+      ? "Test push notification sent. This device is registered for remote pushes."
+      : "Test push notification sent locally, but this device was not registered for remote pushes.",
   };
 }

@@ -79,7 +79,7 @@ function maybeNotifyWeatherAlert(data) {
   const lastSignature = window.localStorage.getItem(WEATHER_NOTIFICATION_KEY);
   if (!signature || signature === lastSignature) return;
 
-  const notification = new window.Notification("Anotara weather alert", {
+  const notification = new window.Notification("Ano-Tara! weather alert", {
     body: data.message,
     tag: signature,
     renotify: false,

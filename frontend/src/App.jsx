@@ -68,10 +68,11 @@ function LaunchSplash() {
   if (!visible) return null;
 
   return (
-    <div className="app-splash" role="status" aria-label="Loading Ano Tara">
+    <div className="app-splash" role="status" aria-label="Loading Ano-Tara!">
       <div className="app-splash__inner">
-        <BrandLogo size={56} showWordmark={false} />
-        <h1 className="app-splash__title">Tara!</h1>
+        <div className="app-splash__brand">
+          <BrandLogo size={360} variant="full" />
+        </div>
         <p className="muted" style={{ margin: 0 }}>
           Your Philippine journey is loading…
         </p>

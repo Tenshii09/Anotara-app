@@ -334,7 +334,7 @@ export default function TravelWizard() {
           >
             <Icon name="close" size={16} /> Exit planner
           </button>
-          <BrandLogo size={26} />
+          <BrandLogo size={44} />
           <div className="step-badge">
             STEP {step} OF {STEPS.length}
           </div>
@@ -978,7 +978,7 @@ export default function TravelWizard() {
             <span className="tara-loader__island tara-loader__island--b" />
             <span className="tara-loader__island tara-loader__island--c" />
             <span className="tara-loader__bird">
-              <BrandLogo size={56} showWordmark={false} accent="#ffd6bd" />
+              <BrandLogo size={96} showWordmark={false} accent="#ffd6bd" />
             </span>
           </div>
           <h2 className="tara-loader__title">Crafting your journey...</h2>

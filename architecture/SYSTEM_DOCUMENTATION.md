@@ -129,8 +129,8 @@ Core Product Features
 
 - Firebase Cloud Messaging sends weather alerts to registered devices.
 - Frontend registers the FCM token after permission.
-- Backend stores tokens and dispatches alerts.
-- Profile includes a light-mode-friendly "Test Push Notification" settings-card action with a bell icon for panel/demo use. It checks browser notification support, prompts for permission when needed, warms the Firebase token when available, then posts an authentic Ano Tara payload to the active service worker for immediate local display with the app icon.
+- Backend stores tokens and dispatches alerts. If Firebase credentials are missing, invalid, or point to a non-existent local service-account file, push delivery is skipped with a structured reason instead of crashing the admin notification endpoint.
+- Profile includes a light-mode-friendly "Test Push Notification" settings-card action with a bell icon for panel/demo use. It checks browser notification support, prompts for permission when needed, creates and registers the Firebase token with `/api/push-tokens` when available, then posts an authentic Ano Tara payload to the active service worker for immediate local display with the app icon.
 - The local test payload uses the "Ano Tara System Alert" title, "Test successful! Your push notifications are working perfectly." body copy, and the app PWA icon/badge assets so the demo notification looks like a real product alert.
 
 12. Dashboard / Home Experience (Aero-Glass)

@@ -5,6 +5,7 @@ import {
   confirmPasswordReset,
   validatePasswordResetToken,
 } from "../lib/passwordResetApi";
+import BrandLogo from "./common/BrandLogo";
 
 export default function ResetPasswordPage() {
   const { token = "" } = useParams();
@@ -70,7 +71,9 @@ export default function ResetPasswordPage() {
       <div className="auth-shell" style={{ maxWidth: 560 }}>
         <section className="auth-card glass-card">
           <div style={{ textAlign: "center", marginBottom: "28px" }}>
-            <div style={{ fontSize: "3rem" }}>🇵🇭</div>
+            <div className="auth-logo-mark" aria-hidden="true">
+              <BrandLogo size={156} showWordmark={false} />
+            </div>
             <h1
               className="serif"
               style={{ fontSize: "2.2rem", margin: "10px 0 8px" }}
@@ -78,7 +81,7 @@ export default function ResetPasswordPage() {
               Reset your password
             </h1>
             <p className="muted" style={{ margin: 0, lineHeight: 1.6 }}>
-              Choose a new password for your Ano Tara account.
+              Choose a new password for your Ano-Tara! account.
             </p>
           </div>
 

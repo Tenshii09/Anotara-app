@@ -410,7 +410,11 @@ export default function ProfilePage() {
       }
 
       successHaptic();
-      setSaveMessage("Test push notification sent. Check your device notification tray.");
+      setSaveMessage(
+        result.remotePushReady
+          ? "Test push notification sent. This device is registered for admin push notifications."
+          : result.message,
+      );
     } catch (pushError) {
       warningHaptic();
       setError(
@@ -724,7 +728,7 @@ export default function ProfilePage() {
             <p className="dashboard-kicker">PWA · Firebase push</p>
             <h3 className="serif">Notification readiness</h3>
             <p className="muted">
-              Send an instant Ano Tara system alert through the active service
+              Send an instant Ano-Tara! system alert through the active service
               worker to verify mobile push permissions and payload rendering.
             </p>
           </div>
