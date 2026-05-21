@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion, useDragControls, useReducedMotion } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import ItineraryMap from "./ItineraryMap";
@@ -46,6 +47,12 @@ import { successHaptic, tapHaptic, warningHaptic } from "../lib/haptics";
 const WEATHER_NOTIFICATION_KEY = "anotara:last-weather-alert";
 const PRESENCE_INTERVAL_MS = 25_000;
 const ACTIVITY_POLL_MS = 6_000;
+const DRAWER_SNAP_ORDER = ["collapsed", "half", "expanded"];
+const DRAWER_SNAP_HEIGHTS = {
+  collapsed: "clamp(132px, 18dvh, 176px)",
+  half: "min(58dvh, 560px)",
+  expanded: "calc(100dvh - max(108px, env(safe-area-inset-top, 0px) + 92px))",
+};
 
 function getWeatherNotificationSignature(data) {
   if (!data) return "";
@@ -256,6 +263,8 @@ export default function ItineraryPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { itineraryId } = useParams();
+  const prefersReducedMotion = useReducedMotion();
+  const drawerDragControls = useDragControls();
 
   const [trip, setTrip] = useState(null);
   const [localItinerary, setLocalItinerary] = useState({});
@@ -293,6 +302,7 @@ export default function ItineraryPage() {
   const [adjustBlock, setAdjustBlock] = useState(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [dayStarts, setDayStarts] = useState({});
+  const [drawerSnap, setDrawerSnap] = useState("half");
 
   const mapHandleRef = useRef(null);
   const [tokenPayload] = useState(
@@ -317,7 +327,37 @@ export default function ItineraryPage() {
     const longitude = Number(place?.longitude ?? place?.lon ?? place?.lng);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
     setFocusedPlaceKey(placeKey ?? null);
+    setDrawerSnap("half");
     mapHandleRef.current?.flyTo({ latitude, longitude, zoom: 15 });
+  }, []);
+
+  const handleDrawerDragEnd = useCallback((_, info) => {
+    const currentIndex = DRAWER_SNAP_ORDER.indexOf(drawerSnap);
+    const safeIndex = currentIndex >= 0 ? currentIndex : 1;
+    const travel = info.offset.y;
+    const velocity = info.velocity.y;
+    const shouldCollapse = travel > 70 || velocity > 520;
+    const shouldExpand = travel < -70 || velocity < -520;
+
+    if (shouldCollapse) {
+      setDrawerSnap(DRAWER_SNAP_ORDER[Math.max(0, safeIndex - 1)]);
+    } else if (shouldExpand) {
+      setDrawerSnap(DRAWER_SNAP_ORDER[Math.min(DRAWER_SNAP_ORDER.length - 1, safeIndex + 1)]);
+    }
+  }, [drawerSnap]);
+
+  const handleSelectDay = useCallback((dayNumber) => {
+    setActiveDay(dayNumber);
+    setDrawerSnap((current) => (current === "collapsed" ? "half" : current));
+  }, []);
+
+  const handleViewAllDays = useCallback(() => {
+    setActiveDay(null);
+    setDrawerSnap((current) => (current === "collapsed" ? "half" : current));
+  }, []);
+
+  const handleMapClick = useCallback(() => {
+    setDrawerSnap("collapsed");
   }, []);
 
   useEffect(() => {
@@ -1029,9 +1069,21 @@ export default function ItineraryPage() {
   }
 
   return (
-    <main className="app-page itinerary-page">
+    <main className={`app-page itinerary-page itinerary-page--map-sheet itinerary-page--drawer-${drawerSnap}`}>
+      <section className="itinerary-map-panel" aria-label="Interactive itinerary map">
+        <ItineraryMap
+          key={trip.itineraryId || trip.id || trip.destination}
+          ref={mapHandleRef}
+          itinerary={localItinerary}
+          destCoords={trip.destCoords}
+          activeDay={activeDay}
+          onMapClick={handleMapClick}
+          resizeKey={drawerSnap}
+        />
+      </section>
+
       <div className="itinerary-topbar">
-        <div className="itinerary-topbar-inner">
+        <div className="itinerary-topbar-inner itinerary-action-bar">
           <button className="top-action-link" type="button" onClick={() => navigate("/my-trips")}>
             <Icon name="arrowLeft" size={16} /> My Trips
           </button>
@@ -1060,7 +1112,7 @@ export default function ItineraryPage() {
                 </>
               ) : (
                 <>
-                  <Icon name="check" size={16} /> Save Itinerary
+                  <Icon name="check" size={16} /> Save
                 </>
               )}
             </button>
@@ -1070,27 +1122,47 @@ export default function ItineraryPage() {
               onClick={handleExportPdf}
               aria-label="Export itinerary as PDF"
             >
-              <Icon name="download" size={16} /> Export PDF
+              <Icon name="download" size={16} /> Export
             </button>
             <button
               className="top-action-link"
               type="button"
               onClick={() => navigate("/dashboard")}
             >
-              Plan new trip
+              Plan Another
             </button>
           </div>
         </div>
       </div>
 
-      <div className="itinerary-shell">
-        <div className="itinerary-layout">
-          <aside className="itinerary-sidebar">
+      <motion.aside
+        className="itinerary-drawer glass-card"
+        animate={{ height: DRAWER_SNAP_HEIGHTS[drawerSnap] }}
+        transition={prefersReducedMotion ? { duration: 0 } : { type: "spring", stiffness: 360, damping: 38 }}
+        drag="y"
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0.12, bottom: 0.18 }}
+        dragControls={drawerDragControls}
+        dragListener={false}
+        onDragEnd={handleDrawerDragEnd}
+        role="region"
+        aria-label="Itinerary details"
+        data-snap={drawerSnap}
+      >
+        <button
+          className="itinerary-drawer__grip"
+          type="button"
+          onPointerDown={(event) => drawerDragControls.start(event)}
+          aria-label="Drag itinerary details"
+        >
+          <span aria-hidden="true" />
+        </button>
+
+        <div className="itinerary-drawer__summary">
+          <div>
             <span className="hero-chip">Your Journey</span>
-
             <h1 className="itinerary-title serif">{trip.destination}</h1>
-
-            <p className="muted" style={{ marginTop: 0, fontSize: "1.05rem" }}>
+            <p className="muted itinerary-drawer__meta">
               {trip.numDays || trip.num_days} Days ·{" "}
               {trip.budget === "high"
                 ? "Luxury Class"
@@ -1098,154 +1170,153 @@ export default function ItineraryPage() {
                   ? "Backpacker"
                   : "Comfort"}
             </p>
+          </div>
+          <button
+            className="top-action-link itinerary-drawer__toggle"
+            type="button"
+            onClick={() => setDrawerSnap((current) => (current === "collapsed" ? "expanded" : "collapsed"))}
+          >
+            {drawerSnap === "collapsed" ? "View Details" : "Show Map"}
+          </button>
+        </div>
 
-            <div className="pill-row">
-              {(Array.isArray(trip.preferences)
-                ? trip.preferences
-                : String(trip.preferences || "")
-                    .split(",")
-                    .map((item) => item.trim())
-                    .filter(Boolean)
-              ).map((item) => (
-                <span key={item} className="badge-pill">
-                  <Icon name="vibe" size={14} /> {item}
-                </span>
-              ))}
+        <div className="itinerary-drawer__body">
+          <div className="pill-row">
+            {(Array.isArray(trip.preferences)
+              ? trip.preferences
+              : String(trip.preferences || "")
+                  .split(",")
+                  .map((item) => item.trim())
+                  .filter(Boolean)
+            ).map((item) => (
+              <span key={item} className="badge-pill">
+                <Icon name="vibe" size={14} /> {item}
+              </span>
+            ))}
+          </div>
+
+          {trip.itineraryId && (
+            <div className="hero-chip">
+              <Icon name="document" size={14} /> Itinerary ID · {trip.itineraryId}
             </div>
+          )}
 
-            {trip.itineraryId && (
-              <div className="hero-chip" style={{ marginBottom: "18px" }}>
-                <Icon name="document" size={14} /> Itinerary ID · {trip.itineraryId}
-              </div>
-            )}
+          <DaySelector
+            days={sortedDays}
+            activeDay={activeDay}
+            onSelectDay={handleSelectDay}
+            onViewAll={handleViewAllDays}
+            showViewAll={sortedDays.length > 1}
+          />
 
-            <DaySelector
-              days={sortedDays}
-              activeDay={activeDay}
-              onSelectDay={setActiveDay}
-              onViewAll={() => setActiveDay(null)}
-              showViewAll={sortedDays.length > 1}
-            />
+          <div className="itinerary-sidebar__alerts">
+            {feedbackError ? <div className="error-banner">{feedbackError}</div> : null}
+            {smartSuggestionError && !smartSuggestion ? (
+              <div className="error-banner">{smartSuggestionError}</div>
+            ) : null}
 
-            <div className="itinerary-sidebar__alerts">
-              {feedbackError ? <div className="error-banner">{feedbackError}</div> : null}
-              {smartSuggestionError && !smartSuggestion ? (
-                <div className="error-banner">{smartSuggestionError}</div>
-              ) : null}
-
-              {smartSuggestion ? (
-                <div
-                  className="glass-card itinerary-sidebar__suggestion"
-                  style={{
-                    border: smartSuggestion.alert
-                      ? "1px solid rgba(225, 29, 72, 0.32)"
-                      : "1px solid rgba(59, 130, 246, 0.18)",
-                    background: smartSuggestion.alert
-                      ? "linear-gradient(135deg, rgba(225, 29, 72, 0.12), rgba(255, 255, 255, 0.92))"
-                      : "linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.92))",
-                  }}
-                >
-                  <p className="hero-chip" style={{ marginBottom: 10 }}>
-                    <Icon name="alert" size={14} /> Smart Suggestion
-                  </p>
-                  <h3 className="serif" style={{ marginTop: 0, marginBottom: 8 }}>
-                    {smartSuggestion.headline}
-                  </h3>
-                  <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
-                    {smartSuggestion.message}
-                  </p>
-                  <p className="muted" style={{ marginTop: 0 }}>
-                    Rain chance: {smartSuggestion.precipitation_probability || 0}%
-                  </p>
-                  {smartSuggestion.focus_day ? (
-                    <button
-                      className="top-action-link"
-                      type="button"
-                      onClick={() => setActiveDay(Number(smartSuggestion.focus_day))}
-                    >
-                      View Day {smartSuggestion.focus_day}
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {pushStatus !== "subscribed" ? (
-                <div className="glass-card itinerary-sidebar__push">
-                  <p className="hero-chip">
-                    <Icon name="bell" size={14} /> Device Push
-                  </p>
-                  <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
-                    Subscribe this device to receive weather alerts even when the app is closed.
-                  </p>
+            {smartSuggestion ? (
+              <div
+                className="glass-card itinerary-sidebar__suggestion"
+                style={{
+                  border: smartSuggestion.alert
+                    ? "1px solid rgba(225, 29, 72, 0.32)"
+                    : "1px solid rgba(59, 130, 246, 0.18)",
+                  background: smartSuggestion.alert
+                    ? "linear-gradient(135deg, rgba(225, 29, 72, 0.12), rgba(255, 255, 255, 0.92))"
+                    : "linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.92))",
+                }}
+              >
+                <p className="hero-chip" style={{ marginBottom: 10 }}>
+                  <Icon name="alert" size={14} /> Smart Suggestion
+                </p>
+                <h3 className="serif" style={{ marginTop: 0, marginBottom: 8 }}>
+                  {smartSuggestion.headline}
+                </h3>
+                <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+                  {smartSuggestion.message}
+                </p>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Rain chance: {smartSuggestion.precipitation_probability || 0}%
+                </p>
+                {smartSuggestion.focus_day ? (
                   <button
                     className="top-action-link"
                     type="button"
-                    onClick={enableDevicePushAlerts}
-                    disabled={pushStatus === "loading" || pushStatus === "unsupported"}
+                    onClick={() => handleSelectDay(Number(smartSuggestion.focus_day))}
                   >
-                    {pushStatus === "blocked"
-                      ? "Notifications blocked"
-                      : pushStatus === "loading"
-                        ? "Enabling..."
-                        : "Enable device push alerts"}
+                    View Day {smartSuggestion.focus_day}
                   </button>
-                  {pushError ? <p className="muted" style={{ marginBottom: 0, color: "#991b1b" }}>{pushError}</p> : null}
-                </div>
-              ) : null}
-            </div>
-
-            {activeDay === null ? (
-              <section className="timeline timeline--overview">
-                <p className="dashboard-kicker">Full trip overview</p>
-                <h3 className="serif">All {sortedDays.length} days at a glance</h3>
-                <p className="muted">
-                  Tap a day above to drill into its time-blocked timeline. Map markers also dim
-                  the inactive days so the chosen one always pops.
-                </p>
-              </section>
-            ) : (
-              <>
-                <VerticalTimeline
-                  dayNumber={activeDay}
-                  places={activeDayPlaces}
-                  trip={{ ...trip, dayStart: dayStarts[activeDay] }}
-                  focusedPlaceKey={focusedPlaceKey}
-                  feedbackState={feedbackState}
-                  swappingItemId={swappingItemId}
-                  memoriesByItemId={memoryByItemId}
-                  onCardActivate={(place, placeKey) => focusPlaceOnMap(place, placeKey)}
-                  onMovePlace={handleMovePlace}
-                  onSwapPlace={handleSwapPlace}
-                  onToggleLock={handleToggleLock}
-                  onPlaceFeedback={handlePlaceFeedback}
-                  onAdjustTime={handleAdjustTime}
-                  onOpenMemoryLog={handleOpenMemoryLog}
-                  isCollaborative={Boolean(trip.itineraryId)}
-                  isPastTrip={trip.status === "Past"}
-                />
-                {activeHotel ? (
-                  <HotelCard
-                    hotel={activeHotel}
-                    dayNumber={activeDay}
-                    refreshing={hotelRefreshing}
-                    onRefresh={() => refreshHotelForDay(activeDay, { refresh: true })}
-                  />
                 ) : null}
-              </>
-            )}
-          </aside>
+              </div>
+            ) : null}
 
-          <section className="itinerary-map-panel">
-            <ItineraryMap
-              key={trip.itineraryId || trip.id || trip.destination}
-              ref={mapHandleRef}
-              itinerary={localItinerary}
-              destCoords={trip.destCoords}
-              activeDay={activeDay}
-            />
-          </section>
+            {pushStatus !== "subscribed" ? (
+              <div className="glass-card itinerary-sidebar__push">
+                <p className="hero-chip">
+                  <Icon name="bell" size={14} /> Device Push
+                </p>
+                <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+                  Subscribe this device to receive weather alerts even when the app is closed.
+                </p>
+                <button
+                  className="top-action-link"
+                  type="button"
+                  onClick={enableDevicePushAlerts}
+                  disabled={pushStatus === "loading" || pushStatus === "unsupported"}
+                >
+                  {pushStatus === "blocked"
+                    ? "Notifications blocked"
+                    : pushStatus === "loading"
+                      ? "Enabling..."
+                      : "Enable device push alerts"}
+                </button>
+                {pushError ? <p className="muted" style={{ marginBottom: 0, color: "#991b1b" }}>{pushError}</p> : null}
+              </div>
+            ) : null}
+          </div>
+
+          {activeDay === null ? (
+            <section className="timeline timeline--overview">
+              <p className="dashboard-kicker">Full trip overview</p>
+              <h3 className="serif">All {sortedDays.length} days at a glance</h3>
+              <p className="muted">
+                Tap a day above to drill into its time-blocked timeline. Map markers also dim
+                the inactive days so the chosen one always pops.
+              </p>
+            </section>
+          ) : (
+            <>
+              <VerticalTimeline
+                dayNumber={activeDay}
+                places={activeDayPlaces}
+                trip={{ ...trip, dayStart: dayStarts[activeDay] }}
+                focusedPlaceKey={focusedPlaceKey}
+                feedbackState={feedbackState}
+                swappingItemId={swappingItemId}
+                memoriesByItemId={memoryByItemId}
+                onCardActivate={(place, placeKey) => focusPlaceOnMap(place, placeKey)}
+                onMovePlace={handleMovePlace}
+                onSwapPlace={handleSwapPlace}
+                onToggleLock={handleToggleLock}
+                onPlaceFeedback={handlePlaceFeedback}
+                onAdjustTime={handleAdjustTime}
+                onOpenMemoryLog={handleOpenMemoryLog}
+                isCollaborative={Boolean(trip.itineraryId)}
+                isPastTrip={trip.status === "Past"}
+              />
+              {activeHotel ? (
+                <HotelCard
+                  hotel={activeHotel}
+                  dayNumber={activeDay}
+                  refreshing={hotelRefreshing}
+                  onRefresh={() => refreshHotelForDay(activeDay, { refresh: true })}
+                />
+              ) : null}
+            </>
+          )}
         </div>
-      </div>
+      </motion.aside>
 
       {activityToast ? (
         <div className="activity-toast" role="status" aria-live="polite">

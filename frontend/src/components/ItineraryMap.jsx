@@ -180,7 +180,13 @@ function buildPopupHTML(place, dayNumber, sequenceNumber) {
   `;
 }
 
-function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
+function ItineraryMap({
+  itinerary,
+  destCoords,
+  activeDay = null,
+  onMapClick,
+  resizeKey,
+}, ref) {
   const mapContainerRef = useRef(null);
   const [mapboxApi, setMapboxApi] = useState(null);
 
@@ -204,6 +210,10 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
   // effect re-runs the moment the map is ready.
   const [isMapReady, setIsMapReady] = useState(false);
   const mapboxgl = mapboxApi;
+  const MapboxLngLat = mapboxgl?.LngLat;
+  const MapboxLngLatBounds = mapboxgl?.LngLatBounds;
+  const MapboxMarker = mapboxgl?.Marker;
+  const MapboxPopup = mapboxgl?.Popup;
 
   useEffect(() => {
     let cancelled = false;
@@ -249,6 +259,9 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
           essential: true,
         });
       },
+      resize() {
+        mapRef.current?.resize();
+      },
     }),
     [],
   );
@@ -265,9 +278,8 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
       return undefined;
     }
 
-    mapboxgl.accessToken = MAPBOX_TOKEN;
-
     const map = new mapboxgl.Map({
+      accessToken: MAPBOX_TOKEN,
       container: mapContainerRef.current,
       style: "mapbox://styles/mapbox/streets-v12",
       center: [destCoords.lon, destCoords.lat],
@@ -330,6 +342,10 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
       setIsMapReady(true);
     });
 
+    map.on("click", () => {
+      onMapClick?.();
+    });
+
     return () => {
       // The map is being destroyed, so any markers that still reference it
       // are about to become orphans. Clear the refs without calling
@@ -341,7 +357,15 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
       map.remove();
       mapRef.current = null;
     };
-  }, [destCoords, mapboxgl]);
+  }, [destCoords, mapboxgl, onMapClick]);
+
+  useEffect(() => {
+    if (!mapRef.current) return undefined;
+    const resizeTimer = window.setTimeout(() => {
+      mapRef.current?.resize();
+    }, 260);
+    return () => window.clearTimeout(resizeTimer);
+  }, [resizeKey]);
 
   // Effect 2 — draw (and redraw) markers + route geometry whenever the
   // itinerary changes or the user switches days. The map itself is preserved
@@ -378,8 +402,12 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
     // Progressive Disclosure (Feature 4): render ALL days so the user always
     // sees the full multi-day route, but dim inactive days to 30% opacity so
     // the chosen day visually dominates.
-    const bounds = new mapboxgl.LngLatBounds();
-    const focusedBounds = new mapboxgl.LngLatBounds();
+    if (!MapboxLngLat || !MapboxLngLatBounds || !MapboxMarker || !MapboxPopup) {
+      return undefined;
+    }
+
+    const bounds = new MapboxLngLatBounds();
+    const focusedBounds = new MapboxLngLatBounds();
     const allCoordinates = [];
     let focusedCoordinateCount = 0;
     let sequenceNumber = 1;
@@ -467,7 +495,7 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
           markerElement.classList.add("map-marker--focused");
         }
 
-        const popup = new mapboxgl.Popup({
+        const popup = new MapboxPopup({
           offset: 18,
           closeButton: false,
           maxWidth: "260px",
@@ -483,7 +511,7 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
           });
         });
 
-        const marker = new mapboxgl.Marker({ element: markerElement })
+        const marker = new MapboxMarker({ element: markerElement })
           .setLngLat(coordinate)
           .setPopup(popup)
           .addTo(map);
@@ -495,7 +523,7 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
     });
 
     if (allCoordinates.length > 0) {
-      const startMarker = new mapboxgl.Marker({
+      const startMarker = new MapboxMarker({
         element: createTagElement("START", "#111827"),
         anchor: "top",
         offset: [0, 22],
@@ -504,7 +532,7 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
         .addTo(map);
       markersRef.current.push(startMarker);
 
-      const endMarker = new mapboxgl.Marker({
+      const endMarker = new MapboxMarker({
         element: createTagElement("END", "#E11D48"),
         anchor: "top",
         offset: [0, 22],
@@ -534,7 +562,7 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
       const center =
         focusedCoordinateCount > 0
           ? focusedBounds.getCenter()
-          : new mapboxgl.LngLat(allCoordinates[0][0], allCoordinates[0][1]);
+          : new MapboxLngLat(allCoordinates[0][0], allCoordinates[0][1]);
       map.flyTo({
         center,
         zoom: 14,
@@ -548,7 +576,15 @@ function ItineraryMap({ itinerary, destCoords, activeDay = null }, ref) {
     return () => {
       directionsAbortController.abort();
     };
-  }, [itinerary, activeDay, isMapReady]);
+  }, [
+    itinerary,
+    activeDay,
+    isMapReady,
+    MapboxLngLat,
+    MapboxLngLatBounds,
+    MapboxMarker,
+    MapboxPopup,
+  ]);
 
   return <div ref={mapContainerRef} className="itinerary-map" />;
 }

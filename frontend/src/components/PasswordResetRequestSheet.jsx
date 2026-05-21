@@ -14,11 +14,19 @@ export default function PasswordResetRequestSheet({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open) {
+    if (!open) return undefined;
+
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
       setEmail(initialEmail || "");
       setMessage("");
       setBusy(false);
-    }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [initialEmail, open]);
 
   async function handleSubmit(event) {
