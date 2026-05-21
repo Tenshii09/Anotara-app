@@ -130,7 +130,8 @@ Core Product Features
 - Firebase Cloud Messaging sends weather alerts to registered devices.
 - Frontend registers the FCM token after permission.
 - Backend stores tokens and dispatches alerts.
-- Profile includes a "Test Push Notification" action for panel/demo use. It checks browser notification support, prompts for permission when needed, warms the Firebase token when available, then posts an authentic Ano Tara payload to the active service worker for immediate local display with the app icon.
+- Profile includes a light-mode-friendly "Test Push Notification" settings-card action with a bell icon for panel/demo use. It checks browser notification support, prompts for permission when needed, warms the Firebase token when available, then posts an authentic Ano Tara payload to the active service worker for immediate local display with the app icon.
+- The local test payload uses the "Ano Tara System Alert" title, "Test successful! Your push notifications are working perfectly." body copy, and the app PWA icon/badge assets so the demo notification looks like a real product alert.
 
 12. Dashboard / Home Experience (Aero-Glass)
 
@@ -254,6 +255,7 @@ Frontend Layer
 - lib/theme.js — light/dark theme detection, application, and persistence.
 - lib/modalActivity.js — global modal surface activity registry.
 - lib/haptics.js — Web Vibration API micro-haptics (tap / success / warning).
+- lib/pushNotifications.js — Profile-triggered test push helper that requests permission, warms Firebase Messaging, and posts the local demo payload to the active service worker.
 - lib/storage.js — wizard/trip/profile/discover-search localStorage helpers.
 
 Backend Layer
@@ -459,6 +461,7 @@ Recent Changelog
 - Fixed a backend bug where /api/generate referenced trip_start_date without extracting it from the request body (would crash on save).
 - Polished the PWA: pre-paint inline splash, animated React LaunchSplash, theme-color split for light/dark, /dashboard start_url, Tara Na! + My Trips manifest shortcuts, and larger precache cap for the Mapbox bundle.
 - Added a Web Vibration micro-haptics layer used across primary interactions.
+- Added the Profile "Test Push Notification" demo path: bell-icon settings card, permission handling, Firebase token warm-up, service-worker message handling, and authentic Ano Tara notification payload.
 
 Current Limitations
 
@@ -535,10 +538,12 @@ Repository Map (Updated)
 - frontend/src/lib/theme.js
 - frontend/src/lib/modalActivity.js
 - frontend/src/lib/haptics.js
+- frontend/src/lib/pushNotifications.js
 - frontend/src/lib/storage.js
 - frontend/src/lib/config.js
 - frontend/src/App.{jsx,css}
 - frontend/src/main.jsx
+- frontend/src/push-sw.js
 - frontend/index.html
 - frontend/vite.config.js
 
