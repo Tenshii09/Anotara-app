@@ -31,6 +31,7 @@ import {
   persistTheme,
   THEMES,
 } from "../lib/theme";
+import { triggerTestPushNotification } from "../lib/pushNotifications";
 import Avatar from "./common/Avatar";
 import BottomSheet from "./common/BottomSheet";
 import Icon from "./common/Icon";
@@ -149,6 +150,7 @@ export default function ProfilePage() {
   const [findFriendsOpen, setFindFriendsOpen] = useState(false);
   const [passwordResetOpen, setPasswordResetOpen] = useState(false);
   const [theme, setTheme] = useState(() => getInitialTheme());
+  const [testPushBusy, setTestPushBusy] = useState(false);
 
   useEffect(() => {
     async function loadProfile() {
@@ -390,6 +392,33 @@ export default function ProfilePage() {
       setError(requestError.message || "Sync failed. Please try again.");
     } finally {
       setForceSyncBusy(false);
+    }
+  }
+
+  async function handleTestPushNotification() {
+    tapHaptic();
+    setError("");
+    setSaveMessage("");
+    setTestPushBusy(true);
+
+    try {
+      const result = await triggerTestPushNotification();
+      if (!result.ok) {
+        warningHaptic();
+        setSaveMessage(result.message);
+        return;
+      }
+
+      successHaptic();
+      setSaveMessage("Test push notification sent. Check your device notification tray.");
+    } catch (pushError) {
+      warningHaptic();
+      setError(
+        pushError.message ||
+          "Could not send the test push notification from this browser.",
+      );
+    } finally {
+      setTestPushBusy(false);
     }
   }
 
@@ -687,6 +716,27 @@ export default function ProfilePage() {
               Active sessions: <strong>This device</strong>
             </p>
           </div>
+        </article>
+
+        {/* Push notification demo */}
+        <article className="glass-card profile-push-card">
+          <div className="profile-push-card__copy">
+            <p className="dashboard-kicker">PWA · Firebase push</p>
+            <h3 className="serif">Notification readiness</h3>
+            <p className="muted">
+              Send an instant Ano Tara system alert through the active service
+              worker to verify mobile push permissions and payload rendering.
+            </p>
+          </div>
+          <button
+            className="btn-luxury profile-push-card__button"
+            type="button"
+            onClick={handleTestPushNotification}
+            disabled={testPushBusy}
+          >
+            <Icon name="bell" size={16} />
+            {testPushBusy ? "Sending..." : "Test Push Notification"}
+          </button>
         </article>
 
         {/* Email notifications */}

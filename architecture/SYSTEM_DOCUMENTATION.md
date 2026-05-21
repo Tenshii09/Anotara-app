@@ -130,6 +130,7 @@ Core Product Features
 - Firebase Cloud Messaging sends weather alerts to registered devices.
 - Frontend registers the FCM token after permission.
 - Backend stores tokens and dispatches alerts.
+- Profile includes a "Test Push Notification" action for panel/demo use. It checks browser notification support, prompts for permission when needed, warms the Firebase token when available, then posts an authentic Ano Tara payload to the active service worker for immediate local display with the app icon.
 
 12. Dashboard / Home Experience (Aero-Glass)
 
@@ -192,6 +193,7 @@ Core Product Features
 - Appearance card persists Light/Dark color mode to localStorage and applies it through documentElement data-theme/color-scheme.
 - The Flock card manages friends, pending requests, outgoing requests, and user search from the profile surface.
 - Email notification preferences let users opt into or out of transactional mail categories from the same profile surface.
+- Push notification readiness card sends a local service-worker-backed "Ano Tara System Alert" test notification so Firebase/Service Worker push behavior can be demonstrated on demand.
 - PWA Memory & Cloud Sync Hub: storage allocation bar fed by navigator.storage.estimate(), Purge Local Cache (clears caches API entries), and Force Cloud Sync (re-pulls itineraries + summary).
 - Travel summary card, Help/Privacy/Terms/Logout rows, and a destructive Delete Account protocol that requires typing "delete my account" verbatim and confirms through a Bottom Sheet before calling DELETE /api/account.
 

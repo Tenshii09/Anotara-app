@@ -26,6 +26,25 @@ function buildNotificationPayload(payload = {}) {
   };
 }
 
+function showAnoTaraNotification(payload = {}) {
+  const title = payload.title || "Ano Tara System Alert";
+
+  return self.registration.showNotification(title, {
+    body:
+      payload.body ||
+      "Test successful! Your push notifications are working perfectly.",
+    icon: payload.icon || "/pwa-icon.svg",
+    badge: payload.badge || "/pwa-maskable.svg",
+    tag: payload.tag || "anotara-push",
+    data: {
+      url: payload.url || "/profile",
+      itinerary_id: payload.itinerary_id || "",
+      focus_day: payload.focus_day || "",
+      notification_signature: payload.notification_signature || "",
+    },
+  });
+}
+
 if (HAS_FIREBASE_CONFIG) {
   const firebaseApp = initializeApp(FIREBASE_CONFIG);
   const messaging = getMessaging(firebaseApp);
@@ -33,19 +52,15 @@ if (HAS_FIREBASE_CONFIG) {
   onBackgroundMessage(messaging, (payload) => {
     const notificationPayload = buildNotificationPayload(payload);
 
-    self.registration.showNotification(notificationPayload.title, {
-      body: notificationPayload.body,
-      icon: "/pwa-icon.svg",
-      badge: "/pwa-maskable.svg",
-      data: {
-        url: notificationPayload.url,
-        itinerary_id: notificationPayload.itinerary_id,
-        focus_day: notificationPayload.focus_day,
-        notification_signature: notificationPayload.notification_signature,
-      },
-    });
+    showAnoTaraNotification(notificationPayload);
   });
 }
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type !== "ANOTARA_TEST_PUSH") return;
+
+  event.waitUntil(showAnoTaraNotification(event.data.payload));
+});
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();

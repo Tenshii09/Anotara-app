@@ -5133,6 +5133,39 @@ h1.serif,
   color: var(--accent);
 }
 
+.profile-push-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.profile-push-card__copy {
+  display: grid;
+  gap: 4px;
+}
+
+.profile-push-card__copy h3,
+.profile-push-card__copy p {
+  margin: 0;
+}
+
+.profile-push-card__button {
+  width: 100%;
+}
+
+@media (min-width: 721px) {
+  .profile-push-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .profile-push-card__button {
+    width: auto;
+    white-space: nowrap;
+  }
+}
+
 .theme-toggle-card {
   display: grid;
   gap: 12px;
