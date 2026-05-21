@@ -1,0 +1,9 @@
+{% extends 'emails/base.html' %} {% block headline %}Email delivery works{%
+endblock %} {% block content %}
+<p>Hi there,</p>
+<p>
+  This test confirms Ano Tara can send transactional email to
+  {{ recipient_email }} using the configured mail provider.
+</p>
+<p>You can now try the Forgot Password flow from the login page.</p>
+{% endblock %}

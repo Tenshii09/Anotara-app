@@ -36,6 +36,7 @@ import BottomSheet from "./common/BottomSheet";
 import Icon from "./common/Icon";
 import InviteCompanionSheet from "./common/InviteCompanionSheet";
 import PageSkeleton from "./common/PageSkeleton";
+import PasswordResetRequestSheet from "./PasswordResetRequestSheet";
 
 const BUDGET_OPTIONS = [
   { value: "low", label: "Backpacker" },
@@ -146,6 +147,7 @@ export default function ProfilePage() {
     outgoing: [],
   });
   const [findFriendsOpen, setFindFriendsOpen] = useState(false);
+  const [passwordResetOpen, setPasswordResetOpen] = useState(false);
   const [theme, setTheme] = useState(() => getInitialTheme());
 
   useEffect(() => {
@@ -668,6 +670,18 @@ export default function ProfilePage() {
               {biometricEnabled ? "On" : "Off"}
             </button>
           </div>
+          <div style={{ marginTop: 14 }}>
+            <button
+              type="button"
+              className="btn-outline-luxury"
+              onClick={() => {
+                tapHaptic();
+                setPasswordResetOpen(true);
+              }}
+            >
+              Change Password
+            </button>
+          </div>
           <div style={{ marginTop: 14, display: "grid", gap: 6 }}>
             <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
               Active sessions: <strong>This device</strong>
@@ -1117,6 +1131,12 @@ export default function ProfilePage() {
         }}
         onSendFriendRequest={handleSendFriendRequestFromSheet}
         emptyState="Search for any explorer by username or email — friend requests sent instantly."
+      />
+      <PasswordResetRequestSheet
+        open={passwordResetOpen}
+        onClose={() => setPasswordResetOpen(false)}
+        initialEmail={email}
+        title="Change password"
       />
     </main>
   );

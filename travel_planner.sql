@@ -655,7 +655,10 @@ CREATE TABLE `users` (
   `companion_vector` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`companion_vector`)),
   `vibe_weights` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`vibe_weights`)),
   `biometric_enabled` tinyint(1) DEFAULT 0,
-  `email_preferences` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`email_preferences`))
+  `email_preferences` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`email_preferences`)),
+  `legal_consent` tinyint(1) NOT NULL DEFAULT 0,
+  `terms_accepted_at` datetime DEFAULT NULL,
+  `privacy_accepted_at` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --

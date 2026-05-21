@@ -31,6 +31,7 @@ const MyTripsPage = lazy(() => import("./components/MyTripsPage"));
 const ItineraryPage = lazy(() => import("./components/ItineraryPage"));
 const TravelWizard = lazy(() => import("./components/TravelWizard"));
 const AdminPanelPage = lazy(() => import("./components/AdminPanelPage"));
+const ResetPasswordPage = lazy(() => import("./components/ResetPasswordPage"));
 
 /**
  * Renders the fixed, animated fluid-pastel background that sits behind
@@ -83,7 +84,14 @@ function LaunchSplash() {
  */
 function RouteAwareBottomNav() {
   const location = useLocation();
-  const hiddenPrefixes = ["/login", "/register", "/generate", "/admin"];
+  const hiddenPrefixes = [
+    "/login",
+    "/register",
+    "/reset-password",
+    "/generate",
+    "/itinerary",
+    "/admin",
+  ];
   const pathname = location.pathname;
   const shouldHide =
     pathname === "/" ||
@@ -120,7 +128,10 @@ function SessionManager() {
         event.detail?.message || "Your session expired. Please log in again.";
       setSessionToast(message);
 
-      if (!["/", "/login", "/register"].includes(window.location.pathname)) {
+      if (
+        !["/", "/login", "/register"].includes(window.location.pathname) &&
+        !window.location.pathname.startsWith("/reset-password")
+      ) {
         navigate("/login", { replace: true });
       }
     });
@@ -142,6 +153,16 @@ function SessionManager() {
 function AppRouteFrame() {
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith("/admin");
+  const hidesBottomNav =
+    location.pathname === "/" ||
+    [
+      "/login",
+      "/register",
+      "/reset-password",
+      "/generate",
+      "/itinerary",
+      "/admin",
+    ].some((prefix) => location.pathname.startsWith(prefix));
 
   return (
     <>
@@ -153,7 +174,7 @@ function AppRouteFrame() {
         className={
           isAdminRoute
             ? "app-route-frame app-route-frame--admin"
-            : "app-route-frame"
+            : `app-route-frame${hidesBottomNav ? " app-route-frame--no-nav" : ""}`
         }
       >
         <Suspense
@@ -166,6 +187,7 @@ function AppRouteFrame() {
               path="/register"
               element={<AuthPage initialMode="register" />}
             />
+            <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
 
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/my-trips" element={<MyTripsPage />} />

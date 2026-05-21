@@ -6,7 +6,7 @@ import click
 from flask import Flask, jsonify
 from flask_cors import CORS
 from config import Config
-from webapp.extensions import bcrypt, jwt
+from webapp.extensions import bcrypt, jwt, limiter
 from webapp.routes.auth_routes import auth_bp
 from webapp.routes.email_routes import email_bp
 from webapp.routes.trip_routes import trip_bp
@@ -14,6 +14,7 @@ from webapp.routes.social_routes import social_bp
 from webapp.routes.admin_routes import admin_bp
 from webapp.services.trip_planning import ml_columns, ml_model
 from webapp.services.email_service import process_queue as process_email_queue
+from webapp.services.email_service import send_email
 from webapp.services.weather_monitor import run_weather_monitor
 
 app = Flask(__name__)
@@ -22,6 +23,7 @@ app.config.from_object(Config)
 CORS(app, supports_credentials=True)
 bcrypt.init_app(app)
 jwt.init_app(app)
+limiter.init_app(app)
 
 
 @jwt.expired_token_loader
@@ -71,6 +73,21 @@ def email_queue_command(limit):
     """Process queued email jobs once and print a JSON summary."""
     result = process_email_queue(limit=limit)
     click.echo(json.dumps(result, indent=2, default=str))
+
+@app.cli.command('send-test-email')
+@click.argument('recipient_email')
+def send_test_email_command(recipient_email):
+    """Send one immediate SMTP/provider test email to verify mail settings."""
+    result = send_email({
+        'recipient_email': recipient_email,
+        'recipient_name': 'Ano Tara tester',
+        'subject': 'Ano Tara email test',
+        'template_name': 'email_test',
+        'category': 'security',
+        'context': {'recipient_email': recipient_email},
+    })
+    click.echo(json.dumps(result, indent=2, default=str))
+
 
 # Keep these imports referenced so module loading happens at startup.
 _ = ml_model, ml_columns

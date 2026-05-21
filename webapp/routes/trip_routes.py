@@ -35,6 +35,7 @@ from webapp.services.database import (
 from webapp.services.weather_monitor import build_weather_suggestion
 from webapp.services.pitch_generator import generate_itinerary_pitch
 from webapp.services.llm_itinerary import generate_llm_itinerary
+from webapp.security_utils import sanitize_user_text
 from webapp.services.trip_planning import (
     build_itinerary,
     fetch_places,
@@ -73,16 +74,24 @@ def api_discover_feed():
 @jwt_required()
 def api_itinerary():
     """Return an itinerary preview without persisting it."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
-    destination = data.get('destination')
-    num_days = int(data.get('num_days', 3))
+    destination = sanitize_user_text(data.get('destination'), max_length=180)
+    if not destination:
+        return jsonify({'error': 'destination is required'}), 400
+    try:
+        num_days = max(1, min(int(data.get('num_days', 3)), 14))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'num_days must be an integer'}), 400
     preferences = data.get('preferences', [])
-    budget = data.get('budget', 'comfort')
-    pacing_style = data.get('pacing_style', 'Moderate')
-    companion_type = data.get('companion_type', 'Solo')
-    transport_mode = data.get('transport_mode', 'Public')
-    accommodation = data.get('accommodation', '')
+    if not isinstance(preferences, list):
+        return jsonify({'error': 'preferences must be a list'}), 400
+    preferences = [sanitize_user_text(item, max_length=40) for item in preferences[:10]]
+    budget = sanitize_user_text(data.get('budget', 'comfort'), max_length=20) or 'comfort'
+    pacing_style = sanitize_user_text(data.get('pacing_style', 'Moderate'), max_length=40) or 'Moderate'
+    companion_type = sanitize_user_text(data.get('companion_type', 'Solo'), max_length=40) or 'Solo'
+    transport_mode = sanitize_user_text(data.get('transport_mode', 'Public'), max_length=40) or 'Public'
+    accommodation = sanitize_user_text(data.get('accommodation', ''), max_length=180)
     trip_start_date = data.get('trip_start_date')
 
     if trip_start_date is not None and str(trip_start_date).strip():
@@ -205,16 +214,24 @@ def api_itinerary_llm():
 def api_generate():
     """Generate, store, and return a finalized itinerary."""
     current_user_id = get_jwt_identity()
-    data = request.get_json()
+    data = request.get_json() or {}
 
-    destination = data.get('destination', '')
-    num_days = int(data.get('num_days', 3))
-    budget = data.get('budget', 'comfort')
+    destination = sanitize_user_text(data.get('destination', ''), max_length=180)
+    if not destination:
+        return jsonify({'error': 'destination is required'}), 400
+    try:
+        num_days = max(1, min(int(data.get('num_days', 3)), 14))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'num_days must be an integer'}), 400
+    budget = sanitize_user_text(data.get('budget', 'comfort'), max_length=20) or 'comfort'
     preferences = data.get('preferences', [])
-    pacing_style = data.get('pacing_style', 'Moderate')
-    companion_type = data.get('companion_type', 'Solo')
-    transport_mode = data.get('transport_mode', 'Public')
-    accommodation = data.get('accommodation', '')
+    if not isinstance(preferences, list):
+        return jsonify({'error': 'preferences must be a list'}), 400
+    preferences = [sanitize_user_text(item, max_length=40) for item in preferences[:10]]
+    pacing_style = sanitize_user_text(data.get('pacing_style', 'Moderate'), max_length=40) or 'Moderate'
+    companion_type = sanitize_user_text(data.get('companion_type', 'Solo'), max_length=40) or 'Solo'
+    transport_mode = sanitize_user_text(data.get('transport_mode', 'Public'), max_length=40) or 'Public'
+    accommodation = sanitize_user_text(data.get('accommodation', ''), max_length=180)
     trip_start_date = data.get('trip_start_date')
 
     if trip_start_date is not None and str(trip_start_date).strip():

@@ -8,6 +8,7 @@ authentication unless explicitly stated.
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from webapp.security_utils import sanitize_user_text
 from webapp.services.email_service import queue_email
 from webapp.services.database import get_itinerary_overview, get_user_profile
 from webapp.services.social import (
@@ -343,7 +344,7 @@ def api_add_memory(itinerary_id, item_id):
 
     data = request.get_json() or {}
     kind = (data.get("kind") or "").lower()
-    note = data.get("note")
+    note = sanitize_user_text(data.get("note"), max_length=1000)
     image_data = data.get("image_data")
     mime_type = data.get("mime_type")
 

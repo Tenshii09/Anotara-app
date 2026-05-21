@@ -15,6 +15,12 @@ Core Product Features
 - Users can register and log in.
 - Authentication uses Flask-JWT-Extended access and refresh tokens.
 - Passwords are hashed with bcrypt.
+- Forgot-password and profile-initiated password changes use POST /api/password-reset/request to send a registered-email reset link. Links are signed with itsdangerous, expire after 30 minutes, include a password-hash fingerprint so they cannot be reused after a successful reset, and are delivered through the transactional email queue.
+- /reset-password/:token renders the React reset form. The frontend validates links with GET /api/password-reset/validate/<token> and submits new passwords to POST /api/password-reset/confirm, where the backend validates the token, hashes the replacement password with bcrypt, updates MySQL, and sends a security confirmation email.
+- Registration requires explicit Terms of Service and Privacy Policy consent; the React registration form blocks submission until consent is checked, opens placeholder Terms/Privacy modals, and the backend validates `legal_consent: true` before recording `legal_consent`, `terms_accepted_at`, and `privacy_accepted_at` on the user row.
+- Login and registration are rate-limited to 5 attempts per minute via Flask-Limiter.
+- Sensitive routes use reusable live-database RBAC decorators such as `requires_role('admin')`, so suspended accounts or stale JWT role claims cannot retain privileged access.
+- User-generated text that is persisted for trips and memory notes is normalized and HTML-escaped server-side before it returns to React JSON views.
 - The frontend stores only the short-lived access JWT in localStorage for API calls. The longer-lived refresh JWT is set by the backend as an HttpOnly cookie scoped to `/api/refresh`, allowing silent renewal without exposing the refresh credential to JavaScript.
 - The React API client refreshes access tokens before expiry, retries once after an auth failure, and emits a clean session-expired redirect/toast when renewal is no longer possible.
 - Users have a role column (`user` by default, `admin` for privileged accounts). Login responses include the role and JWTs carry the role as an additional claim.
@@ -22,6 +28,9 @@ Core Product Features
 - Profile management endpoints:
   - POST /api/refresh (exchange HttpOnly refresh cookie for a new access token)
   - POST /api/logout (clear JWT cookies)
+  - POST /api/password-reset/request (send a 30-minute signed reset link by email)
+  - GET /api/password-reset/validate/<token> (validate reset-token freshness)
+  - POST /api/password-reset/confirm (bcrypt-hash and persist a new password)
   - GET /api/profile (fetch current user profile, including algorithmic preferences and member-since timestamp)
   - PATCH /api/profile (update username)
   - PATCH /api/profile/preferences (persist default budget, companion vector, vibe weights, email preferences, biometric toggle)
@@ -76,10 +85,11 @@ Core Product Features
 
 8a. Transactional Email
 
-- SendGrid is the live transactional mail provider.
-- Mail is queued first, written to MySQL, then sent through the provider adapter or processed asynchronously by the queue worker.
+- SMTP, SendGrid, and Mailgun are supported transactional mail providers. Local Gmail delivery uses `MAIL_PROVIDER=smtp`, `smtp.gmail.com:587`, TLS, and a Google App Password instead of the normal Gmail account password.
+- Mail is queued first, written to MySQL, then sent through the provider adapter or processed asynchronously by the queue worker. `flask --app app send-test-email <email>` sends one immediate provider test email for configuration checks.
 - The webhook endpoint ingests provider delivery events, normalizes them, and stores logs / suppression state for retries and compliance.
 - Email notifications are triggered by registration, account deletion, profile preference changes, admin status changes, friend requests/responses, collaborator invites/removals, itinerary saved reminders, itinerary start-date reminders, and weather-alert fallback delivery.
+- Security email templates include password-reset links and password-changed confirmations.
 - Profile preferences include opt-in email notification categories so users can control which mail classes they receive.
 
 8. The Flock: Friends, Collaboration, and Voting
@@ -131,14 +141,15 @@ Core Product Features
 
 12a. Admin Operations Console
 
-- /admin/\* renders a route-driven operations console separate from the mobile bottom-navigation shell, with /admin/dashboard as the landing page.
+- /admin/\* renders a route-driven operations console separate from the mobile bottom-navigation shell, with /admin/dashboard as the landing page and grouped navigation for Overview, Operations, Intelligence, Governance, and Infrastructure.
+- The admin frontend is split into a shell plus focused admin modules under `frontend/src/components/admin/`, so shared primitives, page views, and page-specific data loading are not coupled into one route component.
 - The frontend checks the stored JWT/profile role for navigation UX, while all admin operations are enforced again on the Flask backend through live database role checks.
-- Roles are `user`, `admin`, and `super_admin`. Only `super_admin` can promote or demote admin accounts. Admins can manage content, view analytics, suspend/reactivate accounts, review audit history, review email delivery state, inspect weather alerts, and request ML retraining.
+- Roles are `user`, `admin`, and `super_admin`. Only `super_admin` can promote or demote admin accounts, edit super-admin settings, or restore database backups. Admins can manage content, view analytics, suspend/reactivate accounts, review audit history, review email delivery state, inspect weather alerts, create/download backups, send operational notifications, and request ML retraining.
 - Suspended accounts are blocked during login and cannot use protected routes after their database status is changed.
 - Admin APIs:
   - GET /api/admin/overview returns command-center metrics, model status, and recent audit events.
   - GET /api/admin/email returns paginated email queue, delivery logs, suppression records, and summary counts.
-  - GET /api/admin/backups returns paginated backup history; POST /api/admin/backups creates a full database backup archive; GET /api/admin/backups/:id/download streams a stored archive; POST /api/admin/backups/:id/restore restores from backup history; POST /api/admin/backups/restore restores an uploaded archive.
+  - GET /api/admin/backups returns paginated backup history; POST /api/admin/backups creates a full database backup archive; GET /api/admin/backups/:id/download streams a stored archive; POST /api/admin/backups/:id/restore and POST /api/admin/backups/restore are super-admin-only restore paths.
   - GET /api/admin/users returns paginated searchable account-management rows.
   - PATCH /api/admin/users/:id/role is super-admin-only and protects against self-demotion and removing the last active super admin.
   - PATCH /api/admin/users/:id/status suspends or reactivates accounts without deleting user data.
@@ -154,7 +165,7 @@ Core Product Features
   - GET /api/admin/ml/status returns the latest Random Forest training run and run history.
   - POST /api/admin/ml/retrain exports user feedback signals and retrains the Random Forest recommendation classifier.
   - GET /api/admin/audit-log returns paginated privileged-action history with optional action, target, and date filters.
-- Admin UI patterns use dense data tables, operational metric cards, progress meters, status pills, filter controls, and command buttons aligned with the existing Aero-Glass design system.
+- Admin UI patterns use dense data tables, operational metric cards, progress meters, status pills, filter controls, notification compose controls, and command buttons aligned with the existing Aero-Glass design system.
 - All privileged mutations write to `admin_audit_log` with actor, action, target, request metadata, and payload context.
 - Admin-managed content extends the `places` table with publication status, curation notes, source, updated timestamp, and updater id so destination operations are tied to the recommendation and discovery systems.
 - ML operations write to `ml_training_runs`, including status, dataset rows, accuracy, precision/recall/F1 metrics, artifact paths, timestamps, and errors.
@@ -176,7 +187,7 @@ Core Product Features
   - Default Budget Tier Lock (Backpacker / Comfort / Luxury) — persists via /profile/preferences.
   - Companion Persona Vector — multi-select chips (Solo, Couple, Family/Kids, Friends, Seniors, Corporate).
   - Experiential Vibe Tuning Array — sliders for Culinary, Beach, Nature, Heritage, Nightlife. Debounced POSTs to /profile/preferences.
-- Security & hardware integration row with biometric authentication toggle (persisted) + active-session indicator.
+- Security & hardware integration row with biometric authentication toggle (persisted), Change Password reset-email action, and active-session indicator.
 - Appearance card persists Light/Dark color mode to localStorage and applies it through documentElement data-theme/color-scheme.
 - The Flock card manages friends, pending requests, outgoing requests, and user search from the profile surface.
 - Email notification preferences let users opt into or out of transactional mail categories from the same profile surface.
@@ -201,6 +212,7 @@ Frontend Layer
 - React 19 + Vite + vite-plugin-pwa.
 - Pages:
   - AuthPage
+  - ResetPasswordPage
   - DashboardPage (Aero-Glass home)
   - MyTripsPage (Trip Vault with lifecycle segmentation)
   - TravelWizard (Tara Na! 9-phase modal with optional voting lobby)
@@ -247,6 +259,9 @@ Backend Layer
 - webapp/routes/auth_routes.py
   - POST /api/register
   - POST /api/login
+  - POST /api/password-reset/request
+  - GET /api/password-reset/validate/<token>
+  - POST /api/password-reset/confirm
   - POST /api/refresh
   - POST /api/logout
   - GET / PATCH /api/profile
@@ -294,13 +309,19 @@ Backend Layer
   - PATCH /api/admin/users/<id>/status
   - GET / POST /api/admin/places
   - PATCH /api/admin/places/<id>
+  - GET /api/admin/analytics
   - GET /api/admin/itineraries
   - GET /api/admin/itineraries/<id>
   - GET /api/admin/notifications
   - POST /api/admin/notifications/send
+  - GET /api/admin/email
+  - GET /api/admin/weather
+  - GET / POST /api/admin/backups
+  - GET /api/admin/backups/<id>/download
+  - POST /api/admin/backups/<id>/restore (super-admin only)
+  - POST /api/admin/backups/restore (super-admin only)
   - GET /api/admin/settings
   - PATCH /api/admin/settings/<key>
-  - GET /api/admin/analytics
   - GET /api/admin/ml/status
   - POST /api/admin/ml/retrain
   - GET /api/admin/audit-log
@@ -326,7 +347,7 @@ Backend Layer
 Data Layer
 
 - MySQL schema:
-  - users (now: default_budget, companion_vector, vibe_weights, email_preferences, biometric_enabled, role, account_status, suspended_at, suspended_reason)
+  - users (now: default_budget, companion_vector, vibe_weights, email_preferences, biometric_enabled, role, account_status, suspended_at, suspended_reason, legal_consent, terms_accepted_at, privacy_accepted_at)
   - places (now: content status, curation notes, source, updated_at, updated_by), itineraries (with trip_start_date), itinerary_items, trip_feedback, weather_alerts, push_tokens
   - admin_audit_log, admin_backup_log, ml_training_runs, admin_settings, and admin_notification_log
   - email_queue, email_logs, and email_suppression back transactional delivery, auditing, and suppression

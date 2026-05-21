@@ -1,0 +1,9 @@
+{{ app_name }}
+
+Email delivery works
+
+Hi there,
+
+This test confirms Ano Tara can send transactional email to {{ recipient_email }} using the configured mail provider.
+
+You can now try the Forgot Password flow from the login page.

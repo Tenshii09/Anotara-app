@@ -9,6 +9,28 @@ cd frontend
 npm install
 npm run build
 
+Gmail SMTP for password reset emails
+
+1. In your Google Account, enable 2-Step Verification.
+2. Create an App Password for Mail.
+3. Add these values to .env, using your real Gmail address and the 16-character app password:
+
+MAIL_PROVIDER=smtp
+MAIL_FROM=your-gmail-address@gmail.com
+MAIL_FROM_NAME=Ano Tara!
+MAIL_SEND_IMMEDIATELY=true
+MAIL_SMTP_HOST=smtp.gmail.com
+MAIL_SMTP_PORT=587
+MAIL_SMTP_USERNAME=your-gmail-address@gmail.com
+MAIL_SMTP_PASSWORD=your-16-character-google-app-password
+MAIL_SMTP_USE_TLS=true
+FRONTEND_URL=http://127.0.0.1:5173
+
+4. Restart Flask after changing .env.
+5. Test delivery:
+flask --app app send-test-email your-gmail-address@gmail.com
+6. Then use the Login page Forgot Password link.
+
 Removing venv
 deactivate  
 # Remove virtual environment

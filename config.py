@@ -20,6 +20,7 @@ class Config:
     JWT_COOKIE_SECURE = os.environ.get('JWT_COOKIE_SECURE', 'false').lower() == 'true'
     JWT_COOKIE_SAMESITE = os.environ.get('JWT_COOKIE_SAMESITE', 'Lax')
     JWT_REFRESH_COOKIE_PATH = '/api/refresh'
+    RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI', 'memory://')
     
     # These names MUST match exactly
     DB_HOST     = os.environ.get('MYSQLHOST')
@@ -50,5 +51,6 @@ class Config:
     MAIL_SMTP_USERNAME = os.environ.get('MAIL_SMTP_USERNAME', '')
     MAIL_SMTP_PASSWORD = os.environ.get('MAIL_SMTP_PASSWORD', '')
     MAIL_SMTP_USE_TLS = os.environ.get('MAIL_SMTP_USE_TLS', 'true').lower() == 'true'
+    FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://127.0.0.1:5173')
 
     ADMIN_BACKUP_DIR = os.environ.get('ADMIN_BACKUP_DIR', os.path.join(os.path.dirname(__file__), 'admin_backups'))

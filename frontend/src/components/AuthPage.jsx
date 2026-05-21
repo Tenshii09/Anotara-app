@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 
 import { persistSession } from "../lib/authSession";
 import { apiRequest } from "../lib/apiClient";
+import BottomSheet from "./common/BottomSheet";
+import PasswordResetRequestSheet from "./PasswordResetRequestSheet";
 
 // These cards explain the frontend migration to users and also serve as a
 // quick summary of how the new React + REST architecture maps to the old UI.
@@ -25,6 +27,19 @@ const introCards = [
   },
 ];
 
+const legalCopy = {
+  terms: {
+    title: "Terms of Service",
+    body:
+      "These placeholder Terms of Service explain that Ano Tara accounts should be used responsibly, travel plans are provided for planning support, and users remain responsible for verifying routes, prices, availability, and local travel advisories before a trip.",
+  },
+  privacy: {
+    title: "Privacy Policy",
+    body:
+      "This placeholder Privacy Policy explains that Ano Tara collects account and trip-planning information to operate the service, secure user sessions, save itineraries, and improve recommendations. A complete policy will replace this draft before launch.",
+  },
+};
+
 export default function AuthPage({ initialMode = "login" }) {
   // Keep one component for both login and registration so the UI stays compact
   // while the backend still receives separate API requests.
@@ -35,16 +50,25 @@ export default function AuthPage({ initialMode = "login" }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [identifier, setIdentifier] = useState("");
+  const [legalConsent, setLegalConsent] = useState(false);
+  const [activeLegalModal, setActiveLegalModal] = useState(null);
+  const [passwordResetOpen, setPasswordResetOpen] = useState(false);
   const [message, setMessage] = useState("");
   const navigate = useNavigate();
+  const selectedLegalCopy = activeLegalModal ? legalCopy[activeLegalModal] : null;
 
   // Send the form data to the Flask API and branch the result depending on
   // whether the user is creating an account or logging in.
   const handleAuth = async (event) => {
     event.preventDefault();
+    if (isRegistering && !legalConsent) {
+      setMessage("Please agree to the Terms of Service and Privacy Policy.");
+      return;
+    }
+
     const endpoint = isRegistering ? "register" : "login";
     const payload = isRegistering
-      ? { username, email, password }
+      ? { username, email, password, legal_consent: true }
       : { identifier, password };
 
     try {
@@ -60,6 +84,7 @@ export default function AuthPage({ initialMode = "login" }) {
         // immediately sign in with the new account.
         setMessage("Account created. Please log in.");
         setIsRegistering(false);
+        setLegalConsent(false);
         setPassword("");
         return;
       }
@@ -178,9 +203,66 @@ export default function AuthPage({ initialMode = "login" }) {
               />
             </div>
 
+            {!isRegistering && (
+              <div style={{ textAlign: "right", margin: "-8px 0 18px" }}>
+                <button
+                  type="button"
+                  className="auth-switch"
+                  onClick={() => setPasswordResetOpen(true)}
+                >
+                  Forgot Password?
+                </button>
+              </div>
+            )}
+
+            {isRegistering && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "10px",
+                  marginBottom: "18px",
+                  fontSize: "0.92rem",
+                  lineHeight: 1.5,
+                }}
+              >
+                <input
+                  id="legal-consent"
+                  type="checkbox"
+                  aria-label="I agree to the Terms of Service and Privacy Policy"
+                  checked={legalConsent}
+                  onChange={(event) => setLegalConsent(event.target.checked)}
+                  required
+                  style={{ marginTop: "4px" }}
+                />
+                <span className="muted">
+                  I agree to the{" "}
+                  <button
+                    type="button"
+                    className="auth-switch"
+                    style={{ display: "inline", padding: 0 }}
+                    onClick={() => setActiveLegalModal("terms")}
+                  >
+                    Terms of Service
+                  </button>{" "}
+                  and{" "}
+                  <button
+                    type="button"
+                    className="auth-switch"
+                    style={{ display: "inline", padding: 0 }}
+                    onClick={() => setActiveLegalModal("privacy")}
+                  >
+                    Privacy Policy
+                  </button>
+                  .
+                </span>
+              </div>
+            )}
+
             <button
               className="btn-luxury"
               type="submit"
+              disabled={isRegistering && !legalConsent}
               style={{ width: "100%" }}
             >
               {isRegistering ? "Create account" : "Login"}
@@ -194,6 +276,7 @@ export default function AuthPage({ initialMode = "login" }) {
               className="auth-switch"
               onClick={() => {
                 setMessage("");
+                setLegalConsent(false);
                 setIsRegistering((current) => !current);
               }}
             >
@@ -206,6 +289,22 @@ export default function AuthPage({ initialMode = "login" }) {
           {message && <div className="error-banner">{message}</div>}
         </section>
       </div>
+      <BottomSheet
+        open={Boolean(selectedLegalCopy)}
+        onClose={() => setActiveLegalModal(null)}
+        title={selectedLegalCopy?.title}
+        size="sm"
+      >
+        <p className="muted" style={{ margin: 0, lineHeight: 1.7 }}>
+          {selectedLegalCopy?.body}
+        </p>
+      </BottomSheet>
+      <PasswordResetRequestSheet
+        open={passwordResetOpen}
+        onClose={() => setPasswordResetOpen(false)}
+        initialEmail={identifier.includes("@") ? identifier : ""}
+        title="Forgot your password?"
+      />
     </main>
   );
 }

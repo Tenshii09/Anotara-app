@@ -1,15 +1,14 @@
 """Admin operations routes for secure Ano-Tara management."""
 
-from functools import wraps
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request, send_file
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity
 
 from train_model import train_model
+from webapp.security import requires_role
 from webapp.services.email_service import list_admin_email_ops, queue_email
 from webapp.services.database import (
-    ADMIN_ROLES,
     create_admin_backup,
     create_admin_place,
     create_admin_notification_log,
@@ -26,7 +25,6 @@ from webapp.services.database import (
     get_latest_ml_training_run,
     list_admin_backups,
     list_admin_weather_alerts,
-    get_user_role,
     list_admin_itineraries,
     list_admin_places,
     list_admin_push_recipient_ids,
@@ -66,32 +64,8 @@ def _log_action(actor_id, action, target_type, target_id=None, payload=None):
     )
 
 
-def admin_required(route_handler):
-    """Require a live admin role from the database, not only the JWT claim."""
-    @wraps(route_handler)
-    @jwt_required()
-    def wrapped(*args, **kwargs):
-        current_user_id = get_jwt_identity()
-        user = get_user_role(current_user_id)
-        if not user or user.get('account_status') != 'active' or user.get('role') not in ADMIN_ROLES:
-            return jsonify({'error': 'Admin access required'}), 403
-        return route_handler(*args, **kwargs)
-
-    return wrapped
-
-
-def super_admin_required(route_handler):
-    """Require the super-admin role for admin-account elevation."""
-    @wraps(route_handler)
-    @admin_required
-    def wrapped(*args, **kwargs):
-        current_user_id = get_jwt_identity()
-        user = get_user_role(current_user_id)
-        if not user or user.get('role') != 'super_admin':
-            return jsonify({'error': 'Super admin access required'}), 403
-        return route_handler(*args, **kwargs)
-
-    return wrapped
+admin_required = requires_role('admin', 'super_admin')
+super_admin_required = requires_role('super_admin')
 
 
 @admin_bp.before_request
@@ -287,7 +261,7 @@ def api_admin_download_backup(backup_id):
 
 
 @admin_bp.route('/api/admin/backups/<int:backup_id>/restore', methods=['POST'])
-@admin_required
+@super_admin_required
 def api_admin_restore_backup_from_history(backup_id):
     """Restore the database from a stored backup archive."""
     actor_id = get_jwt_identity()
@@ -305,7 +279,7 @@ def api_admin_restore_backup_from_history(backup_id):
 
 
 @admin_bp.route('/api/admin/backups/restore', methods=['POST'])
-@admin_required
+@super_admin_required
 def api_admin_restore_backup_upload():
     """Restore the database from an uploaded backup archive."""
     actor_id = get_jwt_identity()

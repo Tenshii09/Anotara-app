@@ -5,14 +5,15 @@
 
 .bottom-nav {
   position: fixed;
-  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  bottom: var(--bottom-nav-offset, max(16px, env(safe-area-inset-bottom, 0px)));
   left: 50%;
   transform: translateX(-50%);
-  width: min(640px, calc(100vw - 24px));
+  width: min(620px, calc(100vw - 24px));
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) clamp(58px, 13vw, 72px) minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
-  gap: 4px;
+  gap: clamp(2px, 1.2vw, 8px);
+  min-height: var(--bottom-nav-height, 94px);
   padding: 10px clamp(8px, 2vw, 14px);
   border-radius: 999px;
   background: var(--glass-bg);
@@ -45,7 +46,7 @@
   gap: 4px;
   min-width: 0;
   min-height: 44px;
-  padding: 8px clamp(6px, 2vw, 14px);
+  padding: 8px clamp(4px, 1.8vw, 12px);
   background: none;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -109,9 +110,10 @@
 
 /* Floating center action — the trip generator entry point. */
 .center-btn {
-  width: clamp(52px, 14vw, 60px);
-  height: clamp(52px, 14vw, 60px);
-  min-height: clamp(52px, 14vw, 60px);
+  justify-self: center;
+  width: clamp(52px, 13vw, 62px);
+  height: clamp(52px, 13vw, 62px);
+  min-height: clamp(52px, 13vw, 62px);
   border-radius: 50%;
   margin-top: -28px;
   color: #fff;
@@ -149,8 +151,10 @@
 /* Mobile-first: hide labels on tight screens, but keep the center icon. */
 @media (max-width: 480px) {
   .bottom-nav {
-    width: calc(100vw - 16px);
-    padding: 8px 10px;
+    width: calc(100vw - 14px);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) clamp(54px, 16vw, 60px) minmax(0, 1fr) minmax(0, 1fr);
+    min-height: 78px;
+    padding: 8px;
   }
 
   .bottom-nav-btn {
@@ -159,5 +163,24 @@
 
   .label {
     display: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .bottom-nav {
+    width: calc(100vw - 10px);
+    gap: 0;
+    padding-inline: 6px;
+  }
+
+  .bottom-nav-btn {
+    min-height: 42px;
+  }
+
+  .center-btn {
+    width: 50px;
+    height: 50px;
+    min-height: 50px;
+    margin-top: -22px;
   }
 }

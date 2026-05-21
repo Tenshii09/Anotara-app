@@ -3,8 +3,11 @@
 This blueprint handles registration and login and returns JWTs to the frontend.
 """
 
+import hashlib
+
 import mysql.connector
-from flask import Blueprint, jsonify, request
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -14,18 +17,30 @@ from flask_jwt_extended import (
     unset_jwt_cookies,
 )
 
-from webapp.extensions import bcrypt
+from webapp.extensions import bcrypt, limiter
+from webapp.security_utils import (
+    EMAIL_PATTERN,
+    USERNAME_PATTERN,
+    parse_json_payload,
+    validate_string_field,
+)
 from webapp.services.email_service import queue_email
 from webapp.services.database import (
+    create_user_account,
     delete_user_account,
     ensure_user_columns,
     get_db,
+    get_user_auth_record_by_email,
+    get_user_auth_record_by_id_and_email,
     get_user_profile,
     update_user_preferences,
+    update_user_password,
     update_user_profile_name,
 )
 
 auth_bp = Blueprint('auth', __name__)
+RESET_TOKEN_SALT = 'password-reset'
+RESET_TOKEN_MAX_AGE_SECONDS = 30 * 60
 
 
 def _build_login_response(user):
@@ -44,6 +59,35 @@ def _build_login_response(user):
     return response
 
 
+def _password_reset_serializer():
+    secret_key = current_app.config['SECRET_KEY']
+    return URLSafeTimedSerializer(secret_key, salt=RESET_TOKEN_SALT)
+
+
+def _build_frontend_reset_url(token):
+    frontend_url = str(current_app.config.get('FRONTEND_URL') or '').rstrip('/')
+    if frontend_url:
+        return f'{frontend_url}/reset-password/{token}'
+    return f'/reset-password/{token}'
+
+
+def _password_reset_fingerprint(password_hash):
+    return hashlib.sha256(str(password_hash or '').encode('utf-8')).hexdigest()
+
+
+def _load_user_from_reset_token(token):
+    payload = _password_reset_serializer().loads(
+        token,
+        max_age=RESET_TOKEN_MAX_AGE_SECONDS,
+    )
+    user = get_user_auth_record_by_id_and_email(payload.get('user_id'), payload.get('email'))
+    if not user:
+        return None
+    if payload.get('password_fingerprint') != _password_reset_fingerprint(user.get('password')):
+        return None
+    return user
+
+
 def _get_active_user_for_refresh(user_id):
     """Load active account metadata before minting a replacement access token."""
     db = get_db()
@@ -59,27 +103,43 @@ def _get_active_user_for_refresh(user_id):
 
 
 @auth_bp.route('/api/register', methods=['POST'])
+@limiter.limit('5 per minute')
 def api_register():
     """Create a new user account if the username and email are available."""
-    ensure_user_columns()
-    data = request.get_json()
-    username = data.get('username', '').strip()
-    email = data.get('email', '').strip()
-    password = data.get('password', '')
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
 
-    if not username or not email or not password:
-        return jsonify({'error': 'All fields are required'}), 400
+    username, error = validate_string_field(
+        data,
+        'username',
+        min_length=3,
+        max_length=50,
+        pattern=USERNAME_PATTERN,
+    )
+    if error:
+        return jsonify({'error': error}), 400
+
+    email, error = validate_string_field(
+        data,
+        'email',
+        min_length=5,
+        max_length=100,
+        pattern=EMAIL_PATTERN,
+    )
+    if error:
+        return jsonify({'error': error}), 400
+
+    password, error = validate_string_field(data, 'password', min_length=8, max_length=128)
+    if error:
+        return jsonify({'error': error}), 400
+
+    if data.get('legal_consent') is not True:
+        return jsonify({'error': 'Terms of Service and Privacy Policy consent is required'}), 400
 
     hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
-    db = get_db()
-    cursor = db.cursor()
     try:
-        cursor.execute(
-            'INSERT INTO users (username, email, password) VALUES (%s, %s, %s)',
-            (username, email, hashed_pw),
-        )
-        db.commit()
-        user_id = cursor.lastrowid
+        user_id = create_user_account(username, email, hashed_pw, legal_consent=True)
         queue_email({
             'recipient_user_id': user_id,
             'recipient_email': email,
@@ -92,17 +152,24 @@ def api_register():
         return jsonify({'message': 'Account created'}), 201
     except mysql.connector.IntegrityError:
         return jsonify({'error': 'Username/Email taken'}), 409
-    finally:
-        db.close()
 
 
 @auth_bp.route('/api/login', methods=['POST'])
+@limiter.limit('5 per minute')
 def api_login():
     """Validate credentials and issue a JWT access token."""
     ensure_user_columns()
-    data = request.get_json()
-    identifier = data.get('identifier', '').strip()
-    password = data.get('password', '')
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
+
+    identifier, error = validate_string_field(data, 'identifier', min_length=3, max_length=100)
+    if error:
+        return jsonify({'error': error}), 400
+
+    password, error = validate_string_field(data, 'password', min_length=1, max_length=128)
+    if error:
+        return jsonify({'error': error}), 400
 
     db = get_db()
     cursor = db.cursor(dictionary=True)
@@ -116,6 +183,114 @@ def api_login():
     if user and bcrypt.check_password_hash(user['password'], password):
         return _build_login_response(user), 200
     return jsonify({'error': 'Invalid credentials'}), 401
+
+
+@auth_bp.route('/api/password-reset/request', methods=['POST'])
+@limiter.limit('5 per minute')
+def api_request_password_reset():
+    """Send a short-lived password reset link when the email belongs to a user."""
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
+
+    email, error = validate_string_field(
+        data,
+        'email',
+        min_length=5,
+        max_length=100,
+        pattern=EMAIL_PATTERN,
+    )
+    if error:
+        return jsonify({'error': error}), 400
+
+    generic_message = 'If that email is registered, a password reset link has been sent.'
+    user = get_user_auth_record_by_email(email)
+    if not user or user.get('account_status') == 'suspended':
+        return jsonify({'message': generic_message}), 200
+
+    token = _password_reset_serializer().dumps({
+        'user_id': user['id'],
+        'email': user['email'],
+        'password_fingerprint': _password_reset_fingerprint(user.get('password')),
+    })
+    reset_url = _build_frontend_reset_url(token)
+
+    queue_email({
+        'recipient_user_id': user['id'],
+        'recipient_email': user['email'],
+        'recipient_name': user.get('username'),
+        'subject': 'Reset your Ano Tara password',
+        'template_name': 'password_reset',
+        'category': 'security',
+        'priority': 10,
+        'context': {
+            'username': user.get('username'),
+            'reset_url': reset_url,
+            'expires_minutes': 30,
+        },
+    })
+
+    return jsonify({'message': generic_message}), 200
+
+
+@auth_bp.route('/api/password-reset/validate/<token>', methods=['GET'])
+@limiter.limit('20 per minute')
+def api_validate_password_reset_token(token):
+    """Allow the frontend reset form to reject expired or malformed tokens early."""
+    try:
+        user = _load_user_from_reset_token(token)
+    except SignatureExpired:
+        return jsonify({'error': 'Password reset link has expired.'}), 400
+    except BadSignature:
+        return jsonify({'error': 'Password reset link is invalid.'}), 400
+
+    if not user or user.get('account_status') == 'suspended':
+        return jsonify({'error': 'Password reset link is invalid.'}), 400
+
+    return jsonify({'message': 'Password reset link is valid.'}), 200
+
+
+@auth_bp.route('/api/password-reset/confirm', methods=['POST'])
+@limiter.limit('5 per minute')
+def api_confirm_password_reset():
+    """Validate a password reset token, hash the new password, and persist it."""
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
+
+    token, error = validate_string_field(data, 'token', min_length=20, max_length=512)
+    if error:
+        return jsonify({'error': error}), 400
+
+    password, error = validate_string_field(data, 'password', min_length=8, max_length=128)
+    if error:
+        return jsonify({'error': error}), 400
+
+    try:
+        user = _load_user_from_reset_token(token)
+    except SignatureExpired:
+        return jsonify({'error': 'Password reset link has expired.'}), 400
+    except BadSignature:
+        return jsonify({'error': 'Password reset link is invalid.'}), 400
+
+    if not user or user.get('account_status') == 'suspended':
+        return jsonify({'error': 'Password reset link is invalid.'}), 400
+
+    hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+    if not update_user_password(user['id'], hashed_pw):
+        return jsonify({'error': 'User not found'}), 404
+
+    queue_email({
+        'recipient_user_id': user['id'],
+        'recipient_email': user['email'],
+        'recipient_name': user.get('username'),
+        'subject': 'Your Ano Tara password was changed',
+        'template_name': 'password_changed',
+        'category': 'security',
+        'context': {'username': user.get('username')},
+    })
+
+    return jsonify({'message': 'Password updated. Please log in with your new password.'}), 200
 
 
 @auth_bp.route('/api/refresh', methods=['POST'])

@@ -17,14 +17,18 @@ from webapp.constants import CATEGORY_MAP, PH_BOUNDS
 ML_MODEL_PATH = 'anotara_ml_model.pkl'
 ML_COLUMNS_PATH = 'anotara_model_columns.pkl'
 
+ml_model = None
+ml_columns = None
+
 if os.path.exists(ML_MODEL_PATH) and os.path.exists(ML_COLUMNS_PATH):
-    ml_model = joblib.load(ML_MODEL_PATH)
-    ml_columns = joblib.load(ML_COLUMNS_PATH)
-    print('✅ Machine Learning Model Loaded Successfully!')
+    try:
+        ml_model = joblib.load(ML_MODEL_PATH)
+        ml_columns = joblib.load(ML_COLUMNS_PATH)
+        print('Machine Learning Model Loaded Successfully!')
+    except Exception as e:
+        print(f'ML Model could not be loaded ({e}). Falling back to rule-based scoring.')
 else:
-    ml_model = None
-    ml_columns = None
-    print('⚠️ ML Model not found. Falling back to rule-based scoring.')
+    print('ML Model not found. Falling back to rule-based scoring.')
 
 
 def geocode_mapbox(destination):

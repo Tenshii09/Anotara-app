@@ -17,6 +17,8 @@ from pathlib import Path
 import mysql.connector
 from flask import current_app
 
+from webapp.security_utils import sanitize_user_text
+
 
 def get_db():
     """Open and return a MySQL connection using the active Flask config."""
@@ -149,6 +151,12 @@ def ensure_user_columns():
         missing_columns.append('ADD COLUMN suspended_at DATETIME NULL')
     if 'suspended_reason' not in existing_columns:
         missing_columns.append('ADD COLUMN suspended_reason VARCHAR(255) NULL')
+    if 'legal_consent' not in existing_columns:
+        missing_columns.append('ADD COLUMN legal_consent BOOLEAN NOT NULL DEFAULT FALSE')
+    if 'terms_accepted_at' not in existing_columns:
+        missing_columns.append('ADD COLUMN terms_accepted_at DATETIME NULL')
+    if 'privacy_accepted_at' not in existing_columns:
+        missing_columns.append('ADD COLUMN privacy_accepted_at DATETIME NULL')
 
     if not missing_columns:
         return
@@ -168,6 +176,90 @@ def ensure_user_preference_columns():
     ensure_user_columns()
 
 
+def create_user_account(username, email, hashed_password, legal_consent=False):
+    """Persist a new user with legal consent timestamps."""
+    if legal_consent is not True:
+        raise ValueError('Legal consent is required before creating a user account')
+
+    ensure_user_columns()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO users
+                (username, email, password, legal_consent, terms_accepted_at, privacy_accepted_at)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (username, email, hashed_password, legal_consent),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_user_auth_record_by_email(email):
+    """Return password-reset-safe account metadata for a registered email."""
+    ensure_user_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT id, username, email, password, account_status
+            FROM users
+            WHERE LOWER(email) = %s
+            """,
+            (str(email or '').strip().lower(),),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_user_auth_record_by_id_and_email(user_id, email):
+    """Return auth metadata when a reset token points to this user/email pair."""
+    ensure_user_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT id, username, email, password, account_status
+            FROM users
+            WHERE id = %s AND LOWER(email) = %s
+            """,
+            (int(user_id), str(email or '').strip().lower()),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_user_password(user_id, hashed_password):
+    """Replace a user's bcrypt password hash after reset-token validation."""
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE users
+            SET password = %s
+            WHERE id = %s
+            """,
+            (hashed_password, int(user_id)),
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+        db.close()
+
+
 def get_user_profile(user_id):
     """Return the basic profile payload for one user."""
     ensure_user_columns()
@@ -178,7 +270,8 @@ def get_user_profile(user_id):
         cursor.execute(
             """
                  SELECT id, username, email, default_budget, companion_vector,
-                     vibe_weights, email_preferences, biometric_enabled, role, created_at
+                     vibe_weights, email_preferences, biometric_enabled, role, created_at,
+                     terms_accepted_at, privacy_accepted_at
             FROM users
             WHERE id = %s
             """,
@@ -806,8 +899,8 @@ def save_itinerary(
                 """,
                 (
                     user_id,
-                    f'Trip to {destination}',
-                    destination,
+                    f"Trip to {sanitize_user_text(destination, max_length=180)}",
+                    sanitize_user_text(destination, max_length=180),
                     budget,
                     num_days,
                     preferences_json,
@@ -823,7 +916,7 @@ def save_itinerary(
         else:
             cursor.execute(
                 "INSERT INTO itineraries (user_id, trip_name) VALUES (%s, %s)",
-                (user_id, f'Trip to {destination}'),
+                (user_id, f"Trip to {sanitize_user_text(destination, max_length=180)}"),
             )
         db.commit()
         itinerary_id = cursor.lastrowid
