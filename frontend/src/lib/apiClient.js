@@ -1,8 +1,5 @@
 import { API_BASE_URL } from "./config";
-import {
-  emitSessionExpired,
-  getValidAccessToken,
-} from "./authSession";
+import { emitSessionExpired, getValidAccessToken } from "./authSession";
 
 function normalizeErrorMessage(status, payload) {
   const payloadMessage =
@@ -26,7 +23,16 @@ function normalizeErrorMessage(status, payload) {
 }
 
 export async function apiRequest(path, options = {}) {
-  const { token = "", headers = {}, skipAuthRefresh = false, ...restOptions } = options;
+  const {
+    token = "",
+    headers = {},
+    skipAuthRefresh = false,
+    ...restOptions
+  } = options;
+  const baseUrl = String(API_BASE_URL || "").replace(/\/+$/, "");
+  const requestPath = String(path || "").startsWith("/")
+    ? String(path || "")
+    : `/${path || ""}`;
 
   async function resolveToken(forceRefresh = false) {
     if (skipAuthRefresh) return token;
@@ -38,7 +44,7 @@ export async function apiRequest(path, options = {}) {
   }
 
   async function sendRequest(authToken) {
-    return fetch(`${API_BASE_URL}${path}`, {
+    return fetch(`${baseUrl}${requestPath}`, {
       ...restOptions,
       credentials: restOptions.credentials || "include",
       headers: {
@@ -51,7 +57,10 @@ export async function apiRequest(path, options = {}) {
   try {
     let response = await sendRequest(await resolveToken(false));
 
-    if (!skipAuthRefresh && (response.status === 401 || response.status === 422)) {
+    if (
+      !skipAuthRefresh &&
+      (response.status === 401 || response.status === 422)
+    ) {
       try {
         response = await sendRequest(await resolveToken(true));
       } catch {
@@ -66,10 +75,15 @@ export async function apiRequest(path, options = {}) {
     const payload = hasJsonBody ? await response.json() : null;
 
     if (!response.ok) {
-      const requestError = new Error(normalizeErrorMessage(response.status, payload));
+      const requestError = new Error(
+        normalizeErrorMessage(response.status, payload),
+      );
       requestError.status = response.status;
       requestError.payload = payload;
-      if (!skipAuthRefresh && (response.status === 401 || response.status === 422)) {
+      if (
+        !skipAuthRefresh &&
+        (response.status === 401 || response.status === 422)
+      ) {
         emitSessionExpired(requestError.message);
       }
       throw requestError;

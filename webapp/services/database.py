@@ -1272,6 +1272,79 @@ def get_weather_alert_history(itinerary_id):
     return list_weather_alerts(itinerary_id, active_only=False)
 
 
+def list_admin_weather_alerts(search_query='', active_only=None, limit=50):
+    """Return weather alerts across itineraries for admin review."""
+    ensure_weather_alert_columns()
+    safe_query = str(search_query or '').strip()
+    safe_limit = max(1, min(int(limit or 50), 100))
+    conditions = []
+    params = []
+
+    if safe_query:
+        like_value = f'%{safe_query}%'
+        conditions.append(
+            '(weather_alerts.headline LIKE %s OR weather_alerts.message LIKE %s OR weather_alerts.alert_type LIKE %s '
+            'OR itineraries.trip_name LIKE %s OR itineraries.destination LIKE %s OR users.username LIKE %s OR users.email LIKE %s)'
+        )
+        params.extend([like_value, like_value, like_value, like_value, like_value, like_value, like_value])
+
+    if active_only is True:
+        conditions.append('weather_alerts.is_active = TRUE')
+    elif active_only is False:
+        conditions.append('weather_alerts.is_active = FALSE')
+
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            f"""
+            SELECT
+                weather_alerts.id,
+                weather_alerts.itinerary_id,
+                weather_alerts.alert_key,
+                weather_alerts.alert_type,
+                weather_alerts.headline,
+                weather_alerts.message,
+                weather_alerts.payload,
+                weather_alerts.is_active,
+                weather_alerts.created_at,
+                weather_alerts.updated_at,
+                weather_alerts.resolved_at,
+                weather_alerts.notification_signature,
+                weather_alerts.notification_sent_at,
+                itineraries.trip_name,
+                itineraries.destination,
+                itineraries.status AS itinerary_status,
+                users.username AS owner_name,
+                users.email AS owner_email
+            FROM weather_alerts
+            LEFT JOIN itineraries ON itineraries.id = weather_alerts.itinerary_id
+            LEFT JOIN users ON users.id = itineraries.user_id
+            {where_sql}
+            ORDER BY weather_alerts.updated_at DESC, weather_alerts.id DESC
+            LIMIT %s
+            """,
+            tuple(params + [safe_limit]),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            row['payload'] = _coerce_json_value(row.get('payload'), {})
+        return {
+            'summary': {
+                'total_alerts': len(rows),
+                'active_alerts': sum(1 for row in rows if row.get('is_active')),
+                'resolved_alerts': sum(1 for row in rows if not row.get('is_active')),
+                'affected_itineraries': len({row.get('itinerary_id') for row in rows if row.get('itinerary_id')}),
+            },
+            'alerts': [_json_safe(row) for row in rows],
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
 def get_indoor_place_alternatives(city, excluded_place_ids=None, limit=4):
     """Return indoor alternatives for weather pivots, filtered away from used places."""
     db = get_db()
@@ -1539,6 +1612,7 @@ def ensure_admin_tables():
     ensure_itinerary_item_columns()
     ensure_feedback_columns()
     ensure_push_token_columns()
+    ensure_weather_alert_columns()
     db = get_db()
     cursor = db.cursor()
 
@@ -1711,7 +1785,7 @@ def get_admin_audit_log(limit=30, offset=0, action='', target_type='', actor_id=
 
     try:
         cursor.execute(
-            """
+            f"""
             SELECT
                 audit.id,
                 audit.actor_id,
@@ -2647,6 +2721,44 @@ def export_feedback_training_dataset():
 
     if not records:
         return None, 0
+
+    label_values = {record['is_recommended'] for record in records}
+    if len(label_values) < 2:
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    name,
+                    COALESCE(city, '') AS city,
+                    category,
+                    COALESCE(rating, 3.5) AS rating
+                FROM places
+                WHERE name IS NOT NULL
+                ORDER BY rating ASC, name ASC
+                LIMIT %s
+                """,
+                (max(12, len(records)),),
+            )
+            fallback_places = cursor.fetchall()
+        finally:
+            cursor.close()
+            db.close()
+
+        if fallback_places:
+            synthetic_labels = {0 if 1 in label_values else 1}
+            for index, place in enumerate(fallback_places):
+                source_record = records[index % len(records)]
+                synthetic_record = dict(source_record)
+                synthetic_record.update({
+                    'place_name': place.get('name') or source_record['place_name'],
+                    'place_province': place.get('city') or source_record['place_province'],
+                    'place_category': place.get('category') or source_record['place_category'],
+                    'place_rating': float(place.get('rating') or 3.5),
+                    'is_recommended': next(iter(synthetic_labels)),
+                })
+                records.append(synthetic_record)
 
     fieldnames = [
         'user_budget',

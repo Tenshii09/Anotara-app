@@ -131,12 +131,13 @@ Core Product Features
 
 12a. Admin Operations Console
 
-- /admin renders a module-based operations console separate from the mobile bottom-navigation shell.
+- /admin/\* renders a route-driven operations console separate from the mobile bottom-navigation shell, with /admin/dashboard as the landing page.
 - The frontend checks the stored JWT/profile role for navigation UX, while all admin operations are enforced again on the Flask backend through live database role checks.
-- Roles are `user`, `admin`, and `super_admin`. Only `super_admin` can promote or demote admin accounts. Admins can manage content, view analytics, suspend/reactivate accounts, review audit history, and request ML retraining.
+- Roles are `user`, `admin`, and `super_admin`. Only `super_admin` can promote or demote admin accounts. Admins can manage content, view analytics, suspend/reactivate accounts, review audit history, review email delivery state, inspect weather alerts, and request ML retraining.
 - Suspended accounts are blocked during login and cannot use protected routes after their database status is changed.
 - Admin APIs:
   - GET /api/admin/overview returns command-center metrics, model status, and recent audit events.
+  - GET /api/admin/email returns email queue, delivery logs, suppression records, and summary counts.
   - GET /api/admin/users returns searchable account-management rows.
   - PATCH /api/admin/users/:id/role is super-admin-only and protects against self-demotion and removing the last active super admin.
   - PATCH /api/admin/users/:id/status suspends or reactivates accounts without deleting user data.
@@ -145,6 +146,7 @@ Core Product Features
   - GET /api/admin/itineraries/:id returns owner metadata, ordered itinerary stops, and feedback labels.
   - GET /api/admin/notifications returns push-token coverage and recent admin notification sends.
   - POST /api/admin/notifications/send sends targeted or all-user operational push notifications through FCM when credentials and user tokens exist.
+  - GET /api/admin/weather returns weather-alert inventory across itineraries with owner and trip context.
   - GET /api/admin/settings returns editable operational feature flags.
   - PATCH /api/admin/settings/:key is super-admin-only and updates one setting.
   - GET /api/admin/analytics returns chart-ready itinerary, feedback, category, user-growth, push-token, and ML-run data with optional date filters.
@@ -155,6 +157,7 @@ Core Product Features
 - All privileged mutations write to `admin_audit_log` with actor, action, target, request metadata, and payload context.
 - Admin-managed content extends the `places` table with publication status, curation notes, source, updated timestamp, and updater id so destination operations are tied to the recommendation and discovery systems.
 - ML operations write to `ml_training_runs`, including status, dataset rows, accuracy, precision/recall/F1 metrics, artifact paths, timestamps, and errors.
+- ML retraining exports feedback-driven rows and, when the live feedback stream is one-sided, synthesizes a balanced fallback set from the places catalog so the RandomForest model can still retrain safely instead of crashing with a single-class dataset.
 - Operations settings are stored in `admin_settings`; admin notification attempts are stored in `admin_notification_log`.
 
 13. Discover Tab

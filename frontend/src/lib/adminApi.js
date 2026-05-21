@@ -18,7 +18,12 @@ export function updateAdminUserRole(token, userId, role) {
   });
 }
 
-export function updateAdminUserStatus(token, userId, accountStatus, reason = "") {
+export function updateAdminUserStatus(
+  token,
+  userId,
+  accountStatus,
+  reason = "",
+) {
   return apiRequest(`/api/admin/users/${userId}/status`, {
     token,
     method: "PATCH",
@@ -55,7 +60,9 @@ export function getAdminAnalytics(token, filters = {}) {
   if (filters.startDate) params.set("start_date", filters.startDate);
   if (filters.endDate) params.set("end_date", filters.endDate);
   const query = params.toString();
-  return apiRequest(`/api/admin/analytics${query ? `?${query}` : ""}`, { token });
+  return apiRequest(`/api/admin/analytics${query ? `?${query}` : ""}`, {
+    token,
+  });
 }
 
 export function getAdminMlStatus(token) {
@@ -80,6 +87,20 @@ export function getAdminItineraryDetail(token, itineraryId) {
 
 export function getAdminNotifications(token) {
   return apiRequest("/api/admin/notifications", { token });
+}
+
+export function getAdminEmailOps(token, filters = {}) {
+  const params = new URLSearchParams({ limit: "30" });
+  if (filters.q) params.set("q", filters.q);
+  return apiRequest(`/api/admin/email?${params.toString()}`, { token });
+}
+
+export function getAdminWeatherOps(token, filters = {}) {
+  const params = new URLSearchParams({ limit: "50" });
+  if (filters.q) params.set("q", filters.q);
+  if (filters.activeOnly !== undefined)
+    params.set("active_only", filters.activeOnly ? "true" : "false");
+  return apiRequest(`/api/admin/weather?${params.toString()}`, { token });
 }
 
 export function sendAdminNotification(token, payload) {

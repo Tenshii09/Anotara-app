@@ -1,127 +1,92 @@
-## Plan: Transactional Email Notifications
+## Plan: Admin Console Expansion
 
-### Objective
+Build the admin experience as a clean, page-based operations console with a clear hierarchy: overview first, then operational pages, then intelligence, governance, and infrastructure. The goal is to turn the current single tabbed panel into a scalable admin system that covers dashboard, analytics, user/content moderation, ML, email/push operations, weather safety, audit/compliance, and backup/restore without coupling UI logic to route handlers.
 
-Add transactional email for user-critical events without breaking the current Flask/React architecture. The implementation must stay service-layer driven, parameterized, testable, and reversible.
+**Steps**
+1. Define the target admin information architecture and navigation model.
+   - Split the current tab list into stable sections: Overview, Operations, Intelligence, Governance, and Infrastructure.
+   - Keep the existing admin route but introduce internal subroutes or route-driven sections so the console can grow without becoming one large component.
+   - Decide which views are read-only dashboards versus mutation-heavy tools.
 
-### Current State
+2. Design the Dashboard page as the default landing surface.
+   - Show executive KPIs, system health, recent incidents, recent admin actions, and quick actions.
+   - Surface cross-system health for users, trips, feedback, push tokens, email queue, weather alerts, and ML status.
+   - Reuse existing metrics and alerts logic from backend admin overview responses.
 
-The codebase already has:
+3. Design the Analytics page as the intelligence hub.
+   - Add charts for user growth, trip volume, destination popularity, feedback quality, push reach, email performance, and ML run quality.
+   - Separate descriptive analytics from operational metrics so the page answers “what is happening?” and “what changed?” clearly.
+   - Add date filters and export-friendly data shapes.
 
-- Flask + JWT + bcrypt authentication
-- A service layer under [webapp/services/](webapp/services)
-- MySQL-backed persistence
-- React profile and preferences surfaces
-- PWA/offline behavior already in the frontend
+4. Break the current admin console into focused operational pages.
+   - Users & Access: search, suspend/reactivate, role changes, super-admin elevation rules, account history.
+   - Places & Content: create/edit/publish/archive destinations, curation notes, source tracking.
+   - Trips & Feedback: saved itinerary inspection, collaborator activity, feedback review.
+   - Notifications: push compose/send history and coverage.
+   - Email Ops: queue, logs, suppression list, retry visibility.
+   - ML Lab: training runs, retraining requests, dataset rows, artifact status.
+   - Weather & Safety: active alerts, affected itineraries, pivot resolution.
+   - Audit & Compliance: privileged action log with filters.
+   - Settings & Automation: feature flags and scheduled automation controls.
+   - Backups & Restore: backup status, export, and restore workflow.
 
-It does not yet have:
+5. Normalize backend capabilities into service-layer contracts.
+   - Keep route handlers thin in [webapp/routes/admin_routes.py](webapp/routes/admin_routes.py) and move any new query-heavy or stateful logic into [webapp/services/database.py](webapp/services/database.py) or dedicated service modules.
+   - Add focused helpers for dashboard aggregates, analytics breakdowns, email ops, weather ops, backup metadata, and any new admin drilldowns.
+   - Preserve live DB role checks and super-admin restrictions.
 
-- Mail provider configuration in [config.py](config.py)
-- An email service abstraction
-- Email audit/suppression storage
-- Webhook handling for bounces/complaints
-- Background delivery infrastructure
+6. Extend the admin API surface only where the UI truly needs it.
+   - Add endpoints for email queue/log/suppression visibility, weather alert inspection, and backup inventory if they are not already present.
+   - Keep all admin mutations audited through the existing privileged-action log pattern.
+   - Avoid broad catch-all endpoints; prefer page-specific payloads.
 
-### Non-Negotiable Constraints
+7. Expand the frontend admin shell into a routeable module system.
+   - Refactor [frontend/src/components/AdminPanelPage.jsx](frontend/src/components/AdminPanelPage.jsx) into smaller page components or page containers.
+   - Keep shared UI primitives for tables, metric cards, filters, status pills, and panels.
+   - Preserve the current Aero-Glass styling while making the layout denser and more readable.
 
-1. Keep provider logic out of route handlers.
-2. Keep all send, render, queue, and suppression logic in the service layer.
-3. Do not send marketing mail by default; transactional mail only unless the user opts in.
-4. Use parameterized DB writes only.
-5. Add documentation in the same change set if the API, schema, or ops flow changes.
+8. Wire navigation and access control cleanly.
+   - Update the admin entry in [frontend/src/App.jsx](frontend/src/App.jsx) so the dashboard is the landing route and subpages map to predictable URLs.
+   - Ensure the frontend still gates the admin UX by role, but backend remains the source of truth.
+   - Keep non-admin users redirected safely out of the admin space.
 
-### Delivery Order
+9. Add schema and migration support for any missing operational records.
+   - Keep the existing SQL schema backward-compatible.
+   - Add migrations for new tables/columns only when needed for email ops, backups, or future admin workflow state.
+   - Ensure new schema fields are mirrored in documentation and service-layer helpers.
 
-1. Foundation and config
-   - Add mail configuration to [config.py](config.py).
-   - Required keys: `MAIL_PROVIDER`, `MAIL_API_KEY`, `MAIL_FROM`, `MAIL_FROM_NAME`.
-   - Optional keys: `MAIL_DOMAIN`, `MAIL_DKIM_SELECTOR`, `MAIL_WEBHOOK_SECRET`, `MAIL_SUPPRESSION_DB`.
-   - Keep defaults safe: disabled behavior should fail closed, not silently send through an unconfigured provider.
+10. Update documentation alongside every API or schema change.
+   - Revise [architecture/SYSTEM_DOCUMENTATION.md](architecture/SYSTEM_DOCUMENTATION.md) so it reflects the final admin pages, navigation, endpoints, and data flow.
+   - Keep the documentation aligned with the current source of truth in backend and frontend code.
 
-2. Service abstraction
-   - Create [webapp/services/email_service.py](webapp/services/email_service.py).
-   - Provide a minimal public surface: `render_email`, `send_email`, `queue_email`, `process_queue`.
-   - Separate provider adapter code from business logic.
-   - Make the service usable in tests without a live provider.
+11. Validate the implementation with targeted checks.
+   - Run frontend build and lint checks after admin UI refactors.
+   - Run backend error checks for modified Flask routes and services.
+   - Verify role-based access, page loading, filter behavior, and mutation flows with a focused manual smoke test.
 
-3. Delivery worker
-   - Choose one queue mechanism and document it clearly. RQ + Redis is the simplest operational choice; do not support multiple workers on day one.
-   - Add retry policy, backoff, idempotency keys, and a dead-letter path.
-   - Avoid synchronous delivery inside request handlers except in tests or explicit admin tooling.
+**Relevant files**
+- [frontend/src/components/AdminPanelPage.jsx](frontend/src/components/AdminPanelPage.jsx) — current admin shell to split into smaller page modules.
+- [frontend/src/lib/adminApi.js](frontend/src/lib/adminApi.js) — admin request helpers and new API calls.
+- [frontend/src/App.jsx](frontend/src/App.jsx) — admin route entry and navigation hookup.
+- [webapp/routes/admin_routes.py](webapp/routes/admin_routes.py) — thin route handlers for admin endpoints.
+- [webapp/services/database.py](webapp/services/database.py) — admin aggregates, table helpers, and persistence logic.
+- [webapp/services/email_service.py](webapp/services/email_service.py) — email queue, suppression, logs, and delivery behavior.
+- [webapp/services/weather_monitor.py](webapp/services/weather_monitor.py) — weather alert generation and itinerary risk flow.
+- [webapp/services/push_notifications.py](webapp/services/push_notifications.py) — notification delivery and token coverage.
+- [travel_planner.sql](travel_planner.sql) — baseline schema to keep aligned with migrations.
+- [migrations/20260520_email_notifications.sql](migrations/20260520_email_notifications.sql) — existing email-related migration pattern.
+- [architecture/SYSTEM_DOCUMENTATION.md](architecture/SYSTEM_DOCUMENTATION.md) — must stay synchronized with any admin changes.
 
-4. Templates
-   - Add `templates/emails/` with a base layout and event-specific HTML/text pairs.
-   - Include plain-text fallbacks for every message.
-   - Keep templates branded, terse, and link-safe.
+**Verification**
+1. Run backend diagnostics for the modified Flask files and service modules.
+2. Run frontend build/lint after the admin shell is split into page modules.
+3. Test admin and super-admin access paths with a real session token.
+4. Exercise dashboard, analytics, user role changes, place edits, ML retraining, and notification sending.
+5. Confirm documentation updates match the implemented routes, pages, and data model.
 
-5. Storage and suppression
-   - Add `email_logs` for delivery audit and `email_suppression` for bounces, complaints, and user opt-outs.
-   - Record enough metadata to trace message id, template, recipient, provider response, and suppression reason.
-   - Use migrations or versioned SQL under a dedicated `migrations/` path.
-
-6. Webhooks and deliverability
-   - Add a protected webhook endpoint for provider bounce/complaint events.
-   - Verify webhook authenticity with a secret or signed payload check.
-   - Document SPF, DKIM, and DMARC requirements for `MAIL_DOMAIN`.
-
-7. Preferences
-   - Extend `/api/profile/preferences` in [webapp/routes/auth_routes.py](webapp/routes/auth_routes.py) only if the backend already persists a JSON-safe preferences field.
-   - Add categories for `security`, `collaboration`, `itinerary_updates`, `weather_alerts`, and `messages`.
-   - Treat `marketing` as opt-in and keep it disabled unless explicitly enabled later.
-   - Update the Profile UI only after the backend contract is stable.
-
-8. Integrations
-   - Wire sends through the relevant service entry points, not directly from routes.
-   - Candidate touchpoints are the auth, admin, social, trip, and weather service flows already listed in the roadmap.
-   - Confirm exact function names before wiring; do not assume a route name from the plan is still current.
-
-### Implementation Sequence
-
-1. Update [config.py](config.py) first so the backend has a stable mail config surface before any code tries to read it.
-2. Create [webapp/services/email_service.py](webapp/services/email_service.py) next so rendering, queueing, suppression, and provider adapters live behind one API.
-3. Add the email templates under `templates/emails/` so the service has concrete message bodies before wiring any send call.
-4. Add the storage layer next: `email_logs` and `email_suppression` migrations under `migrations/`.
-5. Add the webhook route in the appropriate Flask routes module only after the service and storage paths exist.
-6. Extend [webapp/routes/auth_routes.py](webapp/routes/auth_routes.py) for preferences only after the backend persistence shape for email categories is decided.
-7. Wire the service entry points in the existing auth, social, trip, admin, and weather code paths one slice at a time.
-8. Update [requirements.txt](requirements.txt) and add [docs/email_setup.md](docs/email_setup.md) once the implementation shape is settled.
-9. Add tests last, but before merge, and cover templates, payload validation, suppression, webhook handling, and queue idempotency.
-
-### Critical Scope Notes
-
-- Do not make email a hard dependency for core auth or trip generation.
-- Do not block user actions on email delivery unless the feature is explicitly security-critical.
-- Start with a small set of messages: welcome, account deletion confirmation, collaborator invite, itinerary saved, and weather alert fallback.
-- Defer rich campaigns, attachments, and bulk sends until the transactional path is stable.
-
-### Verification
-
-1. Unit tests
-   - Render each template to HTML and plain text.
-   - Validate payload schema and required fields.
-   - Verify suppression lookup blocks sending.
-
-2. Integration tests
-   - Mock the provider adapter.
-   - Mock webhook bounce/complaint events and assert suppression records update.
-   - Confirm queue processing is idempotent.
-
-3. Manual smoke checks
-   - Register an account, trigger a collaborator action, and trigger a trip save or weather alert.
-   - Confirm the message is queued, logged, and rendered correctly.
-
-4. Operational checks
-   - Review send rate, failure rate, and suppression rate.
-   - Treat sustained bounce rate above 2% as a delivery problem, not a template problem.
-
-### Documentation To Add
-
-- `docs/email_setup.md` with provider setup, env vars, webhook setup, queue run commands, and troubleshooting.
-- `requirements.txt` updates for the chosen queue/provider dependencies.
-- `architecture/SYSTEM_DOCUMENTATION.md` only if the backend API, schema, or operational behavior changes in code.
-
-### Open Risks
-
-1. The current codebase does not yet expose a unified preferences persistence model for email categories, so that contract may need a schema decision before UI work starts.
-2. Queue choice affects deployment complexity; pick one worker stack early and do not dual-track it.
-3. Some of the listed integration points may need exact symbol verification before implementation because route and service names can drift.
+**Decisions**
+- The admin console should remain one protected product area, but it should be organized as multiple pages instead of one oversized tab panel.
+- Dashboard and analytics are first-class pages, not just widgets inside the overview.
+- Email ops, weather ops, and backups/restore are included because they match real system operations and already have partial backend foundations or clear operational need.
+- Keep mutations auditable and RBAC-enforced server-side; the frontend is only for UX gating.
+- Follow the decoupled architecture from `.cursorrules`: route handlers stay thin, database logic stays in services, and documentation updates are mandatory for API or schema changes.

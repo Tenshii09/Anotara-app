@@ -316,7 +316,7 @@ export default function ProfilePage() {
 
   function toggleEmailPreference(key) {
     setEmailPreferences((current) => {
-      const next = { ...current, [key]: !Boolean(current[key]) };
+      const next = { ...current, [key]: !current[key] };
       tapHaptic();
       persistPreferences({ email_preferences: next });
       return next;

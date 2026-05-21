@@ -487,6 +487,214 @@ def _fetch_queue_jobs(limit=25, queue_id=None):
         db.close()
 
 
+def _coerce_json_field(value, fallback=None):
+    fallback = {} if fallback is None else fallback
+    if value is None:
+        return dict(fallback)
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except (TypeError, ValueError):
+            pass
+    return dict(fallback)
+
+
+def list_admin_email_queue(search_query='', limit=30):
+    """Return the current email queue for admin operations."""
+    ensure_email_tables()
+    safe_query = _normalize_text(search_query)
+    safe_limit = max(1, min(int(limit or 30), 100))
+    conditions = []
+    params = []
+    if safe_query:
+        like_value = f'%{safe_query}%'
+        conditions.append(
+            '(recipient_email LIKE %s OR recipient_name LIKE %s OR subject LIKE %s OR template_name LIKE %s OR category LIKE %s OR status LIKE %s)'
+        )
+        params.extend([like_value, like_value, like_value, like_value, like_value, like_value])
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            f"""
+            SELECT
+                id,
+                recipient_user_id,
+                recipient_email,
+                recipient_name,
+                subject,
+                template_name,
+                category,
+                provider,
+                status,
+                priority,
+                attempts,
+                max_attempts,
+                send_at,
+                last_error,
+                provider_message_id,
+                created_at,
+                updated_at,
+                queued_at,
+                sent_at,
+                failed_at
+            FROM email_queue
+            {where_sql}
+            ORDER BY queued_at DESC, id DESC
+            LIMIT %s
+            """,
+            tuple(params + [safe_limit]),
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_email_logs(search_query='', limit=30):
+    """Return recent email delivery logs for the admin console."""
+    ensure_email_tables()
+    safe_query = _normalize_text(search_query)
+    safe_limit = max(1, min(int(limit or 30), 100))
+    conditions = []
+    params = []
+    if safe_query:
+        like_value = f'%{safe_query}%'
+        conditions.append(
+            '(logs.recipient_email LIKE %s OR logs.subject LIKE %s OR logs.template_name LIKE %s OR logs.category LIKE %s OR logs.status LIKE %s)'
+        )
+        params.extend([like_value, like_value, like_value, like_value, like_value])
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            f"""
+            SELECT
+                logs.id,
+                logs.queue_id,
+                logs.recipient_email,
+                logs.recipient_user_id,
+                logs.subject,
+                logs.template_name,
+                logs.category,
+                logs.provider,
+                logs.status,
+                logs.response_code,
+                logs.response_body,
+                logs.provider_message_id,
+                logs.attempt_number,
+                logs.payload,
+                logs.created_at,
+                users.username AS recipient_name
+            FROM email_logs logs
+            LEFT JOIN users ON users.id = logs.recipient_user_id
+            {where_sql}
+            ORDER BY logs.created_at DESC, logs.id DESC
+            LIMIT %s
+            """,
+            tuple(params + [safe_limit]),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            row['payload'] = _coerce_json_field(row.get('payload'), {})
+        return rows
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_email_suppressions(search_query='', limit=30):
+    """Return active and inactive suppression rows for review."""
+    ensure_email_tables()
+    safe_query = _normalize_text(search_query)
+    safe_limit = max(1, min(int(limit or 30), 100))
+    conditions = []
+    params = []
+    if safe_query:
+        like_value = f'%{safe_query}%'
+        conditions.append('(email LIKE %s OR reason LIKE %s OR source LIKE %s)')
+        params.extend([like_value, like_value, like_value])
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            f"""
+            SELECT
+                id,
+                email,
+                reason,
+                source,
+                details,
+                is_active,
+                created_at,
+                updated_at
+            FROM email_suppression
+            {where_sql}
+            ORDER BY updated_at DESC, id DESC
+            LIMIT %s
+            """,
+            tuple(params + [safe_limit]),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            row['details'] = _coerce_json_field(row.get('details'), {})
+        return rows
+    finally:
+        cursor.close()
+        db.close()
+
+
+def list_admin_email_ops(search_query='', limit=30):
+    """Return the email operations dashboard payload for admin review."""
+    ensure_email_tables()
+    queue = list_admin_email_queue(search_query=search_query, limit=limit)
+    logs = list_admin_email_logs(search_query=search_query, limit=limit)
+    suppressions = list_admin_email_suppressions(search_query=search_query, limit=limit)
+
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute('SELECT COUNT(*) AS value FROM email_queue')
+        queue_total = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM email_queue WHERE status = 'queued'")
+        queued_total = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM email_queue WHERE status = 'sending'")
+        sending_total = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute('SELECT COUNT(*) AS value FROM email_logs')
+        log_total = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute("SELECT COUNT(*) AS value FROM email_suppression WHERE is_active = TRUE")
+        active_suppressions = int((cursor.fetchone() or {}).get('value') or 0)
+        cursor.execute('SELECT COUNT(*) AS value FROM email_suppression')
+        suppression_total = int((cursor.fetchone() or {}).get('value') or 0)
+
+        return {
+            'summary': {
+                'queue_total': queue_total,
+                'queued_total': queued_total,
+                'sending_total': sending_total,
+                'log_total': log_total,
+                'active_suppressions': active_suppressions,
+                'suppression_total': suppression_total,
+            },
+            'queue': queue,
+            'logs': logs,
+            'suppressions': suppressions,
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
 def queue_email(payload):
     """Persist an email job for later delivery."""
     ensure_email_tables()

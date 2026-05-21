@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from train_model import train_model
-from webapp.services.email_service import queue_email
+from webapp.services.email_service import list_admin_email_ops, queue_email
 from webapp.services.database import (
     ADMIN_ROLES,
     create_admin_place,
@@ -21,6 +21,7 @@ from webapp.services.database import (
     get_admin_notification_overview,
     get_admin_overview,
     get_latest_ml_training_run,
+    list_admin_weather_alerts,
     get_user_role,
     list_admin_itineraries,
     list_admin_places,
@@ -237,6 +238,32 @@ def api_admin_itinerary_detail(itinerary_id):
 def api_admin_notifications():
     """Return push coverage and recent admin notification sends."""
     return jsonify(get_admin_notification_overview()), 200
+
+
+@admin_bp.route('/api/admin/email', methods=['GET'])
+@admin_required
+def api_admin_email_ops():
+    """Return email queue, delivery logs, and suppression records."""
+    return jsonify(list_admin_email_ops(
+        search_query=request.args.get('q', ''),
+        limit=request.args.get('limit', 30),
+    )), 200
+
+
+@admin_bp.route('/api/admin/weather', methods=['GET'])
+@admin_required
+def api_admin_weather_ops():
+    """Return the latest stored weather alerts for admin review."""
+    active_only = request.args.get('active_only')
+    if active_only is None or active_only == '':
+        active_flag = None
+    else:
+        active_flag = str(active_only).lower() in {'1', 'true', 'yes'}
+    return jsonify(list_admin_weather_alerts(
+        search_query=request.args.get('q', ''),
+        active_only=active_flag,
+        limit=request.args.get('limit', 50),
+    )), 200
 
 
 @admin_bp.route('/api/admin/notifications/send', methods=['POST'])

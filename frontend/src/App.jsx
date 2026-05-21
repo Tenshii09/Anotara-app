@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 
 import AuthPage from "./components/AuthPage";
 import ItineraryPage from "./components/ItineraryPage";
@@ -61,7 +68,9 @@ function LaunchSplash() {
       <div className="app-splash__inner">
         <BrandLogo size={56} showWordmark={false} />
         <h1 className="app-splash__title">Tara!</h1>
-        <p className="muted" style={{ margin: 0 }}>Your Philippine journey is loading…</p>
+        <p className="muted" style={{ margin: 0 }}>
+          Your Philippine journey is loading…
+        </p>
       </div>
     </div>
   );
@@ -76,7 +85,8 @@ function RouteAwareBottomNav() {
   const hiddenPrefixes = ["/login", "/register", "/generate", "/admin"];
   const pathname = location.pathname;
   const shouldHide =
-    pathname === "/" || hiddenPrefixes.some((prefix) => pathname.startsWith(prefix));
+    pathname === "/" ||
+    hiddenPrefixes.some((prefix) => pathname.startsWith(prefix));
   if (shouldHide) return null;
   return <BottomNav />;
 }
@@ -138,11 +148,20 @@ function AppRouteFrame() {
         The bottom padding reserves space for the floating glass nav on mobile
         routes. The desktop admin console owns the full viewport.
       */}
-      <div className={isAdminRoute ? "app-route-frame app-route-frame--admin" : "app-route-frame"}>
+      <div
+        className={
+          isAdminRoute
+            ? "app-route-frame app-route-frame--admin"
+            : "app-route-frame"
+        }
+      >
         <Routes>
           <Route path="/" element={<AuthPage initialMode="login" />} />
           <Route path="/login" element={<AuthPage initialMode="login" />} />
-          <Route path="/register" element={<AuthPage initialMode="register" />} />
+          <Route
+            path="/register"
+            element={<AuthPage initialMode="register" />}
+          />
 
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/my-trips" element={<MyTripsPage />} />
@@ -152,7 +171,7 @@ function AppRouteFrame() {
 
           <Route path="/discover" element={<DiscoverPage />} />
           <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/admin" element={<AdminPanelPage />} />
+          <Route path="/admin/*" element={<AdminPanelPage />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
