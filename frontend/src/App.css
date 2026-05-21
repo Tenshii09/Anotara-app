@@ -5668,10 +5668,16 @@ a:hover > .anotara-icon,
 /* ---------- Day selector ---------------------------------------------------- */
 .day-selector {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   overflow-x: auto;
-  padding: 4px 2px 8px;
+  padding: 8px;
   margin-bottom: 14px;
+  border: 1px solid rgba(74, 58, 138, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 16px 34px -28px rgba(35, 24, 71, 0.55);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
   scroll-snap-type: x mandatory;
 }
 
@@ -5686,16 +5692,18 @@ a:hover > .anotara-icon,
   flex: 0 0 auto;
   scroll-snap-align: start;
   display: inline-flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-width: 72px;
-  padding: 10px 16px;
-  border-radius: 18px;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg-strong);
-  color: var(--text-soft);
+  gap: 6px;
+  min-width: 78px;
+  min-height: 44px;
+  padding: 9px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(74, 58, 138, 0.18);
+  background: #fff;
+  color: #3d2f6f;
+  box-shadow: 0 10px 22px -18px rgba(35, 24, 71, 0.55);
   cursor: pointer;
   font-weight: 700;
   transition:
@@ -5706,17 +5714,19 @@ a:hover > .anotara-icon,
 }
 
 .day-selector__pill .day-selector__num {
-  font-family: var(--font-serif);
-  font-size: 1.5rem;
+  order: 2;
+  font-family: inherit;
+  font-size: 1rem;
   line-height: 1;
-  color: var(--text);
+  color: #261a52;
 }
 
 .day-selector__pill .day-selector__label {
-  font-size: 0.66rem;
-  letter-spacing: 0.16em;
+  order: 1;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: #5f4ea0;
 }
 
 .day-selector__pill.is-active {
@@ -5735,7 +5745,7 @@ a:hover > .anotara-icon,
 .day-selector__pill--all {
   flex-direction: row;
   gap: 6px;
-  min-width: auto;
+  min-width: max-content;
   border-radius: 999px;
 }
 
