@@ -32,6 +32,7 @@ const ItineraryPage = lazy(() => import("./components/ItineraryPage"));
 const TravelWizard = lazy(() => import("./components/TravelWizard"));
 const AdminPanelPage = lazy(() => import("./components/AdminPanelPage"));
 const ResetPasswordPage = lazy(() => import("./components/ResetPasswordPage"));
+const LandingPage = lazy(() => import("./components/LandingPage"));
 
 /**
  * Renders the fixed, animated fluid-pastel background that sits behind
@@ -88,6 +89,7 @@ function RouteAwareBottomNav() {
     "/login",
     "/register",
     "/reset-password",
+    "/landing",
     "/generate",
     "/itinerary",
     "/admin",
@@ -159,6 +161,7 @@ function AppRouteFrame() {
       "/login",
       "/register",
       "/reset-password",
+      "/landing",
       "/generate",
       "/itinerary",
       "/admin",
@@ -182,6 +185,7 @@ function AppRouteFrame() {
         >
           <Routes>
             <Route path="/" element={<AuthPage initialMode="login" />} />
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/login" element={<AuthPage initialMode="login" />} />
             <Route
               path="/register"
