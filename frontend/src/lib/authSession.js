@@ -1,13 +1,13 @@
 import { API_BASE_URL } from "./config";
 import {
-  clearStoredToken,
-  clearUserProfile,
+  clearPrivateStorage,
   getStoredToken,
   saveStoredToken,
   saveUserProfile,
 } from "./storage";
 
 const REFRESH_SKEW_MS = 2 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const SESSION_EXPIRED_EVENT = "anotara:session-expired";
 
 let refreshPromise = null;
@@ -71,8 +71,7 @@ export function persistSession({ token, username, role } = {}) {
 
 export function clearSession() {
   clearRefreshTimer();
-  clearStoredToken();
-  clearUserProfile();
+  clearPrivateStorage();
 }
 
 export function emitSessionExpired(message = "Your session expired. Please log in again.") {
@@ -171,4 +170,33 @@ export async function logoutSession() {
   } catch {
     /* A failed logout request should not keep local credentials around. */
   }
+}
+
+export function startIdleSessionTimeout({
+  timeoutMs = IDLE_TIMEOUT_MS,
+  warningMessage = "You were signed out after a period of inactivity.",
+} = {}) {
+  if (typeof window === "undefined") return () => {};
+
+  let idleTimer = null;
+  const resetTimer = () => {
+    window.clearTimeout(idleTimer);
+    if (!getStoredToken()) return;
+    idleTimer = window.setTimeout(() => {
+      emitSessionExpired(warningMessage);
+    }, timeoutMs);
+  };
+
+  const activityEvents = ["click", "keydown", "pointerdown", "touchstart", "visibilitychange"];
+  activityEvents.forEach((eventName) => {
+    window.addEventListener(eventName, resetTimer, { passive: true });
+  });
+  resetTimer();
+
+  return () => {
+    window.clearTimeout(idleTimer);
+    activityEvents.forEach((eventName) => {
+      window.removeEventListener(eventName, resetTimer);
+    });
+  };
 }

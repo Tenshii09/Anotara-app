@@ -71,11 +71,8 @@ function showAnoTaraNotification(payload = {}) {
 }
 
 self.addEventListener("push", (event) => {
-  console.log("Push signal reached SW!", event);
   const rawPayload = parseJsonPayload(event.data);
-  console.log("[Push Debug] Raw service worker push payload:", rawPayload);
   const notificationPayload = buildNotificationPayload(rawPayload);
-  console.log("[Push Debug] Normalized service worker notification payload:", notificationPayload);
 
   event.waitUntil(showAnoTaraNotification(notificationPayload));
 });
@@ -124,17 +121,3 @@ registerRoute(
   "GET",
 );
 
-registerRoute(
-  /^https?:\/\/[^/]+\/api\/.*$/i,
-  new NetworkFirst({
-    cacheName: "anotara-api",
-    networkTimeoutSeconds: 4,
-    plugins: [
-      new ExpirationPlugin({
-        maxEntries: 40,
-        maxAgeSeconds: 60 * 30,
-      }),
-    ],
-  }),
-  "GET",
-);

@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import BrandLogo from "./common/BrandLogo";
+import Icon from "./common/Icon";
+import {
+  applyTheme,
+  getInitialTheme,
+  persistTheme,
+  THEMES,
+} from "../lib/theme";
 
 const steps = [
   {
@@ -73,6 +80,7 @@ export default function LandingPage() {
   const navigate = useNavigate();
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installMessage, setInstallMessage] = useState("");
+  const [theme, setTheme] = useState(() => getInitialTheme());
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (event) => {
@@ -87,8 +95,19 @@ export default function LandingPage() {
     };
   }, []);
 
+  useEffect(() => {
+    applyTheme(theme);
+    persistTheme(theme);
+  }, [theme]);
+
   const handlePlanTrip = () => {
     navigate("/generate");
+  };
+
+  const toggleTheme = () => {
+    setTheme((currentTheme) =>
+      currentTheme === THEMES.dark ? THEMES.light : THEMES.dark,
+    );
   };
 
   const handleInstall = async () => {
@@ -113,9 +132,22 @@ export default function LandingPage() {
           <a href="#features">Features</a>
           <a href="#trending">Trending</a>
         </nav>
-        <button className="landing-nav__cta" type="button" onClick={handlePlanTrip}>
-          Plan Now
-        </button>
+        <div className="landing-nav__actions">
+          <button
+            className="landing-theme-toggle"
+            type="button"
+            onClick={toggleTheme}
+            aria-label={`Switch to ${theme === THEMES.dark ? "light" : "dark"} mode`}
+          >
+            <Icon name={theme === THEMES.dark ? "sun" : "moon"} size={18} />
+          </button>
+          <Link className="landing-nav__login" to="/login">
+            Log In
+          </Link>
+          <button className="landing-nav__cta" type="button" onClick={handlePlanTrip}>
+            Plan Now
+          </button>
+        </div>
       </header>
 
       <section className="landing-hero" aria-labelledby="landing-hero-title">
@@ -136,6 +168,9 @@ export default function LandingPage() {
             flagship SaaS workspace wrapped in soft glass and fluid pastel motion.
           </p>
           <div className="landing-hero__actions">
+            <Link className="landing-login-cta" to="/login">
+              Log In
+            </Link>
             <button className="landing-primary-cta" type="button" onClick={handlePlanTrip}>
               Plan My Trip Now
             </button>

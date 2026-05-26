@@ -39,6 +39,8 @@ from webapp.services.weather_monitor import build_weather_suggestion
 from webapp.services.pitch_generator import generate_itinerary_pitch
 from webapp.services.llm_itinerary import generate_llm_itinerary
 from webapp.security_utils import sanitize_user_text
+from webapp.security_utils import parse_int, parse_json_payload
+from webapp.services.social import can_access_itinerary
 from webapp.services.push_notifications import send_push_to_user, subscribe_token_to_topic
 from webapp.services.trip_planning import (
     build_itinerary,
@@ -56,6 +58,11 @@ def api_dashboard_summary():
     """Return aggregated dashboard stats for the current user."""
     current_user_id = get_jwt_identity()
     stats = get_user_travel_stats(current_user_id)
+    try:
+        from webapp.services.database import log_audit_event
+        log_audit_event('data.access.dashboard_summary', actor_id=current_user_id, target_type='dashboard')
+    except Exception:
+        current_app.logger.warning('Could not audit dashboard summary access.')
     return jsonify(stats), 200
 
 
@@ -65,7 +72,9 @@ def api_discover_feed():
     """Return discover suggestions and trending destinations."""
     tag = request.args.get('tag', 'all')
     search_query = request.args.get('q', '')
-    limit = request.args.get('limit', 18)
+    limit, error = parse_int(request.args.get('limit', 18), 'limit', minimum=1, maximum=50)
+    if error:
+        return jsonify({'error': error}), 400
 
     try:
         feed = get_discover_feed(tag=tag, search_query=search_query, limit=limit)
@@ -79,9 +88,17 @@ def api_discover_feed():
 def api_user_notifications():
     """Return notification-center events visible to the current user."""
     current_user_id = get_jwt_identity()
+    try:
+        from webapp.services.database import log_audit_event
+        log_audit_event('data.access.notifications', actor_id=current_user_id, target_type='notification')
+    except Exception:
+        current_app.logger.warning('Could not audit notification access.')
+    limit, error = parse_int(request.args.get('limit', 30), 'limit', minimum=1, maximum=80)
+    if error:
+        return jsonify({'error': error}), 400
     return jsonify(list_user_notification_events(
         current_user_id,
-        limit=request.args.get('limit', 30),
+        limit=limit,
     )), 200
 
 # The /api/itinerary route is for generating a preview without saving, while /api/generate saves the itinerary to the DB and returns an ID for future reference.    
@@ -319,11 +336,15 @@ def api_generate():
 def api_itinerary_feedback(itinerary_id):
     """Record explicit feedback for a generated itinerary stop."""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
+    if not can_access_itinerary(current_user_id, itinerary_id):
+        return jsonify({'error': 'Forbidden'}), 403
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
 
-    place_id = data.get('place_id')
-    if not place_id:
-        return jsonify({'error': 'place_id is required'}), 400
+    place_id, error = parse_int(data.get('place_id'), 'place_id', minimum=1)
+    if error:
+        return jsonify({'error': error}), 400
 
     raw_feedback = data.get('feedback')
     if raw_feedback in (1, True, '1', 'like', 'liked', 'up', 'positive'):
@@ -334,6 +355,11 @@ def api_itinerary_feedback(itinerary_id):
         return jsonify({'error': 'feedback must be like or dislike'}), 400
 
     save_place_feedback(current_user_id, itinerary_id, place_id, feedback_value)
+    try:
+        from webapp.services.database import log_audit_event
+        log_audit_event('itinerary.feedback', actor_id=current_user_id, target_type='itinerary', target_id=itinerary_id)
+    except Exception:
+        current_app.logger.warning('Could not audit itinerary feedback.')
     return jsonify({'message': 'Feedback saved.'}), 200
 
 
@@ -341,7 +367,12 @@ def api_itinerary_feedback(itinerary_id):
 @jwt_required()
 def api_reorder_itinerary_items(itinerary_id):
     """Update the order of items within an itinerary."""
-    data = request.get_json() or {}
+    current_user_id = get_jwt_identity()
+    if not can_access_itinerary(current_user_id, itinerary_id):
+        return jsonify({'error': 'Forbidden'}), 403
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     items = data.get('items', [])
 
     if not isinstance(items, list) or not items:
@@ -349,6 +380,11 @@ def api_reorder_itinerary_items(itinerary_id):
 
     try:
         update_itinerary_item_order(itinerary_id, items)
+        try:
+            from webapp.services.database import log_audit_event
+            log_audit_event('itinerary.reorder', actor_id=current_user_id, target_type='itinerary', target_id=itinerary_id)
+        except Exception:
+            current_app.logger.warning('Could not audit itinerary reorder.')
         return jsonify({'message': 'Itinerary order updated.'}), 200
     except Exception as error:
         return jsonify({'error': 'Could not reorder itinerary items'}), 500
@@ -425,7 +461,12 @@ def api_update_itinerary_start_date(itinerary_id):
 @jwt_required()
 def api_swap_itinerary_item(itinerary_id, item_id):
     """Replace a single itinerary stop with a nearby stronger candidate."""
-    data = request.get_json(silent=True) or {}
+    current_user_id = get_jwt_identity()
+    if not can_access_itinerary(current_user_id, itinerary_id):
+        return jsonify({'error': 'Forbidden'}), 403
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     preferred_place_id = data.get('preferred_place_id')
     prefer_indoor = bool(data.get('prefer_indoor'))
 
@@ -445,10 +486,15 @@ def api_swap_itinerary_item(itinerary_id, item_id):
 @jwt_required()
 def api_lock_itinerary_item(item_id):
     """Toggle or explicitly set the lock state of one itinerary stop."""
-    data = request.get_json() or {}
-    itinerary_id = data.get('itinerary_id')
-    if not itinerary_id:
-        return jsonify({'error': 'itinerary_id is required'}), 400
+    current_user_id = get_jwt_identity()
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
+    itinerary_id, error = parse_int(data.get('itinerary_id'), 'itinerary_id', minimum=1)
+    if error:
+        return jsonify({'error': error}), 400
+    if not can_access_itinerary(current_user_id, itinerary_id):
+        return jsonify({'error': 'Forbidden'}), 403
 
     context = get_itinerary_item_context(itinerary_id, item_id)
     if not context:
@@ -466,6 +512,9 @@ def api_lock_itinerary_item(item_id):
 @jwt_required()
 def api_smart_suggestion(itinerary_id):
     """Return a weather-aware suggestion banner for the saved itinerary."""
+    current_user_id = get_jwt_identity()
+    if not can_access_itinerary(current_user_id, itinerary_id):
+        return jsonify({'error': 'Forbidden'}), 403
     suggestion = build_weather_suggestion(itinerary_id, persist=True)
     if not suggestion:
         return jsonify({'error': 'Itinerary not found'}), 404
@@ -476,6 +525,9 @@ def api_smart_suggestion(itinerary_id):
 @jwt_required()
 def api_weather_alerts(itinerary_id):
     """Return stored weather alerts for an itinerary."""
+    current_user_id = get_jwt_identity()
+    if not can_access_itinerary(current_user_id, itinerary_id):
+        return jsonify({'error': 'Forbidden'}), 403
     if not get_itinerary_overview(itinerary_id):
         return jsonify({'error': 'Itinerary not found'}), 404
 
@@ -488,13 +540,9 @@ def api_weather_alerts(itinerary_id):
 def api_save_push_token():
     """Store a Firebase Cloud Messaging token for the current user."""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
-    print(f"PUSH TOKEN RECEIVED FROM FRONTEND: {json.dumps(data, default=str)}")
-    current_app.logger.info(
-        'Push token registration payload received for user_id=%s: %s',
-        current_user_id,
-        json.dumps(data, default=str),
-    )
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     token = (data.get('token') or '').strip()
 
     if not token:
@@ -563,7 +611,9 @@ def api_send_test_push():
 def api_delete_push_token():
     """Delete a Firebase Cloud Messaging token for the current user."""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     token = (data.get('token') or '').strip()
     if not token:
         return jsonify({'error': 'token is required'}), 400
@@ -612,7 +662,7 @@ def get_saved_itineraries():
         return jsonify(itineraries), 200
 
     except Exception as error:
-        print("Error fetching itineraries:", error)
+        current_app.logger.exception("Error fetching itineraries: %s", error)
         return jsonify({"error": "Failed to fetch itineraries"}), 500
 
     finally:
@@ -635,7 +685,7 @@ def get_saved_itinerary_details(itinerary_id):
         trip = overview.get("itinerary")
         items = overview.get("items", [])
 
-        if int(trip.get("user_id")) != int(current_user_id):
+        if not can_access_itinerary(current_user_id, itinerary_id):
             return jsonify({"error": "You are not allowed to view this itinerary"}), 403
 
         itinerary = {}
@@ -691,5 +741,5 @@ def get_saved_itinerary_details(itinerary_id):
         return jsonify(response), 200
 
     except Exception as error:
-        print("Error fetching itinerary details:", error)
-        return jsonify({"error": str(error)}), 500
+        current_app.logger.exception("Error fetching itinerary details: %s", error)
+        return jsonify({"error": "Failed to fetch itinerary details"}), 500

@@ -25,6 +25,6 @@ export function confirmPasswordReset(token, password) {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ token, password }),
+    body: JSON.stringify({ token, newPassword: password }),
   });
 }

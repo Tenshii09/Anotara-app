@@ -324,10 +324,10 @@ export default function DashboardPage() {
     () =>
       getUnreadNotifications(
         notificationReadState,
-        getVisibleNotifications(notificationDeletedState, [
+        [
           ...serverNotifications,
-          ...NOTIFICATION_EVENTS,
-        ]),
+          ...getVisibleNotifications(notificationDeletedState, NOTIFICATION_EVENTS),
+        ],
       ).length > 0,
     [notificationDeletedState, notificationReadState, serverNotifications],
   );

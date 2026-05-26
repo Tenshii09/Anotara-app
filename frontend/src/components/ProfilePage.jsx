@@ -162,6 +162,7 @@ export default function ProfilePage() {
   });
   const [findFriendsOpen, setFindFriendsOpen] = useState(false);
   const [passwordResetOpen, setPasswordResetOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [theme, setTheme] = useState(() => getInitialTheme());
   const [testPushBusy, setTestPushBusy] = useState(false);
   const [hardResetBusy, setHardResetBusy] = useState(false);
@@ -546,7 +547,7 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleLogout() {
+  async function handleConfirmLogout() {
     tapHaptic();
     clearTripData();
     clearWizardDraft();
@@ -1261,7 +1262,10 @@ export default function ProfilePage() {
             <button
               className="top-action-link"
               type="button"
-              onClick={handleLogout}
+              onClick={() => {
+                tapHaptic();
+                setIsLogoutModalOpen(true);
+              }}
             >
               Log out
             </button>
@@ -1283,6 +1287,36 @@ export default function ProfilePage() {
           </button>
         </article>
       </section>
+
+      <BottomSheet
+        open={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        title="Log out?"
+        size="sm"
+        footer={
+          <>
+            <button
+              className="btn-outline-luxury"
+              type="button"
+              onClick={() => setIsLogoutModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn-luxury"
+              type="button"
+              onClick={handleConfirmLogout}
+            >
+              Log Out
+            </button>
+          </>
+        }
+      >
+        <p className="muted" style={{ margin: 0, lineHeight: 1.7 }}>
+          Are you sure you want to log out? Any unsaved local changes should be
+          saved before you leave.
+        </p>
+      </BottomSheet>
 
       <BottomSheet
         open={pendingDelete}

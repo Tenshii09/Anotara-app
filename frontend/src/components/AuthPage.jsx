@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { persistSession } from "../lib/authSession";
 import { apiRequest } from "../lib/apiClient";
+import { enableTotp, generateTotpSetup, verifyTotp } from "../lib/totpApi";
 import BottomSheet from "./common/BottomSheet";
 import BrandLogo from "./common/BrandLogo";
 import PasswordResetRequestSheet from "./PasswordResetRequestSheet";
@@ -32,12 +33,17 @@ const legalCopy = {
   terms: {
     title: "Terms of Service",
     body:
-      "These placeholder Terms of Service explain that Ano-Tara! accounts should be used responsibly, travel plans are provided for planning support, and users remain responsible for verifying routes, prices, availability, and local travel advisories before a trip.",
+      "Ano-Tara! provides itinerary planning support, saved trips, collaboration, notifications, and recommendations. You are responsible for verifying routes, prices, safety advisories, availability, and local rules before traveling. Do not misuse the service, attempt unauthorized access, or upload content you do not have rights to share.",
   },
   privacy: {
     title: "Privacy Policy",
     body:
-      "This placeholder Privacy Policy explains that Ano-Tara! collects account and trip-planning information to operate the service, secure user sessions, save itineraries, and improve recommendations. A complete policy will replace this draft before launch.",
+      "Ano-Tara! collects account details, consent records, trip preferences, saved itineraries, collaboration activity, device notification tokens, and operational logs to provide the app, protect accounts, send requested notifications, troubleshoot errors, and improve recommendations. We do not intentionally expose passwords, tokens, or backup data to the frontend. You can update preferences or delete your account from Profile.",
+  },
+  notice: {
+    title: "Privacy Notice and Consent",
+    body:
+      "By creating an account, you consent to Ano-Tara! processing your account and trip-planning data for authentication, itinerary generation, saved trips, collaboration, notifications, security auditing, backups, and service reliability. You can withdraw from optional notifications in your browser or profile settings, and account deletion removes your user record and related cascaded data where supported.",
   },
 };
 
@@ -51,12 +57,52 @@ export default function AuthPage({ initialMode = "login" }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [identifier, setIdentifier] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpChallenge, setOtpChallenge] = useState(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpChallenge, setTotpChallenge] = useState(null);
+  const [totpSetup, setTotpSetup] = useState(null);
+  const [totpSetupLoading, setTotpSetupLoading] = useState(false);
+  const [totpSetupError, setTotpSetupError] = useState("");
   const [legalConsent, setLegalConsent] = useState(false);
   const [activeLegalModal, setActiveLegalModal] = useState(null);
+  const [privacyNoticeSeen, setPrivacyNoticeSeen] = useState(false);
   const [passwordResetOpen, setPasswordResetOpen] = useState(false);
   const [message, setMessage] = useState("");
   const navigate = useNavigate();
   const selectedLegalCopy = activeLegalModal ? legalCopy[activeLegalModal] : null;
+  const isOtpStep = Boolean(otpChallenge);
+  const isTotpStep = Boolean(totpChallenge);
+
+  useEffect(() => {
+    if (!totpChallenge?.needsSetup || totpSetup) return;
+
+    let active = true;
+    async function loadTotpSetup() {
+      try {
+        setTotpSetupLoading(true);
+        setTotpSetupError("");
+        setMessage("");
+        const setup = await generateTotpSetup(totpChallenge);
+        if (active) setTotpSetup(setup);
+      } catch (requestError) {
+        console.error("TOTP setup generation failed:", requestError);
+        if (active) {
+          const errorMessage =
+            requestError.message || "Could not start authenticator setup.";
+          setTotpSetupError(`Failed to load QR code: ${errorMessage}`);
+          setMessage(errorMessage);
+        }
+      } finally {
+        if (active) setTotpSetupLoading(false);
+      }
+    }
+
+    loadTotpSetup();
+    return () => {
+      active = false;
+    };
+  }, [totpChallenge, totpSetup]);
 
   function getDiagnosticAuthErrorMessage(requestError) {
     const firebaseCode =
@@ -91,13 +137,6 @@ export default function AuthPage({ initialMode = "login" }) {
       ? { username, email, password, legal_consent: true }
       : { identifier, password };
 
-    console.log("[Auth Debug] API Key exists:", !!import.meta.env.VITE_FIREBASE_API_KEY);
-    console.log(
-      "[Auth Debug] Firebase project loaded:",
-      import.meta.env.VITE_FIREBASE_PROJECT_ID || "(missing)",
-    );
-    console.log("[Auth Debug] Auth endpoint:", `/api/${endpoint}`);
-
     try {
       const data = await apiRequest(`/api/${endpoint}`, {
         method: "POST",
@@ -116,16 +155,95 @@ export default function AuthPage({ initialMode = "login" }) {
         return;
       }
 
+      if (data?.requires_otp) {
+        setOtpChallenge({
+          userId: data.user_id,
+          challengeId: data.challenge_id,
+          maskedEmail: data.masked_email,
+          expiresInSeconds: data.expires_in_seconds,
+        });
+        setOtpCode("");
+        setMessage(data.message || "Verification code sent to your email.");
+        return;
+      }
+
+      if (data?.requires_totp || data?.requires_totp_setup) {
+        setTotpChallenge({
+          userId: data.user_id,
+          challengeId: data.challenge_id,
+          role: data.role,
+          needsSetup: Boolean(data.requires_totp_setup),
+        });
+        setTotpCode("");
+        setTotpSetup(null);
+        setTotpSetupError("");
+        setMessage(data.message || "Authenticator verification required.");
+        return;
+      }
+
       persistSession(data);
       navigate(["admin", "super_admin"].includes(data.role) ? "/admin" : "/dashboard");
     } catch (requestError) {
-      console.error("[Auth Debug] Raw auth error object:", requestError);
-      console.error("[Auth Debug] error.code:", requestError?.code);
-      console.error("[Auth Debug] error.message:", requestError?.message);
-      console.error("[Auth Debug] error.status:", requestError?.status);
-      console.error("[Auth Debug] error.payload:", requestError?.payload);
-
       setMessage(getDiagnosticAuthErrorMessage(requestError));
+    }
+  };
+
+  const handleTotpSubmit = async (event) => {
+    event.preventDefault();
+    const cleanedCode = totpCode.replace(/\D/g, "").slice(0, 6);
+    if (cleanedCode.length !== 6) {
+      setMessage("Enter the 6-digit authenticator code.");
+      return;
+    }
+
+    try {
+      const data = totpChallenge.needsSetup
+        ? await enableTotp(totpChallenge, totpSetup?.secret, cleanedCode)
+        : await verifyTotp(totpChallenge, cleanedCode);
+      persistSession(data);
+      navigate(["admin", "super_admin"].includes(data.role) ? "/admin" : "/dashboard");
+    } catch (requestError) {
+      setMessage(requestError?.message || "Invalid authenticator code.");
+    }
+  };
+
+  function resetTotpFlow() {
+    setTotpChallenge(null);
+    setTotpCode("");
+    setTotpSetup(null);
+    setTotpSetupError("");
+    setPassword("");
+    setMessage("");
+  }
+
+  const handleOtpSubmit = async (event) => {
+    event.preventDefault();
+    const cleanedCode = otpCode.replace(/\D/g, "").slice(0, 6);
+    if (cleanedCode.length !== 6) {
+      setMessage("Enter the 6-digit verification code.");
+      return;
+    }
+
+    try {
+      const data = await apiRequest("/api/verify-otp", {
+        method: "POST",
+        skipAuthRefresh: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: otpChallenge.userId,
+          challenge_id: otpChallenge.challengeId,
+          code: cleanedCode,
+        }),
+      });
+      persistSession(data);
+      navigate(["admin", "super_admin"].includes(data.role) ? "/admin" : "/dashboard");
+    } catch (requestError) {
+      const errorMessage = requestError?.message || "Invalid Code";
+      setMessage(errorMessage);
+      if (errorMessage.toLowerCase().includes("expired")) {
+        setOtpChallenge(null);
+        setOtpCode("");
+      }
     }
   };
 
@@ -133,7 +251,13 @@ export default function AuthPage({ initialMode = "login" }) {
     <main className="app-page auth-page">
       <div className="auth-shell auth-grid">
         <section className="auth-intro">
-          <span className="hero-chip">Ano-Tara! Travel Planner</span>
+          <button
+            className="hero-chip auth-landing-chip"
+            type="button"
+            onClick={() => navigate("/landing")}
+          >
+            Ano-Tara! Travel Planner
+          </button>
           <h1 className="auth-title">
             Plan smarter trips across the Philippines.
           </h1>
@@ -180,7 +304,123 @@ export default function AuthPage({ initialMode = "login" }) {
             </p>
           </div>
 
-          <form onSubmit={handleAuth}>
+          {isTotpStep ? (
+            <form onSubmit={handleTotpSubmit}>
+              {totpChallenge.needsSetup ? (
+                <>
+                  <div className="admin-notice" style={{ marginBottom: "18px" }}>
+                    Admin accounts require Google Authenticator. Scan this QR code,
+                    then enter the 6-digit code from your app.
+                  </div>
+                  {totpSetupLoading ? (
+                    <p className="muted" style={{ textAlign: "center" }}>
+                      Preparing authenticator setup...
+                    </p>
+                  ) : totpSetupError ? (
+                    <div className="error-banner" style={{ marginBottom: 18 }}>
+                      {totpSetupError}
+                    </div>
+                  ) : totpSetup?.qr_code ? (
+                    <div style={{ display: "grid", gap: 12, marginBottom: 18, textAlign: "center" }}>
+                      <img
+                        alt="Google Authenticator QR code"
+                        src={totpSetup.qr_code}
+                        style={{ width: 180, height: 180, margin: "0 auto", borderRadius: 18 }}
+                      />
+                      <p className="muted" style={{ margin: 0, wordBreak: "break-all" }}>
+                        Manual key: <strong>{totpSetup.secret}</strong>
+                      </p>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="admin-notice" style={{ marginBottom: "18px" }}>
+                  Enter the 6-digit code from Google Authenticator to continue.
+                </div>
+              )}
+              <div style={{ marginBottom: "18px" }}>
+                <label className="field-label" htmlFor="totp-code">
+                  Authenticator Code
+                </label>
+                <input
+                  id="totp-code"
+                  className="auth-input"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={totpCode}
+                  onChange={(event) =>
+                    setTotpCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  required
+                  style={{ textAlign: "center", letterSpacing: "0.35em" }}
+                />
+              </div>
+              <button
+                className="btn-luxury"
+                type="submit"
+                disabled={totpChallenge.needsSetup && !totpSetup?.secret}
+                style={{ width: "100%" }}
+              >
+                {totpChallenge.needsSetup ? "Enable Authenticator" : "Verify & Continue"}
+              </button>
+              <div style={{ textAlign: "center", marginTop: "16px" }}>
+                <button type="button" className="auth-switch" onClick={resetTotpFlow}>
+                  Back to login
+                </button>
+              </div>
+            </form>
+          ) : isOtpStep ? (
+            <form onSubmit={handleOtpSubmit}>
+              <div className="admin-notice" style={{ marginBottom: "18px" }}>
+                A 6-digit verification code was sent to{" "}
+                <strong>{otpChallenge.maskedEmail || "your email"}</strong>.
+                It expires in 5 minutes.
+              </div>
+              <div style={{ marginBottom: "18px" }}>
+                <label className="field-label" htmlFor="otp-code">
+                  Verification code
+                </label>
+                <input
+                  id="otp-code"
+                  className="auth-input"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={otpCode}
+                  onChange={(event) =>
+                    setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  required
+                  style={{ textAlign: "center", letterSpacing: "0.35em" }}
+                />
+              </div>
+              <button className="btn-luxury" type="submit" style={{ width: "100%" }}>
+                Verify & Continue
+              </button>
+              <div style={{ textAlign: "center", marginTop: "16px" }}>
+                <button
+                  type="button"
+                  className="auth-switch"
+                  onClick={() => {
+                    setOtpChallenge(null);
+                    setOtpCode("");
+                    setPassword("");
+                    setMessage("");
+                  }}
+                >
+                  Back to login
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleAuth}>
             {isRegistering && (
               <div style={{ marginBottom: "16px" }}>
                 {/* Username is only needed for account creation. */}
@@ -250,6 +490,25 @@ export default function AuthPage({ initialMode = "login" }) {
             )}
 
             {isRegistering && (
+              <div className="admin-notice" style={{ marginBottom: "18px" }}>
+                <strong>Privacy Notice:</strong>{" "}
+                We use account, trip, collaboration, notification, and audit
+                data to operate and secure Ano-Tara!.{" "}
+                <button
+                  type="button"
+                  className="auth-switch"
+                  style={{ display: "inline", padding: 0 }}
+                  onClick={() => {
+                    setPrivacyNoticeSeen(true);
+                    setActiveLegalModal("notice");
+                  }}
+                >
+                  Review details
+                </button>
+              </div>
+            )}
+
+            {isRegistering && (
               <div
                 style={{
                   display: "flex",
@@ -265,12 +524,15 @@ export default function AuthPage({ initialMode = "login" }) {
                   type="checkbox"
                   aria-label="I agree to the Terms of Service and Privacy Policy"
                   checked={legalConsent}
-                  onChange={(event) => setLegalConsent(event.target.checked)}
+                  onChange={(event) => {
+                    setLegalConsent(event.target.checked);
+                    if (event.target.checked) setPrivacyNoticeSeen(true);
+                  }}
                   required
                   style={{ marginTop: "4px" }}
                 />
                 <span className="muted">
-                  I agree to the{" "}
+                  I have reviewed the privacy notice and agree to the{" "}
                   <button
                     type="button"
                     className="auth-switch"
@@ -301,26 +563,35 @@ export default function AuthPage({ initialMode = "login" }) {
             >
               {isRegistering ? "Create account" : "Login"}
             </button>
-          </form>
+            </form>
+          )}
 
-          <div style={{ textAlign: "center", marginTop: "16px" }}>
-            {/* Toggle the form mode without navigating away from the page. */}
-            <button
-              type="button"
-              className="auth-switch"
-              onClick={() => {
-                setMessage("");
-                setLegalConsent(false);
-                setIsRegistering((current) => !current);
-              }}
-            >
-              {isRegistering
-                ? "Already have an account? Login"
-                : "Don't have an account? Register"}
-            </button>
-          </div>
+          {!isOtpStep && !isTotpStep ? (
+            <div style={{ textAlign: "center", marginTop: "16px" }}>
+              {/* Toggle the form mode without navigating away from the page. */}
+              <button
+                type="button"
+                className="auth-switch"
+                onClick={() => {
+                  setMessage("");
+                  setLegalConsent(false);
+                  setPrivacyNoticeSeen(false);
+                  setIsRegistering((current) => !current);
+                }}
+              >
+                {isRegistering
+                  ? "Already have an account? Login"
+                  : "Don't have an account? Register"}
+              </button>
+            </div>
+          ) : null}
 
           {message && <div className="error-banner">{message}</div>}
+          {isRegistering && !privacyNoticeSeen ? (
+            <p className="muted" style={{ marginTop: "12px", fontSize: "0.86rem" }}>
+              Review the privacy notice before creating an account.
+            </p>
+          ) : null}
         </section>
       </div>
       <BottomSheet

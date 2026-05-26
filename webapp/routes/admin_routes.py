@@ -257,6 +257,7 @@ def api_admin_download_backup(backup_id):
         as_attachment=True,
         download_name=record.get('file_name') or file_path.name,
         mimetype='application/zip',
+        max_age=0,
     )
 
 
@@ -273,7 +274,11 @@ def api_admin_restore_backup_from_history(backup_id):
     if not file_path:
         return jsonify({'error': 'Backup file is not available.'}), 404
 
-    restored = restore_admin_backup(actor_id, file_path)
+    try:
+        restored = restore_admin_backup(actor_id, file_path)
+    except Exception as error:
+        current_app.logger.exception('Backup restore failed: %s', error)
+        return jsonify({'error': 'Backup restore failed.'}), 400
     _log_action(actor_id, 'backup.restore', 'backup', backup_id, restored)
     return jsonify(restored), 200
 
@@ -299,6 +304,9 @@ def api_admin_restore_backup_upload():
 
     try:
         restored = restore_admin_backup(actor_id, uploaded_path)
+    except Exception as error:
+        current_app.logger.exception('Uploaded backup restore failed: %s', error)
+        return jsonify({'error': 'Uploaded backup restore failed.'}), 400
     finally:
         if uploaded_path.exists():
             uploaded_path.unlink(missing_ok=True)
@@ -387,12 +395,15 @@ def _send_admin_notification():
     }
 
     if audience_type == 'all':
-        delivery = send_push_to_topic('all_users', payload)
-        result['sent'] += int(delivery.get('sent') or 0)
-        result['failed'] += int(delivery.get('failed') or 0)
-        if delivery.get('skipped'):
-            result['skipped'] += 1
-        result['details'].append(delivery)
+        recipient_ids = list_admin_push_recipient_ids('all')
+        result['recipient_count'] = len(recipient_ids)
+        for recipient_id in recipient_ids:
+            user_delivery = send_push_to_user(recipient_id, payload)
+            result['sent'] += int(user_delivery.get('sent') or 0)
+            result['failed'] += int(user_delivery.get('failed') or 0)
+            if user_delivery.get('skipped'):
+                result['skipped'] += 1
+            result['details'].append({'user_id': recipient_id, **user_delivery})
     else:
         recipient_ids = list_admin_push_recipient_ids(audience_type, target_user_id)
         result['recipient_count'] = len(recipient_ids)
@@ -417,7 +428,7 @@ def _send_admin_notification():
         'target_user_id': target_user_id,
         'title': title,
         'recipient_count': result['recipient_count'],
-        'topic': 'all_users' if audience_type == 'all' else None,
+        'topic': None,
     })
     return jsonify({'id': log_id, 'result': result}), 200
 

@@ -16,19 +16,25 @@ Core Product Features
 - Authentication uses Flask-JWT-Extended access and refresh tokens.
 - Passwords are hashed with bcrypt.
 - Forgot-password and profile-initiated password changes use POST /api/password-reset/request to send a registered-email reset link. Links are signed with itsdangerous, expire after 30 minutes, include a password-hash fingerprint so they cannot be reused after a successful reset, and are delivered through the transactional email queue.
-- /reset-password/:token renders the React reset form. The frontend validates links with GET /api/password-reset/validate/<token> and submits new passwords to POST /api/password-reset/confirm, where the backend validates the token, hashes the replacement password with bcrypt, updates MySQL, and sends a security confirmation email.
-- Registration requires explicit Terms of Service and Privacy Policy consent; the React registration form blocks submission until consent is checked, opens placeholder Terms/Privacy modals, and the backend validates `legal_consent: true` before recording `legal_consent`, `terms_accepted_at`, and `privacy_accepted_at` on the user row.
+- Reset links are standardized as `/reset-password?token=<signed-token>` using `http://localhost:5173` as the frontend base URL. The React reset page extracts the token with `useSearchParams`, validates links with GET /api/password-reset/validate/<token>, and submits `{ token, newPassword }` to POST /api/password-reset/confirm, where the backend validates the token, hashes the replacement password with bcrypt, updates MySQL, and sends a security confirmation email.
+- Registration requires explicit Terms of Service and Privacy Policy consent; the React registration form blocks submission until consent is checked, opens Terms/Privacy/Privacy Notice modals, and the backend validates `legal_consent: true` before recording `legal_consent`, `terms_accepted_at`, and `privacy_accepted_at` on the user row.
+- Password login now has a second-factor interception step before a final JWT/session is issued. Standard users receive a 6-digit email OTP stored in `login_otp_challenges` as a hash with a 5-minute expiry; POST /api/verify-otp consumes the challenge and returns the access token + refresh cookie.
+- Admin and super-admin users use Google Authenticator TOTP instead of email OTP. Password success creates a short-lived password-verified TOTP challenge; if `totp_enabled` is false the frontend shows an authenticator setup flow, otherwise it asks for the current authenticator code. Final admin access is issued only after POST /api/totp/enable or POST /api/totp/verify succeeds.
 - Login and registration are rate-limited to 5 attempts per minute via Flask-Limiter.
 - Sensitive routes use reusable live-database RBAC decorators such as `requires_role('admin')`, so suspended accounts or stale JWT role claims cannot retain privileged access.
 - User-generated text that is persisted for trips and memory notes is normalized and HTML-escaped server-side before it returns to React JSON views.
-- The frontend stores only the short-lived access JWT in localStorage for API calls. The longer-lived refresh JWT is set by the backend as an HttpOnly cookie scoped to `/api/refresh`, allowing silent renewal without exposing the refresh credential to JavaScript.
-- The React API client refreshes access tokens before expiry, retries once after an auth failure, and emits a clean session-expired redirect/toast when renewal is no longer possible.
+- The frontend stores only the short-lived access JWT in localStorage for API calls. The longer-lived refresh JWT is set by the backend as an HttpOnly cookie scoped to `/api/refresh`, allowing silent renewal without exposing the refresh credential to JavaScript. Logout and session-expiry cleanup clear private localStorage keys including trip drafts, profile cache, notification read state, recent searches, and push token metadata.
+- The React API client refreshes access tokens before expiry, retries once after an auth failure, enforces an idle-session timeout, and emits a clean session-expired redirect/toast when renewal is no longer possible.
 - Users have a role column (`user` by default, `admin` for privileged accounts). Login responses include the role and JWTs carry the role as an additional claim.
 - Local admin access can be seeded with `seed_admin_user.py`, which hashes the runtime `ANOTARA_ADMIN_PASSWORD` value before inserting or promoting `juandelacruz@gmail.com`.
 - The dashboard bell opens `/notifications`, a dedicated mobile-first Notification Center for user-facing system events such as trip invitations, itinerary exports, weather alerts, and offline/PWA updates. Until a backend notification inbox exists, seeded frontend events and read/unread state are stored locally under `anotara_notification_read_state`; the dashboard bell red dot reflects unread notification state.
 - Profile management endpoints:
   - POST /api/refresh (exchange HttpOnly refresh cookie for a new access token)
   - POST /api/logout (clear JWT cookies)
+  - POST /api/verify-otp (verify standard-user email OTP and issue the final session)
+  - POST /api/totp/generate (admin-only authenticator setup QR + secret)
+  - POST /api/totp/enable (verify setup code, persist `totp_secret`, and issue the final session)
+  - POST /api/totp/verify (verify existing admin authenticator code and issue the final session)
   - POST /api/password-reset/request (send a 30-minute signed reset link by email)
   - GET /api/password-reset/validate/<token> (validate reset-token freshness)
   - POST /api/password-reset/confirm (bcrypt-hash and persist a new password)
@@ -90,7 +96,7 @@ Core Product Features
 - Mail is queued first, written to MySQL, then sent through the provider adapter or processed asynchronously by the queue worker. `flask --app app send-test-email <email>` sends one immediate provider test email for configuration checks.
 - The webhook endpoint ingests provider delivery events, normalizes them, and stores logs / suppression state for retries and compliance.
 - Email notifications are triggered by registration, account deletion, profile preference changes, admin status changes, friend requests/responses, collaborator invites/removals, itinerary saved reminders, itinerary start-date reminders, and weather-alert fallback delivery.
-- Security email templates include password-reset links and password-changed confirmations.
+- Security email templates include password-reset links, password-changed confirmations, and 6-digit login OTP messages.
 - Profile preferences include opt-in email notification categories so users can control which mail classes they receive.
 
 8. The Flock: Friends, Collaboration, and Voting
@@ -131,7 +137,7 @@ Core Product Features
 - Firebase Cloud Messaging sends weather alerts to registered devices.
 - Frontend registers the FCM token after permission and asks the backend to enroll it in the `all_users` Firebase topic.
 - Backend stores tokens, subscribes new web tokens to the `all_users` topic through Firebase Admin, and dispatches alerts. If Firebase credentials are missing, invalid, or point to a non-existent local service-account file, push delivery is skipped with a structured reason instead of crashing the admin notification endpoint.
-- The in-app Notification Center calls GET `/api/notifications`, which returns visible admin broadcasts, targeted admin sends, and successful user test-push sends from `admin_notification_log`, then prepends them above the local seeded notification examples.
+- The in-app Notification Center calls GET `/api/notifications`, which returns visible admin broadcasts, targeted admin sends, and successful user test-push sends from `admin_notification_log` with the user-facing source label `System`, then prepends them above the local seeded notification examples.
 - Profile includes a light-mode-friendly "Test Push Notification" settings-card action with a bell icon for panel/demo use. It checks browser notification support, prompts for permission when needed, creates and registers the Firebase token with `/api/push-tokens` when available, subscribes that token server-side to `all_users`, sends an authentic Ano Tara payload through Firebase, and stores successful test sends as targeted Notification Center events.
 - The local test payload uses the "Ano Tara System Alert" title, "Test successful! Your push notifications are working perfectly." body copy, and the app PWA icon/badge assets so the demo notification looks like a real product alert.
 
@@ -150,6 +156,7 @@ Core Product Features
 - The admin frontend is split into a shell plus focused admin modules under `frontend/src/components/admin/`, so shared primitives, page views, and page-specific data loading are not coupled into one route component.
 - The frontend checks the stored JWT/profile role for navigation UX, while all admin operations are enforced again on the Flask backend through live database role checks.
 - Roles are `user`, `admin`, and `super_admin`. Only `super_admin` can promote or demote admin accounts, edit super-admin settings, or restore database backups. Admins can manage content, view analytics, suspend/reactivate accounts, review audit history, review email delivery state, inspect weather alerts, create/download backups, send operational notifications, and request ML retraining.
+- Admin and super-admin accounts must complete Google Authenticator TOTP. First-time admin sign-in returns `requires_totp_setup`; the React auth page calls `/api/totp/generate`, renders the QR code from a base64 data URL, verifies the app code through `/api/totp/enable`, and then receives the final JWT. Subsequent admin sign-ins return `requires_totp` and complete through `/api/totp/verify`.
 - Suspended accounts are blocked during login and cannot use protected routes after their database status is changed.
 - Admin APIs:
   - GET /api/admin/overview returns command-center metrics, model status, and recent audit events.
@@ -162,7 +169,7 @@ Core Product Features
   - GET /api/admin/itineraries returns paginated searchable saved-trip rows for support inspection.
   - GET /api/admin/itineraries/:id returns owner metadata, ordered itinerary stops, and feedback labels.
   - GET /api/admin/notifications returns push-token coverage, delivery health, and recent admin notification sends for read-only monitoring.
-  - POST /api/send-notification and POST /api/admin/notifications/send send operational push notifications through FCM; all-user sends target the Firebase `all_users` topic, while specific-user sends still use stored device tokens.
+  - POST /api/send-notification and POST /api/admin/notifications/send send operational push notifications through FCM; all-user and specific-user sends use stored device tokens so each reachable account receives one push and one matching in-app Notification Center record.
   - GET /api/admin/weather returns paginated weather-alert inventory across itineraries with owner and trip context.
   - GET /api/admin/settings returns editable operational feature flags.
   - PATCH /api/admin/settings/:key is super-admin-only and updates one setting.
@@ -175,7 +182,7 @@ Core Product Features
 - Admin-managed content extends the `places` table with publication status, curation notes, source, updated timestamp, and updater id so destination operations are tied to the recommendation and discovery systems.
 - ML operations write to `ml_training_runs`, including status, dataset rows, accuracy, precision/recall/F1 metrics, artifact paths, timestamps, and errors.
 - ML retraining exports feedback-driven rows and, when the live feedback stream is one-sided, synthesizes a balanced fallback set from the places catalog so the RandomForest model can still retrain safely instead of crashing with a single-class dataset.
-- Backup history is stored in `admin_backup_log`, and backup archives are written to the configurable `ADMIN_BACKUP_DIR`.
+- Backup history is stored in `admin_backup_log`, and backup archives are written to the configurable `ADMIN_BACKUP_DIR`. Normal backup list/create responses avoid exposing raw server file paths; restore uploads validate archive paths, manifest presence, target table names, and backup DDL shape before execution.
 - Operations settings are stored in `admin_settings`; admin notification attempts are stored in `admin_notification_log`.
 
 13. Discover Tab
@@ -248,10 +255,11 @@ Frontend Layer
   - TransportPicker.jsx — transport mode selector.
   - DealbreakersGrid.jsx — hard-constraint selector.
 - lib/apiClient.js — centralized fetch wrapper with normalized error messages, credentialed requests, silent token refresh, and one retry on expired access tokens.
-- lib/authSession.js — access-token persistence, JWT expiry decoding, refresh scheduling, logout cookie clearing, and global session-expired events.
+- lib/authSession.js — access-token persistence, JWT expiry decoding, refresh scheduling, idle timeout, private localStorage cleanup, logout cookie clearing, and global session-expired events.
 - lib/tripsApi.js — trip-focused helpers (getSavedItineraries, getDashboardSummary, getDiscoverFeed, getSmartSuggestion, updateTripStartDate, deleteItinerary, duplicateItinerary).
 - lib/profileApi.js — profile and preferences helpers (getProfile, updateProfile, updateProfilePreferences, deleteAccount).
 - lib/socialApi.js — friends, collaborators, vote sessions, memories, and hotel helper calls.
+- lib/totpApi.js — unauthenticated password-verified TOTP setup/verify helpers used before admin JWT issuance.
 - lib/timeBlocks.js — shared schedule/time-block computations for timeline + PDF export.
 - lib/pdfExport.js — self-contained printable itinerary/PDF export via browser print.
 - lib/theme.js — light/dark theme detection, application, and persistence.
@@ -266,6 +274,10 @@ Backend Layer
 - webapp/routes/auth_routes.py
   - POST /api/register
   - POST /api/login
+  - POST /api/verify-otp
+  - POST /api/totp/generate
+  - POST /api/totp/enable
+  - POST /api/totp/verify
   - POST /api/password-reset/request
   - GET /api/password-reset/validate/<token>
   - POST /api/password-reset/confirm
@@ -339,7 +351,8 @@ Backend Layer
 - webapp/services/email_service.py
   - queue_email(), send_email(), process_queue(), process_webhook_payload(), and suppression helpers for transactional delivery
 - webapp/services/database.py adds:
-  - ensure_user_preference_columns() — defensively adds default_budget, companion_vector, vibe_weights, email_preferences, profile_image, biometric_enabled, created_at usage to users.
+  - ensure_user_preference_columns() / ensure_user_columns() — defensively adds default_budget, companion_vector, vibe_weights, email_preferences, profile_image, biometric_enabled, role/status, legal consent timestamps, and admin TOTP fields to users.
+  - login_otp_challenges helpers for email OTP and admin TOTP password-verified challenges.
   - update_user_profile(user_id, …)
   - update_user_preferences(user_id, …)
   - delete_user_account(user_id)
@@ -357,10 +370,12 @@ Backend Layer
 Data Layer
 
 - MySQL schema:
-  - users (now: default_budget, companion_vector, vibe_weights, email_preferences, profile_image, biometric_enabled, role, account_status, suspended_at, suspended_reason, legal_consent, terms_accepted_at, privacy_accepted_at)
+  - users (now: default_budget, companion_vector, vibe_weights, email_preferences, profile_image, biometric_enabled, role, account_status, suspended_at, suspended_reason, legal_consent, terms_accepted_at, privacy_accepted_at, totp_secret, totp_enabled)
   - places (now: content status, curation notes, source, updated_at, updated_by), itineraries (with trip_start_date), itinerary_items, trip_feedback, weather_alerts, push_tokens
   - admin_audit_log, admin_backup_log, ml_training_runs, admin_settings, and admin_notification_log
   - email_queue, email_logs, and email_suppression back transactional delivery, auditing, and suppression
+  - audit_events stores broader authentication, profile, data-access, and backend error audit events
+  - login_otp_challenges stores hashed email OTP challenges and short-lived admin TOTP login/setup challenges
   - friendships, trip_collaborators, trip_activity
   - vote_sessions, vote_session_participants, vote_session_responses
   - itinerary_item_memories
@@ -377,7 +392,7 @@ External Services
 
 Data Flow (Updated)
 
-Authentication: login returns a short-lived access JWT and sets an HttpOnly refresh-cookie JWT. The SPA schedules a silent refresh before access-token expiry, rehydrates the schedule on page reload, and redirects to login with a toast only when the refresh token is missing, expired, invalid, or the account is suspended.
+Authentication: password login does not always return a session immediately. Standard users receive `requires_otp` and must submit the emailed 6-digit code to POST /api/verify-otp before the backend returns the short-lived access JWT and HttpOnly refresh-cookie JWT. Admin and super-admin users receive either `requires_totp_setup` or `requires_totp`; setup uses POST /api/totp/generate + POST /api/totp/enable, while existing authenticators use POST /api/totp/verify. Only after the second factor succeeds does the SPA persist the access token, schedule silent refresh, and route the user to `/dashboard` or `/admin`.
 
 Trip Creation:
 
@@ -414,7 +429,8 @@ Appearance:
 
 1. App boot applies getInitialTheme() from localStorage or system preference.
 2. Profile color-mode toggle persists "light" or "dark" under anotara:theme.
-3. CSS theme variables read documentElement[data-theme] and documentElement.style.colorScheme.
+3. The public landing page also exposes a compact Sun/Moon theme toggle in the top navigation; both Profile and Landing use the same `frontend/src/lib/theme.js` helpers.
+4. CSS theme variables read documentElement[data-theme] and documentElement.style.colorScheme.
 
 Account Deletion:
 
@@ -424,18 +440,22 @@ Account Deletion:
 
 Admin Operations:
 
-1. Admin login returns a JWT role claim and stores the profile role for frontend routing.
-2. Every `/api/admin/*` request re-checks the current database role and active account status before executing.
-3. Super admins can promote or demote admins, with guards against self-demotion and removing the last active super admin.
-4. Admins curate place records, inspect itineraries, suspend/reactivate accounts, inspect analytics, send operational notifications, and request ML retraining.
-5. Super admins can update operations settings and feature flags.
-6. Mutations are written to `admin_audit_log` so privileged changes remain traceable.
-7. Retraining exports feedback-derived rows, trains the RandomForest classifier, updates model artifacts, and records metrics in `ml_training_runs`.
+1. Admin password login returns a TOTP setup/verification challenge instead of a JWT.
+2. TOTP setup generates a pyotp base32 secret, provisioning URI (`issuer_name='Ano-Tara!'`), and QR code image using qrcode/Pillow; the secret is saved only after the first code verifies.
+3. After TOTP succeeds, login returns a JWT role claim and stores the profile role for frontend routing.
+4. Every `/api/admin/*` request re-checks the current database role and active account status before executing.
+5. Super admins can promote or demote admins, with guards against self-demotion and removing the last active super admin.
+6. Admins curate place records, inspect itineraries, suspend/reactivate accounts, inspect analytics, send operational notifications, and request ML retraining.
+7. Super admins can update operations settings and feature flags.
+8. Mutations are written to `admin_audit_log` so privileged changes remain traceable.
+9. Retraining exports feedback-derived rows, trains the RandomForest classifier, updates model artifacts, and records metrics in `ml_training_runs`.
 
 Database Schema Highlights
 
 - itineraries has trip_start_date for server-backed countdown / progress timelines and lifecycle segmentation.
-- users has profile_image, default_budget, companion_vector (JSON), vibe_weights (JSON), biometric_enabled, role, and admin-controlled account_status.
+- users has profile_image, default_budget, companion_vector (JSON), vibe_weights (JSON), biometric_enabled, role, admin-controlled account_status, legal consent timestamps, and admin TOTP state (`totp_secret`, `totp_enabled`).
+- login_otp_challenges stores hashed email OTP codes, expiry/attempt counters, and short-lived admin TOTP challenge rows.
+- audit_events stores non-admin security/activity audit entries such as login, OTP/TOTP, profile changes, data access, and backend errors.
 - places has admin curation metadata for publication workflow and recommendation catalog management.
 - admin_audit_log stores privileged changes; ml_training_runs stores retraining status and model metrics.
 - admin_settings stores operations feature flags; admin_notification_log stores admin-triggered notification delivery attempts.
@@ -450,6 +470,15 @@ Database Schema Highlights
 
 Recent Changelog
 
+- Added security assurance hardening: restricted CORS config, required production secrets, secure cookie defaults, baseline security headers, request-size limits, JSON error handlers, and broad activity/error audit events.
+- Added login step-up authentication: standard users verify a 5-minute 6-digit email OTP before receiving a JWT, while admin and super-admin accounts must set up and verify Google Authenticator TOTP.
+- Added TOTP dependencies and flow (`pyotp`, `qrcode`, `pillow`), including QR code setup UI, `/api/totp/generate`, `/api/totp/enable`, `/api/totp/verify`, and admin-only enforcement before `/admin` access.
+- Standardized password reset URLs to `/reset-password?token=<token>` on `http://localhost:5173`, updated ResetPasswordPage to use `useSearchParams`, and changed reset confirmation payloads to `{ token, newPassword }`.
+- Added frontend route guards for authenticated pages and admin-only routes, plus logout confirmation sheets in Profile and Admin.
+- Hardened itinerary authorization so feedback, reorder, swap, lock, weather alert, smart suggestion, and detail routes check owner/collaborator access before reading or mutating data.
+- Hardened backup restore/listing behavior by avoiding normal API exposure of raw server paths and validating uploaded backup archive paths, manifests, table identifiers, and DDL shape.
+- Removed/gated sensitive frontend debug logging and stopped the service worker from caching authenticated `/api/*` GET responses.
+- Enhanced the public Landing page with `/login` CTAs, a clickable login-page brand chip back to `/landing`, and a persisted Sun/Moon light/dark theme toggle with dark-mode glassmorphism styles.
 - Added transactional email notifications with queueing, provider adapters, suppression handling, webhook processing, and template rendering.
 - Added editable profile pictures on the Profile tab with client-side image selection, `/api/profile` persistence, and Dashboard avatar reuse.
 - Added SendGrid-backed transactional delivery with verified sender requirements, webhook event tracking, and queue/log tables.
@@ -471,6 +500,8 @@ Recent Changelog
 
 Current Limitations
 
+- TOTP is enforced only for `admin` and `super_admin` roles; standard users currently use email OTP rather than an authenticator app.
+- TOTP recovery/backup codes are not implemented yet, so losing an admin authenticator requires database/admin intervention.
 - Collaboration is near-real-time polling/heartbeat based; websocket conflict resolution is not implemented yet.
 - Memory photos are stored as LONGTEXT/base64 payloads; production object storage would be better for large media.
 - Hotel recommendations are curated from the local places catalog and cached per day; they are not yet backed by a live hotel availability API.
@@ -539,6 +570,7 @@ Repository Map (Updated)
 - frontend/src/lib/tripsApi.js
 - frontend/src/lib/profileApi.js
 - frontend/src/lib/socialApi.js
+- frontend/src/lib/totpApi.js
 - frontend/src/lib/timeBlocks.js
 - frontend/src/lib/pdfExport.js
 - frontend/src/lib/theme.js

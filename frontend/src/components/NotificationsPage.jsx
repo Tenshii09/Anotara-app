@@ -35,14 +35,14 @@ export default function NotificationsPage() {
   const [serverNotifications, setServerNotifications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const allNotificationEvents = useMemo(
-    () => [...serverNotifications, ...NOTIFICATION_EVENTS],
-    [serverNotifications],
+  const localNotificationEvents = useMemo(
+    () => getVisibleNotifications(deletedState, NOTIFICATION_EVENTS),
+    [deletedState],
   );
 
   const notificationEvents = useMemo(
-    () => getVisibleNotifications(deletedState, allNotificationEvents),
-    [allNotificationEvents, deletedState],
+    () => [...serverNotifications, ...localNotificationEvents],
+    [localNotificationEvents, serverNotifications],
   );
 
   const unreadNotifications = useMemo(

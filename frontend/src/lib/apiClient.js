@@ -88,12 +88,6 @@ export async function apiRequest(path, options = {}) {
     const payload = hasJsonBody ? await response.json() : null;
 
     if (!response.ok) {
-      console.error("[API Debug] Request failed:", {
-        path: requestPath,
-        status: response.status,
-        payload,
-      });
-
       const requestError = new Error(
         normalizeErrorMessage(response.status, payload),
       );
@@ -113,13 +107,6 @@ export async function apiRequest(path, options = {}) {
     if (error.status) {
       throw error;
     }
-
-    console.error("[API Debug] Network/runtime error:", {
-      path: requestPath,
-      message: error?.message,
-      code: error?.code,
-      error,
-    });
 
     const networkError = new Error(
       typeof navigator !== "undefined" && !navigator.onLine

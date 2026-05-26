@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   confirmPasswordReset,
@@ -8,7 +8,8 @@ import {
 import BrandLogo from "./common/BrandLogo";
 
 export default function ResetPasswordPage() {
-  const { token = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get("token") || "";
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -19,8 +20,16 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     let active = true;
+    console.log("Extracted Token:", token);
 
     async function validateToken() {
+      if (!token) {
+        setTokenValid(false);
+        setMessage("Password reset token is missing.");
+        setValidating(false);
+        return;
+      }
+
       try {
         setValidating(true);
         setMessage("");
@@ -46,6 +55,14 @@ export default function ResetPasswordPage() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (!password || !confirmPassword) {
+      setMessage("Both password fields are required.");
+      return;
+    }
+    if (password.length < 8) {
+      setMessage("New password must be at least 8 characters.");
+      return;
+    }
     if (password !== confirmPassword) {
       setMessage("Passwords do not match.");
       return;
@@ -56,7 +73,7 @@ export default function ResetPasswordPage() {
       setMessage("");
       const response = await confirmPasswordReset(token, password);
       setMessage(
-        response?.message || "Password updated. Please log in with your new password.",
+        response?.message || "Password updated successfully!",
       );
       window.setTimeout(() => navigate("/login", { replace: true }), 1800);
     } catch (requestError) {
@@ -133,7 +150,7 @@ export default function ResetPasswordPage() {
                 disabled={submitting}
                 style={{ width: "100%" }}
               >
-                {submitting ? "Updating..." : "Update password"}
+                {submitting ? "Saving..." : "Save New Password"}
               </button>
             </form>
           ) : (

@@ -21,6 +21,14 @@ export const TEST_PUSH_NOTIFICATION_PAYLOAD = {
   tag: "anotara-test-push",
 };
 
+const isDebugLoggingEnabled = import.meta.env.DEV;
+
+function debugLog(...args) {
+  if (isDebugLoggingEnabled) {
+    console.debug(...args);
+  }
+}
+
 function assertNotificationSupport() {
   if (typeof window === "undefined" || !("Notification" in window)) {
     throw new Error("This browser does not support notifications.");
@@ -34,22 +42,22 @@ function assertNotificationSupport() {
 export async function requestNotificationPermission() {
   assertNotificationSupport();
 
-  console.log("[Push Debug] Requesting notification permission.", {
+  debugLog("[Push Debug] Requesting notification permission.", {
     currentPermission: window.Notification.permission,
   });
 
   if (window.Notification.permission === "granted") {
-    console.log("[Push Debug] Notification permission already granted.");
+    debugLog("[Push Debug] Notification permission already granted.");
     return "granted";
   }
 
   if (window.Notification.permission === "denied") {
-    console.warn("[Push Debug] Notification permission is already denied.");
+    debugLog("[Push Debug] Notification permission is already denied.");
     return "denied";
   }
 
   const permission = await window.Notification.requestPermission();
-  console.log("[Push Debug] Notification permission request result:", permission);
+  debugLog("[Push Debug] Notification permission request result:", permission);
   return permission;
 }
 
@@ -74,7 +82,7 @@ export async function registerDeviceForRemotePush(accessToken = getStoredToken()
   try {
     subscription = await getBrowserPushSubscription();
   } catch (subscriptionError) {
-    console.warn(
+    debugLog(
       "[Push Debug] Push subscription metadata was unavailable, saving Firebase token anyway:",
       subscriptionError,
     );
@@ -87,11 +95,6 @@ export async function registerDeviceForRemotePush(accessToken = getStoredToken()
     subscription,
     topics: ["all_users"],
   };
-
-  console.log("[Push Debug] Sending push token payload to backend:", {
-    ...pushTokenPayload,
-    token: `${firebaseToken.slice(0, 18)}...${firebaseToken.slice(-8)}`,
-  });
 
   try {
     await apiRequest("/api/push-tokens", {
@@ -112,7 +115,7 @@ export async function registerDeviceForRemotePush(accessToken = getStoredToken()
       }
     }
   } catch (error) {
-    console.error("[Push Debug] Backend push token save failed:", error);
+    debugLog("[Push Debug] Backend push token save failed:", error);
     return {
       ok: false,
       reason:
@@ -246,7 +249,7 @@ export async function triggerTestPushNotification() {
   }
 
   try {
-    console.log("[Push Debug] Requesting real remote push from backend...");
+    debugLog("[Push Debug] Requesting real remote push from backend...");
     const sendResult = await apiRequest("/api/push-tokens/test", {
       method: "POST",
       token: accessToken,
@@ -254,7 +257,7 @@ export async function triggerTestPushNotification() {
     });
     const sentCount = Number(sendResult?.delivery?.sent || 0);
 
-    console.log("[Push Debug] Backend remote push result:", sendResult);
+    debugLog("[Push Debug] Backend remote push result:", sendResult);
 
     return {
       ok: true,
@@ -268,7 +271,7 @@ export async function triggerTestPushNotification() {
       delivery: sendResult?.delivery,
     };
   } catch (error) {
-    console.error("[Push Debug] Backend remote push send failed:", error);
+    debugLog("[Push Debug] Backend remote push send failed:", error);
     await showLocalTestNotification(registration);
 
     return {

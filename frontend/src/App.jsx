@@ -18,8 +18,9 @@ import {
   hasStoredSession,
   onSessionExpired,
   scheduleSilentRefresh,
+  startIdleSessionTimeout,
 } from "./lib/authSession";
-import { getStoredToken } from "./lib/storage";
+import { getStoredToken, loadUserProfile } from "./lib/storage";
 import { applyTheme, getInitialTheme } from "./lib/theme";
 
 import "./App.css";
@@ -141,6 +142,8 @@ function SessionManager() {
     });
   }, [navigate]);
 
+  useEffect(() => startIdleSessionTimeout(), []);
+
   useEffect(() => {
     if (!sessionToast) return undefined;
     const timer = window.setTimeout(() => setSessionToast(""), 5200);
@@ -152,6 +155,28 @@ function SessionManager() {
       {sessionToast}
     </div>
   ) : null;
+}
+
+function ProtectedRoute({ children }) {
+  const location = useLocation();
+  if (!hasStoredSession()) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+  return children;
+}
+
+function AdminRoute({ children }) {
+  const location = useLocation();
+  const profile = loadUserProfile();
+  const isAdmin = ["admin", "super_admin"].includes(profile?.role);
+
+  if (!hasStoredSession()) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+  if (!isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return children;
 }
 
 function AppRouteFrame() {
@@ -193,27 +218,29 @@ function AppRouteFrame() {
               path="/register"
               element={<AuthPage initialMode="register" />}
             />
-            <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
 
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/my-trips" element={<MyTripsPage />} />
-            <Route path="/itinerary" element={<ItineraryPage />} />
-            <Route path="/itinerary/:itineraryId" element={<ItineraryPage />} />
-            <Route path="/generate" element={<TravelWizard />} />
+            <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+            <Route path="/my-trips" element={<ProtectedRoute><MyTripsPage /></ProtectedRoute>} />
+            <Route path="/itinerary" element={<ProtectedRoute><ItineraryPage /></ProtectedRoute>} />
+            <Route path="/itinerary/:itineraryId" element={<ProtectedRoute><ItineraryPage /></ProtectedRoute>} />
+            <Route path="/generate" element={<ProtectedRoute><TravelWizard /></ProtectedRoute>} />
 
-            <Route path="/discover" element={<DiscoverPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/discover" element={<ProtectedRoute><DiscoverPage /></ProtectedRoute>} />
+            <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
             <Route
               path="/admin/*"
               element={
-                <Suspense
-                  fallback={
-                    <div className="admin-notice">Loading admin console...</div>
-                  }
-                >
-                  <AdminPanelPage />
-                </Suspense>
+                <AdminRoute>
+                  <Suspense
+                    fallback={
+                      <div className="admin-notice">Loading admin console...</div>
+                    }
+                  >
+                    <AdminPanelPage />
+                  </Suspense>
+                </AdminRoute>
               }
             />
 

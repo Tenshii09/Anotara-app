@@ -53,3 +53,37 @@ def parse_json_payload():
     if not isinstance(data, dict):
         return None, jsonify({'error': 'JSON payload must be an object'}), 400
     return data, None, None
+
+
+def parse_optional_json_payload():
+    """Read an optional JSON object payload and reject malformed non-objects."""
+    if not request.data:
+        return {}, None, None
+    return parse_json_payload()
+
+
+def parse_int(value, field_name, *, minimum=None, maximum=None):
+    """Return an integer plus an error message when a scalar is invalid."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None, f'{field_name} must be an integer'
+    if minimum is not None and parsed < minimum:
+        return None, f'{field_name} must be at least {minimum}'
+    if maximum is not None and parsed > maximum:
+        return None, f'{field_name} must be at most {maximum}'
+    return parsed, None
+
+
+def validate_choice(value, field_name, allowed_values, *, required=True):
+    """Normalize and validate a string enum field."""
+    if value is None:
+        if required:
+            return '', f'{field_name} is required'
+        return '', None
+    normalized = str(value).strip()
+    if required and not normalized:
+        return '', f'{field_name} is required'
+    if normalized and normalized not in allowed_values:
+        return '', f'{field_name} must be one of: {", ".join(sorted(allowed_values))}'
+    return normalized, None

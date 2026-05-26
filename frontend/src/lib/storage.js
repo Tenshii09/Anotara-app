@@ -2,6 +2,8 @@ import {
   DISCOVER_RECENT_SEARCHES_KEY,
   NOTIFICATION_DELETED_STATE_KEY,
   NOTIFICATION_READ_STATE_KEY,
+  PUSH_SUBSCRIPTION_STORAGE_KEY,
+  PUSH_TOKEN_STORAGE_KEY,
   PROFILE_STORAGE_KEY,
   TOKEN_STORAGE_KEY,
   TRIP_STORAGE_KEY,
@@ -107,6 +109,24 @@ export function clearUserProfile() {
   }
 
   window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+}
+
+export function clearPrivateStorage() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  [
+    TOKEN_STORAGE_KEY,
+    PROFILE_STORAGE_KEY,
+    TRIP_STORAGE_KEY,
+    WIZARD_STORAGE_KEY,
+    DISCOVER_RECENT_SEARCHES_KEY,
+    NOTIFICATION_READ_STATE_KEY,
+    NOTIFICATION_DELETED_STATE_KEY,
+    PUSH_TOKEN_STORAGE_KEY,
+    PUSH_SUBSCRIPTION_STORAGE_KEY,
+  ].forEach((key) => window.localStorage.removeItem(key));
 }
 
 export function loadDiscoverRecentSearches() {

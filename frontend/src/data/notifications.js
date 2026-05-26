@@ -86,7 +86,7 @@ export function normalizeNotificationEvents(events = []) {
     title: event.title || "Ano-Tara update",
     message: event.message || event.body || "",
     timestamp: formatNotificationTimestamp(event.timestamp || event.created_at),
-    source: event.source || "Ano-Tara System",
+    source: event.source || "System",
     tone: event.tone || "system",
     actionLabel: event.actionLabel || event.action_label || "Open dashboard",
     actionPath: event.actionPath || event.action_path || "/dashboard",

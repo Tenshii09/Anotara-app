@@ -8,7 +8,7 @@ authentication unless explicitly stated.
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from webapp.security_utils import sanitize_user_text
+from webapp.security_utils import parse_int, parse_json_payload, sanitize_user_text, validate_choice
 from webapp.services.email_service import queue_email
 from webapp.services.database import get_itinerary_overview, get_user_profile
 from webapp.services.social import (
@@ -52,7 +52,9 @@ def api_friend_search():
     query = (request.args.get("q") or "").strip()
     if len(query) < 2:
         return jsonify({"results": []}), 200
-    limit = request.args.get("limit", 8)
+    limit, error = parse_int(request.args.get("limit", 8), "limit", minimum=1, maximum=20)
+    if error:
+        return jsonify({"error": error}), 400
     results = search_users(current_user_id, query, limit=limit)
     return jsonify({"results": results}), 200
 
@@ -62,10 +64,12 @@ def api_friend_search():
 def api_send_friend_request():
     """Send (or refresh) a friend request to another user."""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
-    addressee_id = data.get("user_id") or data.get("addressee_id")
-    if not addressee_id:
-        return jsonify({"error": "user_id is required"}), 400
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
+    addressee_id, error = parse_int(data.get("user_id") or data.get("addressee_id"), "user_id", minimum=1)
+    if error:
+        return jsonify({"error": error}), 400
 
     friendship, error = send_friend_request(current_user_id, addressee_id)
     if error:
@@ -78,8 +82,12 @@ def api_send_friend_request():
 def api_respond_friend_request(friendship_id):
     """Accept or decline an incoming friend request."""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
-    decision = data.get("decision", "accepted")
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
+    decision, error = validate_choice(data.get("decision", "accepted"), "decision", {"accepted", "declined"})
+    if error:
+        return jsonify({"error": error}), 400
     friendship, error = respond_to_friend_request(current_user_id, friendship_id, decision)
     if error:
         return jsonify({"error": error}), 400
@@ -130,12 +138,16 @@ def api_add_collaborator(itinerary_id):
     if not can_access_itinerary(current_user_id, itinerary_id):
         return jsonify({"error": "Forbidden"}), 403
 
-    data = request.get_json() or {}
-    user_id = data.get("user_id")
-    if not user_id:
-        return jsonify({"error": "user_id is required"}), 400
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
+    user_id, error = parse_int(data.get("user_id"), "user_id", minimum=1)
+    if error:
+        return jsonify({"error": error}), 400
 
-    role = data.get("role", "editor")
+    role, error = validate_choice(data.get("role", "editor"), "role", {"viewer", "editor", "owner"})
+    if error:
+        return jsonify({"error": error}), 400
     add_collaborator(itinerary_id, user_id, current_user_id, role=role)
     record_trip_activity(itinerary_id, current_user_id, "collaborator_added", {"user_id": user_id})
     return jsonify({"flock": list_collaborators(itinerary_id)}), 201
@@ -244,7 +256,9 @@ def api_create_vote_session():
 def api_join_vote_session():
     """Join an existing voting room via its session code."""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     code = (data.get("session_code") or "").strip()
     if not code:
         return jsonify({"error": "session_code is required"}), 400
@@ -270,7 +284,9 @@ def api_get_vote_session(session_id):
 def api_submit_vote(session_id):
     """Submit a vote for one question in the voting room."""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     question_key = (data.get("question_key") or "").strip()
     if not question_key:
         return jsonify({"error": "question_key is required"}), 400
@@ -286,7 +302,9 @@ def api_submit_vote(session_id):
 def api_advance_vote_session(session_id):
     """Host-only: jump the lobby to the next step."""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     session, error = advance_vote_session(
         session_id,
         current_user_id,
@@ -342,7 +360,9 @@ def api_add_memory(itinerary_id, item_id):
     if not can_access_itinerary(current_user_id, itinerary_id):
         return jsonify({"error": "Forbidden"}), 403
 
-    data = request.get_json() or {}
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     kind = (data.get("kind") or "").lower()
     note = sanitize_user_text(data.get("note"), max_length=1000)
     image_data = data.get("image_data")

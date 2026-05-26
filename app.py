@@ -3,8 +3,11 @@
 import json
 
 import click
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+from werkzeug.exceptions import HTTPException
+
 from config import Config
 from webapp.extensions import bcrypt, jwt, limiter
 from webapp.routes.auth_routes import auth_bp
@@ -15,16 +18,71 @@ from webapp.routes.admin_routes import admin_bp
 from webapp.services.trip_planning import ml_columns, ml_model
 from webapp.services.email_service import process_queue as process_email_queue
 from webapp.services.email_service import send_email
+from webapp.services.database import log_audit_event
 from webapp.services.push_notifications import send_push_to_user
 from webapp.services.weather_monitor import run_weather_monitor
 
 app = Flask(__name__)
 app.config.from_object(Config)
 # Configure the app once, then register the shared extension instances.
-CORS(app, supports_credentials=True)
+CORS(
+    app,
+    origins=app.config.get('CORS_ORIGINS', []),
+    supports_credentials=True,
+    allow_headers=['Content-Type', 'Authorization', 'X-CSRF-TOKEN'],
+)
 bcrypt.init_app(app)
 jwt.init_app(app)
 limiter.init_app(app)
+
+
+@app.after_request
+def add_security_headers(response):
+    """Apply baseline browser security headers to every backend response."""
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'DENY')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+    response.headers.setdefault('Cache-Control', 'no-store')
+    if request.is_secure:
+        response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    return response
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(error):
+    """Return JSON for framework-level errors without leaking stack traces."""
+    return jsonify({
+        'error': error.description or error.name,
+        'code': error.name.lower().replace(' ', '_'),
+    }), error.code or 500
+
+
+@app.errorhandler(Exception)
+def handle_uncaught_exception(error):
+    """Log unexpected failures and expose a stable generic API contract."""
+    app.logger.exception('Unhandled backend error: %s', error)
+    try:
+        verify_jwt_in_request(optional=True)
+        actor_id = get_jwt_identity()
+    except Exception:
+        actor_id = None
+    try:
+        log_audit_event(
+            'system.error',
+            actor_id=actor_id,
+            target_type='request',
+            outcome='failure',
+            payload={'path': request.path, 'method': request.method, 'error_type': error.__class__.__name__},
+            ip_address=request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip(),
+            user_agent=request.headers.get('User-Agent', ''),
+        )
+    except Exception:
+        app.logger.warning('Could not write system.error audit event.')
+    return jsonify({
+        'error': 'An unexpected server error occurred.',
+        'code': 'internal_server_error',
+    }), 500
 
 
 @jwt.expired_token_loader
@@ -108,4 +166,4 @@ def send_test_push_command(user_id):
 _ = ml_model, ml_columns
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=app.config.get('DEBUG', False))

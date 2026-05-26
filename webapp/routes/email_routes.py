@@ -2,6 +2,7 @@
 
 from flask import Blueprint, jsonify, request, current_app
 
+from webapp.security_utils import parse_json_payload
 from webapp.services.email_service import process_webhook_payload
 
 email_bp = Blueprint('email', __name__)
@@ -18,8 +19,14 @@ def api_email_webhook():
         or ''
     ).strip()
 
-    if expected_secret and provided_secret != expected_secret:
+    if not expected_secret:
+        current_app.logger.warning('Rejected email webhook because MAIL_WEBHOOK_SECRET is not configured.')
+        return jsonify({'error': 'Webhook is not configured'}), 503
+
+    if provided_secret != expected_secret:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    payload = request.get_json(silent=True) or {}
+    payload, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
     return jsonify(process_webhook_payload(payload)), 200

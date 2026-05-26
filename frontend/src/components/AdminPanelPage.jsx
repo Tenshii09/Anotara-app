@@ -26,6 +26,7 @@ import {
   UsersPage,
   WeatherOpsPage,
 } from "./admin/AdminPages";
+import BottomSheet from "./common/BottomSheet";
 import {
   createAdminBackup,
   createAdminPlace,
@@ -108,6 +109,7 @@ export default function AdminPanelPage() {
   const [placeForm, setPlaceForm] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -276,6 +278,7 @@ export default function AdminPanelPage() {
   }, [token, isAdmin, activeNav]);
 
   async function handleLogout() {
+    setIsLogoutModalOpen(false);
     await logoutSession();
     navigate("/login");
   }
@@ -482,7 +485,7 @@ export default function AdminPanelPage() {
       error={error}
       isLoading={isLoading}
       isMutating={isMutating}
-      onLogout={handleLogout}
+      onLogout={() => setIsLogoutModalOpen(true)}
       onNavigate={navigate}
       onRefresh={() => loadAdminData(activeNav)}
       onRetrain={handleRetrain}
@@ -493,6 +496,30 @@ export default function AdminPanelPage() {
       success={success}
     >
       {renderActivePage()}
+      <BottomSheet
+        open={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        title="Log out?"
+        size="sm"
+        footer={
+          <>
+            <button
+              className="btn-outline-luxury"
+              type="button"
+              onClick={() => setIsLogoutModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button className="btn-luxury" type="button" onClick={handleLogout}>
+              Log Out
+            </button>
+          </>
+        }
+      >
+        <p className="muted" style={{ margin: 0, lineHeight: 1.7 }}>
+          Are you sure you want to log out of the admin console?
+        </p>
+      </BottomSheet>
       {placeForm ? (
         <PlaceFormModal
           form={placeForm}

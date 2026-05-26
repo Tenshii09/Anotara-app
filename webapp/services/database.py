@@ -10,6 +10,7 @@ import csv
 import math
 import tempfile
 import zipfile
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -71,6 +72,25 @@ def _safe_table_name(table_name):
     if not table_name or not table_name.replace('_', '').isalnum():
         raise ValueError(f'Invalid table name: {table_name}')
     return table_name
+
+
+def _safe_identifier(identifier):
+    identifier = str(identifier or '').strip()
+    if not identifier or not identifier.replace('_', '').isalnum():
+        raise ValueError(f'Invalid SQL identifier: {identifier}')
+    return identifier
+
+
+def _validate_backup_create_sql(table_name, create_sql):
+    """Reject backup DDL that does not describe the expected table only."""
+    safe_table = _safe_table_name(table_name)
+    sql = str(create_sql or '').strip()
+    if ';' in sql.rstrip(';'):
+        raise ValueError(f'Backup DDL for {safe_table} must contain exactly one statement.')
+    pattern = rf'^CREATE\s+TABLE\s+`?{re.escape(safe_table)}`?\s*\('
+    if not re.match(pattern, sql, flags=re.IGNORECASE):
+        raise ValueError(f'Backup DDL for {safe_table} must create the matching table.')
+    return sql
 
 
 def _sql_literal(value):
@@ -159,6 +179,10 @@ def ensure_user_columns():
         missing_columns.append('ADD COLUMN terms_accepted_at DATETIME NULL')
     if 'privacy_accepted_at' not in existing_columns:
         missing_columns.append('ADD COLUMN privacy_accepted_at DATETIME NULL')
+    if 'totp_secret' not in existing_columns:
+        missing_columns.append('ADD COLUMN totp_secret VARCHAR(64) NULL')
+    if 'totp_enabled' not in existing_columns:
+        missing_columns.append('ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT FALSE')
 
     if not missing_columns:
         return
@@ -237,6 +261,205 @@ def get_user_auth_record_by_id_and_email(user_id, email):
             (int(user_id), str(email or '').strip().lower()),
         )
         return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def ensure_login_otp_table():
+    """Create the short-lived login OTP challenge table."""
+    ensure_user_columns()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS login_otp_challenges (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                user_id     INT NOT NULL,
+                code_hash   CHAR(64) NOT NULL,
+                expires_at  DATETIME NOT NULL,
+                consumed_at DATETIME NULL,
+                attempts    INT NOT NULL DEFAULT 0,
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_login_otp_user_created (user_id, created_at),
+                INDEX idx_login_otp_expires (expires_at),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def create_login_otp_challenge(user_id, code_hash, expires_at):
+    """Persist a fresh OTP challenge and expire prior unused challenges."""
+    ensure_login_otp_table()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE login_otp_challenges
+            SET consumed_at = CURRENT_TIMESTAMP
+            WHERE user_id = %s AND consumed_at IS NULL
+            """,
+            (int(user_id),),
+        )
+        cursor.execute(
+            """
+            INSERT INTO login_otp_challenges (user_id, code_hash, expires_at)
+            VALUES (%s, %s, %s)
+            """,
+            (int(user_id), code_hash, expires_at),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_login_otp_challenge(challenge_id, user_id):
+    """Return one unconsumed OTP challenge for verification."""
+    ensure_login_otp_table()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT id, user_id, code_hash, expires_at, consumed_at, attempts
+            FROM login_otp_challenges
+            WHERE id = %s AND user_id = %s
+            """,
+            (int(challenge_id), int(user_id)),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def mark_login_otp_attempt(challenge_id):
+    """Increment failed verification attempts for a challenge."""
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE login_otp_challenges
+            SET attempts = attempts + 1
+            WHERE id = %s
+            """,
+            (int(challenge_id),),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def consume_login_otp_challenge(challenge_id):
+    """Mark a successful OTP challenge as consumed."""
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE login_otp_challenges
+            SET consumed_at = CURRENT_TIMESTAMP
+            WHERE id = %s AND consumed_at IS NULL
+            """,
+            (int(challenge_id),),
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+        db.close()
+
+
+def create_login_totp_challenge(user_id, expires_at):
+    """Create a password-verified admin TOTP challenge."""
+    ensure_login_otp_table()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE login_otp_challenges
+            SET consumed_at = CURRENT_TIMESTAMP
+            WHERE user_id = %s AND consumed_at IS NULL AND code_hash = 'totp'
+            """,
+            (int(user_id),),
+        )
+        cursor.execute(
+            """
+            INSERT INTO login_otp_challenges (user_id, code_hash, expires_at)
+            VALUES (%s, 'totp', %s)
+            """,
+            (int(user_id), expires_at),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_admin_user_for_totp_challenge(challenge_id, user_id):
+    """Load an active admin user tied to an unconsumed TOTP challenge."""
+    ensure_user_columns()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT
+                users.id,
+                users.username,
+                users.email,
+                users.role,
+                users.account_status,
+                users.totp_secret,
+                users.totp_enabled,
+                challenges.id AS challenge_id,
+                challenges.expires_at,
+                challenges.consumed_at,
+                challenges.attempts
+            FROM login_otp_challenges challenges
+            INNER JOIN users ON users.id = challenges.user_id
+            WHERE challenges.id = %s
+                AND challenges.user_id = %s
+                AND challenges.code_hash = 'totp'
+            """,
+            (int(challenge_id), int(user_id)),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def enable_user_totp(user_id, secret):
+    """Save a verified TOTP secret for an admin user."""
+    ensure_user_columns()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE users
+            SET totp_secret = %s,
+                totp_enabled = TRUE
+            WHERE id = %s
+            """,
+            (str(secret), int(user_id)),
+        )
+        db.commit()
+        return cursor.rowcount > 0
     finally:
         cursor.close()
         db.close()
@@ -1605,6 +1828,7 @@ def list_admin_backups(page=1, limit=10):
         rows = cursor.fetchall()
         for row in rows:
             row['summary'] = _coerce_json_value(row.get('summary'), {})
+            row.pop('file_path', None)
         return _build_page_payload(
             [_json_safe(row) for row in rows],
             row_key='backups',
@@ -1724,7 +1948,6 @@ def create_admin_backup(actor_id):
             'id': log_id,
             'backup_label': backup_label,
             'file_name': file_name,
-            'file_path': str(file_path),
             'status': 'completed',
             'table_count': len(table_snapshots),
         }
@@ -1753,6 +1976,11 @@ def _load_backup_archive(backup_file_path):
         raise FileNotFoundError(f'Backup file not found: {backup_file_path}')
 
     with zipfile.ZipFile(backup_path, 'r') as archive:
+        for member in archive.namelist():
+            if Path(member).is_absolute() or '..' in Path(member).parts:
+                raise ValueError('Backup archive contains unsafe paths.')
+        if 'manifest.json' not in archive.namelist():
+            raise ValueError('Backup archive is missing manifest.json.')
         manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
         snapshots = []
         for table_name in manifest.get('tables', []):
@@ -1797,9 +2025,7 @@ def restore_admin_backup(actor_id, backup_file_path):
 
         for snapshot in snapshots:
             table_name = _safe_table_name(snapshot['table_name'])
-            create_sql = str(snapshot.get('create_sql') or '')
-            if not create_sql.upper().startswith('CREATE TABLE'):
-                raise ValueError(f'Backup snapshot for {table_name} is missing CREATE TABLE SQL.')
+            create_sql = _validate_backup_create_sql(table_name, snapshot.get('create_sql'))
             cursor.execute(create_sql)
 
         for snapshot in snapshots:
@@ -1807,7 +2033,7 @@ def restore_admin_backup(actor_id, backup_file_path):
             rows = snapshot.get('rows') or []
             if not rows:
                 continue
-            columns = snapshot.get('columns') or list(rows[0].keys())
+            columns = [_safe_identifier(column) for column in (snapshot.get('columns') or list(rows[0].keys()))]
             column_sql = ', '.join(f'`{column}`' for column in columns)
             placeholder_sql = ', '.join(['%s'] * len(columns))
             insert_sql = f'INSERT INTO `{table_name}` ({column_sql}) VALUES ({placeholder_sql})'
@@ -1836,7 +2062,6 @@ def restore_admin_backup(actor_id, backup_file_path):
             'id': log_id,
             'backup_label': str(manifest.get('backup_label') or backup_path.stem),
             'file_name': backup_path.name,
-            'file_path': str(backup_path),
             'status': 'completed',
             'table_count': len(snapshots),
         }
@@ -2324,6 +2549,79 @@ def ensure_admin_tables():
             ),
         )
         db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def ensure_audit_event_table():
+    """Create the general-purpose audit trail used outside admin operations."""
+    ensure_user_columns()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_events (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                actor_id    INT NULL,
+                event_type  VARCHAR(80) NOT NULL,
+                target_type VARCHAR(40) NULL,
+                target_id   INT NULL,
+                outcome     VARCHAR(20) NOT NULL DEFAULT 'success',
+                payload     JSON,
+                ip_address  VARCHAR(64),
+                user_agent  VARCHAR(255),
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_audit_events_actor_created (actor_id, created_at),
+                INDEX idx_audit_events_type_created (event_type, created_at),
+                FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def log_audit_event(
+    event_type,
+    *,
+    actor_id=None,
+    target_type=None,
+    target_id=None,
+    outcome='success',
+    payload=None,
+    ip_address=None,
+    user_agent=None,
+):
+    """Persist a privacy-aware audit event for authentication, access, and errors."""
+    ensure_audit_event_table()
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO audit_events
+                (actor_id, event_type, target_type, target_id, outcome, payload, ip_address, user_agent)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                int(actor_id) if actor_id is not None else None,
+                str(event_type or 'unknown')[:80],
+                str(target_type or '')[:40] or None,
+                int(target_id) if target_id is not None else None,
+                str(outcome or 'success')[:20],
+                json.dumps(_json_safe(payload or {})),
+                str(ip_address or '')[:64],
+                str(user_agent or '')[:255],
+            ),
+        )
+        db.commit()
+        return cursor.lastrowid
     finally:
         cursor.close()
         db.close()
@@ -3054,7 +3352,7 @@ def list_user_notification_events(user_id, limit=30):
                 'title': row.get('title') or 'Ano-Tara update',
                 'message': row.get('body') or '',
                 'timestamp': row.get('created_at'),
-                'source': 'Ano-Tara System',
+                'source': 'System',
                 'tone': 'system',
                 'action_label': 'Open dashboard',
                 'action_path': '/dashboard',

@@ -328,11 +328,11 @@ export default function ItineraryPage() {
     return (localItinerary[focusDay] || []).filter(
       (place) => String(place.environment_type || "").toLowerCase() === "outdoor",
     );
-  }, [localItinerary, smartSuggestion?.alert, smartSuggestion?.focus_day]);
+  }, [localItinerary, smartSuggestion]);
 
   const weatherAlternatives = useMemo(
     () => (Array.isArray(smartSuggestion?.indoor_alternatives) ? smartSuggestion.indoor_alternatives : []),
-    [smartSuggestion?.indoor_alternatives],
+    [smartSuggestion],
   );
 
   const focusPlaceOnMap = useCallback((place, placeKey) => {

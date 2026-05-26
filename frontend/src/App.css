@@ -1551,6 +1551,23 @@ h1.serif,
   letter-spacing: 0.04em;
 }
 
+.auth-landing-chip {
+  cursor: pointer;
+  font: inherit;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.auth-landing-chip:hover,
+.auth-landing-chip:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--control-border-strong);
+  background: var(--control-bg-hover);
+  outline: none;
+}
+
 .step-badge {
   padding: 9px 18px;
   border-radius: 999px;
@@ -7859,6 +7876,21 @@ a:hover > .anotara-icon,
   padding: 20px var(--page-gutter) 34px;
 }
 
+:root[data-theme="dark"] .landing-page {
+  --landing-primary: #f59ec8;
+  --landing-secondary: #8fd3ff;
+  --landing-soft: rgba(245, 158, 200, 0.16);
+  --landing-ink: #f8f3ff;
+  --landing-muted: rgba(231, 225, 245, 0.78);
+  --landing-fluid-gradient:
+    radial-gradient(circle at 14% 18%, rgba(126, 48, 112, 0.46), transparent 30%),
+    radial-gradient(circle at 84% 14%, rgba(63, 60, 145, 0.5), transparent 32%),
+    radial-gradient(circle at 68% 76%, rgba(18, 75, 112, 0.44), transparent 34%),
+    radial-gradient(circle at 22% 82%, rgba(32, 97, 86, 0.34), transparent 30%),
+    linear-gradient(135deg, #090b1f 0%, #11162f 46%, #221336 100%);
+  background: #070916;
+}
+
 .landing-page::before {
   content: "";
   position: fixed;
@@ -7977,6 +8009,11 @@ a:hover > .anotara-icon,
     transform 180ms ease;
 }
 
+:root[data-theme="dark"] .landing-nav__links a,
+:root[data-theme="dark"] .landing-secondary-link {
+  color: rgba(246, 241, 255, 0.82);
+}
+
 .landing-nav__links a:hover,
 .landing-secondary-link:hover {
   color: var(--landing-primary);
@@ -7984,7 +8021,8 @@ a:hover > .anotara-icon,
 }
 
 .landing-nav__cta,
-.landing-install-button {
+.landing-install-button,
+.landing-login-cta {
   border: 0;
   border-radius: 999px;
   cursor: pointer;
@@ -7995,6 +8033,63 @@ a:hover > .anotara-icon,
   transition:
     transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
     box-shadow 220ms ease;
+}
+
+.landing-nav__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.landing-nav__login,
+.landing-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.46);
+  color: #27213f;
+  font-weight: 900;
+  text-decoration: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    color 180ms ease;
+}
+
+.landing-nav__login {
+  min-height: 42px;
+  padding: 0 16px;
+  font-size: 0.9rem;
+}
+
+.landing-theme-toggle {
+  width: 42px;
+  height: 42px;
+  cursor: pointer;
+}
+
+.landing-nav__login:hover,
+.landing-theme-toggle:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--landing-primary);
+}
+
+:root[data-theme="dark"] .landing-nav__login,
+:root[data-theme="dark"] .landing-theme-toggle {
+  border-color: rgba(232, 221, 255, 0.24);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(248, 243, 255, 0.92);
+}
+
+:root[data-theme="dark"] .landing-nav__login:hover,
+:root[data-theme="dark"] .landing-theme-toggle:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--landing-primary);
 }
 
 .landing-nav__cta {
@@ -8179,6 +8274,29 @@ a:hover > .anotara-icon,
     filter 220ms ease;
 }
 
+.landing-login-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: 0 28px;
+  text-decoration: none;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.12)),
+    linear-gradient(135deg, var(--landing-primary), var(--landing-secondary));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.34) inset,
+    0 28px 62px -24px rgba(74, 58, 138, 0.72);
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 220ms ease;
+}
+
+.landing-login-cta:hover {
+  transform: translateY(-3px) scale(1.02);
+  filter: saturate(1.1);
+}
+
 .landing-primary-cta:hover {
   transform: translateY(-3px) scale(1.02);
   filter: saturate(1.1);
@@ -8192,6 +8310,45 @@ a:hover > .anotara-icon,
     linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.46)),
     var(--glass-bg);
   animation: landingFloat 5s ease-in-out infinite alternate;
+}
+
+:root[data-theme="dark"] .landing-hero__visual,
+:root[data-theme="dark"] .landing-trip-card,
+:root[data-theme="dark"] .landing-step,
+:root[data-theme="dark"] .landing-bento-card,
+:root[data-theme="dark"] .landing-trip-tile,
+:root[data-theme="dark"] .landing-footer {
+  background:
+    linear-gradient(135deg, rgba(20, 24, 50, 0.78), rgba(13, 16, 36, 0.58)),
+    rgba(255, 255, 255, 0.06);
+  border-color: rgba(232, 221, 255, 0.18);
+  box-shadow:
+    0 36px 90px -56px rgba(0, 0, 0, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme="dark"] .landing-hero__visual::before {
+  background:
+    linear-gradient(110deg, rgba(10, 13, 32, 0.78) 0%, rgba(18, 22, 48, 0.36) 48%, rgba(255, 255, 255, 0.05) 100%),
+    radial-gradient(circle at 20% 18%, rgba(245, 158, 200, 0.2), transparent 18%),
+    radial-gradient(circle at 76% 24%, rgba(143, 211, 255, 0.16), transparent 16%);
+}
+
+:root[data-theme="dark"] .landing-hero__sun {
+  opacity: 0.54;
+  background: radial-gradient(circle, rgba(245, 158, 200, 0.9) 0%, rgba(105, 79, 196, 0.58) 58%, rgba(252, 213, 227, 0) 70%);
+}
+
+:root[data-theme="dark"] .landing-hero__island {
+  background: linear-gradient(135deg, rgba(143, 211, 255, 0.44), rgba(245, 158, 200, 0.3));
+}
+
+:root[data-theme="dark"] .landing-hero__wave {
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(143, 211, 255, 0.16) 0 44px,
+    rgba(255, 255, 255, 0.08) 44px 84px
+  );
 }
 
 .landing-trip-card__eyebrow {
@@ -8244,6 +8401,10 @@ a:hover > .anotara-icon,
   border-radius: 999px;
   background: #fff;
   border: 3px solid var(--landing-primary);
+}
+
+:root[data-theme="dark"] .landing-route-line span::before {
+  background: #10142e;
 }
 
 .landing-trip-card__stats {
@@ -8669,6 +8830,7 @@ a:hover > .anotara-icon,
   }
 
   .landing-primary-cta,
+  .landing-login-cta,
   .landing-secondary-link,
   .landing-install-button {
     width: 100%;
@@ -8678,6 +8840,18 @@ a:hover > .anotara-icon,
 
   .landing-secondary-link {
     padding: 10px;
+  }
+
+  .landing-nav__actions {
+    gap: 8px;
+  }
+
+  .landing-nav__login {
+    padding: 0 12px;
+  }
+
+  .landing-nav__cta {
+    display: none;
   }
 
   .landing-steps,
