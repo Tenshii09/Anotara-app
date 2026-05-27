@@ -8,6 +8,7 @@ from flask import jsonify, request
 
 USERNAME_PATTERN = re.compile(r'^[A-Za-z0-9_.-]+$')
 EMAIL_PATTERN = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+PASSWORD_SPECIAL_PATTERN = re.compile(r'[^A-Za-z0-9]')
 
 
 def sanitize_user_text(value, *, max_length=255):
@@ -45,6 +46,22 @@ def validate_string_field(data, field_name, *, required=True, min_length=0, max_
         return '', f'{field_name} contains invalid characters'
 
     return value, None
+
+
+def validate_password_strength(password):
+    """Return an error message when a new account password is too weak."""
+    value = str(password or '')
+    requirements = [
+        (len(value) >= 8, 'at least 8 characters'),
+        (any(char.isupper() for char in value), 'one uppercase letter'),
+        (any(char.islower() for char in value), 'one lowercase letter'),
+        (any(char.isdigit() for char in value), 'one number'),
+        (bool(PASSWORD_SPECIAL_PATTERN.search(value)), 'one special character'),
+    ]
+    missing = [label for passed, label in requirements if not passed]
+    if missing:
+        return 'Password must include ' + ', '.join(missing) + '.'
+    return None
 
 
 def parse_json_payload():

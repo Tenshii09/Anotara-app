@@ -47,6 +47,29 @@ const legalCopy = {
   },
 };
 
+const passwordRequirements = [
+  {
+    label: "At least 8 characters",
+    test: (value) => value.length >= 8,
+  },
+  {
+    label: "One uppercase letter",
+    test: (value) => /[A-Z]/.test(value),
+  },
+  {
+    label: "One lowercase letter",
+    test: (value) => /[a-z]/.test(value),
+  },
+  {
+    label: "One number",
+    test: (value) => /\d/.test(value),
+  },
+  {
+    label: "One special character",
+    test: (value) => /[^A-Za-z0-9]/.test(value),
+  },
+];
+
 export default function AuthPage({ initialMode = "login" }) {
   // Keep one component for both login and registration so the UI stays compact
   // while the backend still receives separate API requests.
@@ -56,9 +79,12 @@ export default function AuthPage({ initialMode = "login" }) {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [otpChallenge, setOtpChallenge] = useState(null);
+  const [registrationOtpCode, setRegistrationOtpCode] = useState("");
+  const [registrationChallenge, setRegistrationChallenge] = useState(null);
   const [totpCode, setTotpCode] = useState("");
   const [totpChallenge, setTotpChallenge] = useState(null);
   const [totpSetup, setTotpSetup] = useState(null);
@@ -72,10 +98,16 @@ export default function AuthPage({ initialMode = "login" }) {
   const navigate = useNavigate();
   const selectedLegalCopy = activeLegalModal ? legalCopy[activeLegalModal] : null;
   const isOtpStep = Boolean(otpChallenge);
+  const isRegistrationOtpStep = Boolean(registrationChallenge);
   const isTotpStep = Boolean(totpChallenge);
+  const passwordChecklist = passwordRequirements.map((requirement) => ({
+    ...requirement,
+    met: requirement.test(password),
+  }));
+  const isRegistrationPasswordStrong = passwordChecklist.every((item) => item.met);
 
   useEffect(() => {
-    if (!totpChallenge?.needsSetup || totpSetup) return;
+    if (!totpChallenge || totpSetup) return;
 
     let active = true;
     async function loadTotpSetup() {
@@ -131,6 +163,18 @@ export default function AuthPage({ initialMode = "login" }) {
       setMessage("Please agree to the Terms of Service and Privacy Policy.");
       return;
     }
+    if (isRegistering && password !== confirmPassword) {
+      setMessage("Passwords do not match.");
+      return;
+    }
+    if (isRegistering && !isRegistrationPasswordStrong) {
+      const missingRequirements = passwordChecklist
+        .filter((item) => !item.met)
+        .map((item) => item.label.toLowerCase())
+        .join(", ");
+      setMessage(`Password must include ${missingRequirements}.`);
+      return;
+    }
 
     const endpoint = isRegistering ? "register" : "login";
     const payload = isRegistering
@@ -146,12 +190,14 @@ export default function AuthPage({ initialMode = "login" }) {
       });
 
       if (isRegistering) {
-        // After successful registration, switch back to login so the user can
-        // immediately sign in with the new account.
-        setMessage("Account created. Please log in.");
-        setIsRegistering(false);
-        setLegalConsent(false);
-        setPassword("");
+        setRegistrationChallenge({
+          challengeId: data.challenge_id,
+          email: data.email || email,
+          maskedEmail: data.masked_email,
+          expiresInSeconds: data.expires_in_seconds,
+        });
+        setRegistrationOtpCode("");
+        setMessage(data.message || "Verification code sent to your email.");
         return;
       }
 
@@ -187,6 +233,45 @@ export default function AuthPage({ initialMode = "login" }) {
       setMessage(getDiagnosticAuthErrorMessage(requestError));
     }
   };
+
+  const handleRegistrationOtpSubmit = async (event) => {
+    event.preventDefault();
+    const cleanedCode = registrationOtpCode.replace(/\D/g, "").slice(0, 6);
+    if (cleanedCode.length !== 6) {
+      setMessage("Enter the 6-digit email verification code.");
+      return;
+    }
+
+    try {
+      const data = await apiRequest("/api/register/verify", {
+        method: "POST",
+        skipAuthRefresh: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challenge_id: registrationChallenge.challengeId,
+          email: registrationChallenge.email,
+          code: cleanedCode,
+        }),
+      });
+      setMessage(data.message || "Account created. Please log in.");
+      setRegistrationChallenge(null);
+      setRegistrationOtpCode("");
+      setIsRegistering(false);
+      setLegalConsent(false);
+      setPassword("");
+      setConfirmPassword("");
+    } catch (requestError) {
+      setMessage(requestError?.message || "Invalid verification code.");
+    }
+  };
+
+  function resetRegistrationOtpFlow() {
+    setRegistrationChallenge(null);
+    setRegistrationOtpCode("");
+    setPassword("");
+    setConfirmPassword("");
+    setMessage("");
+  }
 
   const handleTotpSubmit = async (event) => {
     event.preventDefault();
@@ -304,40 +389,74 @@ export default function AuthPage({ initialMode = "login" }) {
             </p>
           </div>
 
-          {isTotpStep ? (
+          {isRegistrationOtpStep ? (
+            <form onSubmit={handleRegistrationOtpSubmit}>
+              <div className="admin-notice" style={{ marginBottom: "18px" }}>
+                A 6-digit verification code was sent to{" "}
+                <strong>{registrationChallenge.maskedEmail || registrationChallenge.email}</strong>.
+                Enter it below to finish creating your account.
+              </div>
+              <div style={{ marginBottom: "18px" }}>
+                <label className="field-label" htmlFor="registration-otp-code">
+                  Email verification code
+                </label>
+                <input
+                  id="registration-otp-code"
+                  className="auth-input"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={registrationOtpCode}
+                  onChange={(event) =>
+                    setRegistrationOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  required
+                  style={{ textAlign: "center", letterSpacing: "0.35em" }}
+                />
+              </div>
+              <button className="btn-luxury" type="submit" style={{ width: "100%" }}>
+                Verify Email & Create Account
+              </button>
+              <div style={{ textAlign: "center", marginTop: "16px" }}>
+                <button
+                  type="button"
+                  className="auth-switch"
+                  onClick={resetRegistrationOtpFlow}
+                >
+                  Back to registration
+                </button>
+              </div>
+            </form>
+          ) : isTotpStep ? (
             <form onSubmit={handleTotpSubmit}>
-              {totpChallenge.needsSetup ? (
-                <>
-                  <div className="admin-notice" style={{ marginBottom: "18px" }}>
-                    Admin accounts require Google Authenticator. Scan this QR code,
-                    then enter the 6-digit code from your app.
-                  </div>
-                  {totpSetupLoading ? (
-                    <p className="muted" style={{ textAlign: "center" }}>
-                      Preparing authenticator setup...
-                    </p>
-                  ) : totpSetupError ? (
-                    <div className="error-banner" style={{ marginBottom: 18 }}>
-                      {totpSetupError}
-                    </div>
-                  ) : totpSetup?.qr_code ? (
-                    <div style={{ display: "grid", gap: 12, marginBottom: 18, textAlign: "center" }}>
-                      <img
-                        alt="Google Authenticator QR code"
-                        src={totpSetup.qr_code}
-                        style={{ width: 180, height: 180, margin: "0 auto", borderRadius: 18 }}
-                      />
-                      <p className="muted" style={{ margin: 0, wordBreak: "break-all" }}>
-                        Manual key: <strong>{totpSetup.secret}</strong>
-                      </p>
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <div className="admin-notice" style={{ marginBottom: "18px" }}>
-                  Enter the 6-digit code from Google Authenticator to continue.
+              <div className="admin-notice" style={{ marginBottom: "18px" }}>
+                {totpChallenge.needsSetup
+                  ? "Admin accounts require Google Authenticator. Scan this QR code, then enter the 6-digit code from your app."
+                  : "Scan this QR code in Google Authenticator if this device is not enrolled yet, then enter the current 6-digit code to continue."}
+              </div>
+              {totpSetupLoading ? (
+                <p className="muted" style={{ textAlign: "center" }}>
+                  Preparing authenticator QR code...
+                </p>
+              ) : totpSetupError ? (
+                <div className="error-banner" style={{ marginBottom: 18 }}>
+                  {totpSetupError}
                 </div>
-              )}
+              ) : totpSetup?.qr_code ? (
+                <div style={{ display: "grid", gap: 12, marginBottom: 18, textAlign: "center" }}>
+                  <img
+                    alt="Google Authenticator QR code"
+                    src={totpSetup.qr_code}
+                    style={{ width: 180, height: 180, margin: "0 auto", borderRadius: 18 }}
+                  />
+                  <p className="muted" style={{ margin: 0, wordBreak: "break-all" }}>
+                    Manual key: <strong>{totpSetup.secret}</strong>
+                  </p>
+                </div>
+              ) : null}
               <div style={{ marginBottom: "18px" }}>
                 <label className="field-label" htmlFor="totp-code">
                   Authenticator Code
@@ -475,7 +594,44 @@ export default function AuthPage({ initialMode = "login" }) {
                 onChange={(event) => setPassword(event.target.value)}
                 required
               />
+              {isRegistering && (
+                <div
+                  className="muted"
+                  style={{
+                    display: "grid",
+                    gap: 6,
+                    marginTop: 10,
+                    fontSize: "0.84rem",
+                  }}
+                >
+                  {passwordChecklist.map((item) => (
+                    <span
+                      key={item.label}
+                      style={{ color: item.met ? "#2f7d4f" : "inherit" }}
+                    >
+                      {item.met ? "✓" : "•"} {item.label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {isRegistering && (
+              <div style={{ marginBottom: "18px" }}>
+                <label className="field-label" htmlFor="confirm-password">
+                  Confirm Password
+                </label>
+                <input
+                  id="confirm-password"
+                  className="auth-input"
+                  type="password"
+                  placeholder="Re-enter your password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                />
+              </div>
+            )}
 
             {!isRegistering && (
               <div style={{ textAlign: "right", margin: "-8px 0 18px" }}>
@@ -566,7 +722,7 @@ export default function AuthPage({ initialMode = "login" }) {
             </form>
           )}
 
-          {!isOtpStep && !isTotpStep ? (
+          {!isRegistrationOtpStep && !isOtpStep && !isTotpStep ? (
             <div style={{ textAlign: "center", marginTop: "16px" }}>
               {/* Toggle the form mode without navigating away from the page. */}
               <button
@@ -576,6 +732,8 @@ export default function AuthPage({ initialMode = "login" }) {
                   setMessage("");
                   setLegalConsent(false);
                   setPrivacyNoticeSeen(false);
+                  setRegistrationChallenge(null);
+                  setRegistrationOtpCode("");
                   setIsRegistering((current) => !current);
                 }}
               >
@@ -587,7 +745,7 @@ export default function AuthPage({ initialMode = "login" }) {
           ) : null}
 
           {message && <div className="error-banner">{message}</div>}
-          {isRegistering && !privacyNoticeSeen ? (
+          {isRegistering && !isRegistrationOtpStep && !privacyNoticeSeen ? (
             <p className="muted" style={{ marginTop: "12px", fontSize: "0.86rem" }}>
               Review the privacy notice before creating an account.
             </p>

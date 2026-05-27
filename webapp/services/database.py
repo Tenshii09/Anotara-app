@@ -266,6 +266,247 @@ def get_user_auth_record_by_id_and_email(user_id, email):
         db.close()
 
 
+def ensure_login_attempt_table():
+    """Create identifier-scoped failed password attempt tracking."""
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS login_attempt_locks (
+                identifier_hash CHAR(64) PRIMARY KEY,
+                identifier      VARCHAR(120) NOT NULL,
+                failed_count    INT NOT NULL DEFAULT 0,
+                locked_until    DATETIME NULL,
+                last_failed_at  DATETIME NULL,
+                created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+            """
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def _login_identifier_key(identifier):
+    normalized = str(identifier or '').strip().lower()
+    return normalized, hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+
+def get_login_attempt_lock(identifier):
+    """Return the active cooldown state for a login identifier."""
+    ensure_login_attempt_table()
+    normalized, identifier_hash = _login_identifier_key(identifier)
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT identifier_hash, identifier, failed_count, locked_until, last_failed_at
+            FROM login_attempt_locks
+            WHERE identifier_hash = %s
+            """,
+            (identifier_hash,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        locked_until = row.get('locked_until')
+        if locked_until and locked_until <= datetime.utcnow():
+            clear_login_attempt_lock(normalized)
+            return None
+        return row
+    finally:
+        cursor.close()
+        db.close()
+
+
+def record_failed_login_attempt(identifier, *, max_attempts=3, cooldown_seconds=60):
+    """Increment failed password attempts and start cooldown when needed."""
+    ensure_login_attempt_table()
+    normalized, identifier_hash = _login_identifier_key(identifier)
+    lock_until_expression = (
+        f"CASE WHEN failed_count + 1 >= %s THEN DATE_ADD(UTC_TIMESTAMP(), INTERVAL {int(cooldown_seconds)} SECOND) ELSE NULL END"
+    )
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            f"""
+            INSERT INTO login_attempt_locks
+                (identifier_hash, identifier, failed_count, locked_until, last_failed_at)
+            VALUES (%s, %s, 1, NULL, UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE
+                identifier = VALUES(identifier),
+                failed_count = CASE
+                    WHEN locked_until IS NOT NULL AND locked_until > UTC_TIMESTAMP() THEN failed_count
+                    ELSE failed_count + 1
+                END,
+                locked_until = CASE
+                    WHEN locked_until IS NOT NULL AND locked_until > UTC_TIMESTAMP() THEN locked_until
+                    ELSE {lock_until_expression}
+                END,
+                last_failed_at = UTC_TIMESTAMP()
+            """,
+            (identifier_hash, normalized, int(max_attempts)),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+    return get_login_attempt_lock(normalized)
+
+
+def clear_login_attempt_lock(identifier):
+    """Clear failed password attempts after a successful password check."""
+    ensure_login_attempt_table()
+    _, identifier_hash = _login_identifier_key(identifier)
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM login_attempt_locks WHERE identifier_hash = %s",
+            (identifier_hash,),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def ensure_registration_otp_table():
+    """Create pending account registration OTP challenges."""
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS registration_otp_challenges (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                username        VARCHAR(50) NOT NULL,
+                email           VARCHAR(100) NOT NULL,
+                password_hash   VARCHAR(255) NOT NULL,
+                code_hash       CHAR(64) NOT NULL,
+                legal_consent   BOOLEAN NOT NULL DEFAULT FALSE,
+                expires_at      DATETIME NOT NULL,
+                consumed_at     DATETIME NULL,
+                attempts        INT NOT NULL DEFAULT 0,
+                created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_registration_otp_email_created (email, created_at),
+                INDEX idx_registration_otp_username_created (username, created_at),
+                INDEX idx_registration_otp_expires (expires_at)
+            )
+            """
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def create_registration_otp_challenge(username, email, password_hash, code_hash, expires_at, legal_consent):
+    """Persist a pending registration and expire older matching challenges."""
+    ensure_registration_otp_table()
+    normalized_email = str(email or '').strip().lower()
+    normalized_username = str(username or '').strip()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE registration_otp_challenges
+            SET consumed_at = CURRENT_TIMESTAMP
+            WHERE consumed_at IS NULL
+                AND (LOWER(email) = %s OR username = %s)
+            """,
+            (normalized_email, normalized_username),
+        )
+        cursor.execute(
+            """
+            INSERT INTO registration_otp_challenges
+                (username, email, password_hash, code_hash, legal_consent, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                normalized_username,
+                normalized_email,
+                str(password_hash),
+                str(code_hash),
+                bool(legal_consent),
+                expires_at,
+            ),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+        db.close()
+
+
+def get_registration_otp_challenge(challenge_id, email):
+    """Return one pending registration OTP challenge."""
+    ensure_registration_otp_table()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT id, username, email, password_hash, code_hash, legal_consent,
+                   expires_at, consumed_at, attempts
+            FROM registration_otp_challenges
+            WHERE id = %s AND LOWER(email) = %s
+            """,
+            (int(challenge_id), str(email or '').strip().lower()),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def mark_registration_otp_attempt(challenge_id):
+    """Increment failed pending-registration OTP attempts."""
+    ensure_registration_otp_table()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE registration_otp_challenges
+            SET attempts = attempts + 1
+            WHERE id = %s
+            """,
+            (int(challenge_id),),
+        )
+        db.commit()
+    finally:
+        cursor.close()
+        db.close()
+
+
+def consume_registration_otp_challenge(challenge_id):
+    """Mark a successful pending-registration OTP challenge as consumed."""
+    ensure_registration_otp_table()
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE registration_otp_challenges
+            SET consumed_at = CURRENT_TIMESTAMP
+            WHERE id = %s AND consumed_at IS NULL
+            """,
+            (int(challenge_id),),
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+        db.close()
+
+
 def ensure_login_otp_table():
     """Create the short-lived login OTP challenge table."""
     ensure_user_columns()

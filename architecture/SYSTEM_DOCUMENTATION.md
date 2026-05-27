@@ -17,8 +17,9 @@ Core Product Features
 - Passwords are hashed with bcrypt.
 - Forgot-password and profile-initiated password changes use POST /api/password-reset/request to send a registered-email reset link. Links are signed with itsdangerous, expire after 30 minutes, include a password-hash fingerprint so they cannot be reused after a successful reset, and are delivered through the transactional email queue.
 - Reset links are standardized as `/reset-password?token=<signed-token>` using `http://localhost:5173` as the frontend base URL. The React reset page extracts the token with `useSearchParams`, validates links with GET /api/password-reset/validate/<token>, and submits `{ token, newPassword }` to POST /api/password-reset/confirm, where the backend validates the token, hashes the replacement password with bcrypt, updates MySQL, and sends a security confirmation email.
-- Registration requires explicit Terms of Service and Privacy Policy consent; the React registration form blocks submission until consent is checked, opens Terms/Privacy/Privacy Notice modals, and the backend validates `legal_consent: true` before recording `legal_consent`, `terms_accepted_at`, and `privacy_accepted_at` on the user row.
+- Registration requires explicit Terms of Service and Privacy Policy consent, password complexity validation, and email ownership verification. New passwords must include at least 8 characters, uppercase, lowercase, number, and special character checks in both React and Flask before POST /api/register stores a pending `registration_otp_challenges` row with the bcrypt-hashed password and sends a 5-minute email OTP; POST /api/register/verify consumes the challenge, creates the user row, and records `legal_consent`, `terms_accepted_at`, and `privacy_accepted_at`.
 - Password login now has a second-factor interception step before a final JWT/session is issued. Standard users receive a 6-digit email OTP stored in `login_otp_challenges` as a hash with a 5-minute expiry; POST /api/verify-otp consumes the challenge and returns the access token + refresh cookie.
+- Password login tracks consecutive wrong-password attempts per normalized username/email in `login_attempt_locks`; after 3 failed password checks for the same identifier, the backend returns HTTP 429 and enforces a 1-minute cooldown before another password attempt.
 - Admin and super-admin users use Google Authenticator TOTP instead of email OTP. Password success creates a short-lived password-verified TOTP challenge; if `totp_enabled` is false the frontend shows an authenticator setup flow, otherwise it asks for the current authenticator code. Final admin access is issued only after POST /api/totp/enable or POST /api/totp/verify succeeds.
 - Login and registration are rate-limited to 5 attempts per minute via Flask-Limiter.
 - Sensitive routes use reusable live-database RBAC decorators such as `requires_role('admin')`, so suspended accounts or stale JWT role claims cannot retain privileged access.
@@ -31,6 +32,8 @@ Core Product Features
 - Profile management endpoints:
   - POST /api/refresh (exchange HttpOnly refresh cookie for a new access token)
   - POST /api/logout (clear JWT cookies)
+  - POST /api/register (validate registration details and send a pending-account email OTP)
+  - POST /api/register/verify (verify pending-account email OTP, create the account, and send the welcome email)
   - POST /api/verify-otp (verify standard-user email OTP and issue the final session)
   - POST /api/totp/generate (admin-only authenticator setup QR + secret)
   - POST /api/totp/enable (verify setup code, persist `totp_secret`, and issue the final session)
@@ -156,7 +159,7 @@ Core Product Features
 - The admin frontend is split into a shell plus focused admin modules under `frontend/src/components/admin/`, so shared primitives, page views, and page-specific data loading are not coupled into one route component.
 - The frontend checks the stored JWT/profile role for navigation UX, while all admin operations are enforced again on the Flask backend through live database role checks.
 - Roles are `user`, `admin`, and `super_admin`. Only `super_admin` can promote or demote admin accounts, edit super-admin settings, or restore database backups. Admins can manage content, view analytics, suspend/reactivate accounts, review audit history, review email delivery state, inspect weather alerts, create/download backups, send operational notifications, and request ML retraining.
-- Admin and super-admin accounts must complete Google Authenticator TOTP. First-time admin sign-in returns `requires_totp_setup`; the React auth page calls `/api/totp/generate`, renders the QR code from a base64 data URL, verifies the app code through `/api/totp/enable`, and then receives the final JWT. Subsequent admin sign-ins return `requires_totp` and complete through `/api/totp/verify`.
+- Admin and super-admin accounts must complete Google Authenticator TOTP. First-time admin sign-in returns `requires_totp_setup`; the React auth page calls `/api/totp/generate`, renders the QR code from a base64 data URL, verifies the app code through `/api/totp/enable`, and then receives the final JWT. Subsequent admin sign-ins return `requires_totp`, still render the stored authenticator QR/manual key for device enrollment, and complete through `/api/totp/verify`.
 - Suspended accounts are blocked during login and cannot use protected routes after their database status is changed.
 - Admin APIs:
   - GET /api/admin/overview returns command-center metrics, model status, and recent audit events.

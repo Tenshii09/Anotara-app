@@ -31,24 +31,32 @@ from webapp.security_utils import (
     USERNAME_PATTERN,
     parse_json_payload,
     validate_string_field,
+    validate_password_strength,
 )
 from webapp.services.email_service import queue_email
 from webapp.services.database import (
+    clear_login_attempt_lock,
+    consume_registration_otp_challenge,
     create_user_account,
     create_login_otp_challenge,
     create_login_totp_challenge,
+    create_registration_otp_challenge,
     consume_login_otp_challenge,
     delete_user_account,
     enable_user_totp,
     ensure_user_columns,
     get_admin_user_for_totp_challenge,
+    get_login_attempt_lock,
     get_login_otp_challenge,
+    get_registration_otp_challenge,
     get_db,
     get_user_auth_record_by_email,
     get_user_auth_record_by_id_and_email,
     get_user_profile,
     log_audit_event,
     mark_login_otp_attempt,
+    mark_registration_otp_attempt,
+    record_failed_login_attempt,
     update_user_profile,
     update_user_preferences,
     update_user_password,
@@ -61,6 +69,9 @@ OTP_CODE_LENGTH = 6
 OTP_MAX_ATTEMPTS = 5
 ADMIN_ROLES = {'admin', 'super_admin'}
 TOTP_CHALLENGE_MINUTES = 10
+LOGIN_LOCK_MAX_ATTEMPTS = 3
+LOGIN_LOCK_SECONDS = 60
+REGISTRATION_OTP_MINUTES = 5
 
 
 def _build_login_response(user):
@@ -136,6 +147,20 @@ def _qr_code_data_url(provisioning_uri):
     return f'data:image/png;base64,{encoded}'
 
 
+def _build_totp_setup_payload(secret, challenge):
+    account_name = challenge.get('email') or challenge.get('username') or f"user-{challenge['id']}"
+    provisioning_uri = pyotp.TOTP(secret).provisioning_uri(
+        name=account_name,
+        issuer_name='Ano-Tara!',
+    )
+    return {
+        'secret': secret,
+        'provisioning_uri': provisioning_uri,
+        'qr_code': _qr_code_data_url(provisioning_uri),
+        'already_enabled': bool(challenge.get('totp_enabled')),
+    }
+
+
 def _generate_otp_code():
     """Return a cryptographically random six-digit numeric OTP."""
     return f'{secrets.randbelow(1_000_000):06d}'
@@ -158,6 +183,23 @@ def _send_login_otp(user, code, expires_minutes):
         'priority': 5,
         'context': {
             'username': user.get('username'),
+            'otp_code': code,
+            'expires_minutes': expires_minutes,
+        },
+    })
+
+
+def _send_registration_otp(username, email, code, expires_minutes):
+    """Deliver the account creation OTP before the user row exists."""
+    return queue_email({
+        'recipient_email': email,
+        'recipient_name': username,
+        'subject': 'Verify your Ano Tara account email',
+        'template_name': 'registration_otp',
+        'category': 'security',
+        'priority': 5,
+        'context': {
+            'username': username,
             'otp_code': code,
             'expires_minutes': expires_minutes,
         },
@@ -248,7 +290,7 @@ def _get_active_user_for_otp(user_id):
 @auth_bp.route('/api/register', methods=['POST'])
 @limiter.limit('5 per minute')
 def api_register():
-    """Create a new user account if the username and email are available."""
+    """Start account creation by emailing a verification OTP."""
     data, error_response, status_code = parse_json_payload()
     if error_response:
         return error_response, status_code
@@ -278,22 +320,119 @@ def api_register():
     password, error = validate_string_field(data, 'password', min_length=8, max_length=128)
     if error:
         return jsonify({'error': error}), 400
+    password_strength_error = validate_password_strength(password)
+    if password_strength_error:
+        return jsonify({'error': password_strength_error}), 400
 
     if data.get('legal_consent') is not True:
         return jsonify({'error': 'Terms of Service and Privacy Policy consent is required'}), 400
 
-    hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
     try:
-        user_id = create_user_account(username, email, hashed_pw, legal_consent=True)
+        cursor.execute(
+            'SELECT id FROM users WHERE username = %s OR LOWER(email) = %s',
+            (username, email.lower()),
+        )
+        if cursor.fetchone():
+            return jsonify({'error': 'Username/Email taken'}), 409
+    finally:
+        db.close()
+
+    code = _generate_otp_code()
+    expires_at = datetime.utcnow() + timedelta(minutes=REGISTRATION_OTP_MINUTES)
+    hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+    challenge_id = create_registration_otp_challenge(
+        username,
+        email,
+        hashed_pw,
+        _hash_otp_code(code),
+        expires_at,
+        legal_consent=True,
+    )
+    delivery = _send_registration_otp(username, email, code, REGISTRATION_OTP_MINUTES)
+    if delivery.get('skipped') or delivery.get('sent') is False:
+        _audit('auth.register.otp_send', outcome='failure', payload={'email': email})
+        return jsonify({'error': 'Could not send verification code. Please try again later.'}), 503
+
+    _audit('auth.register.otp_send', payload={'email': email, 'challenge_id': challenge_id})
+    return jsonify({
+        'requires_registration_otp': True,
+        'challenge_id': challenge_id,
+        'email': email,
+        'masked_email': _mask_email(email),
+        'expires_in_seconds': REGISTRATION_OTP_MINUTES * 60,
+        'message': 'Verification code sent to your email.',
+    }), 200
+
+
+@auth_bp.route('/api/register/verify', methods=['POST'])
+@limiter.limit('10 per minute')
+def api_register_verify():
+    """Verify a pending registration email OTP and create the user account."""
+    data, error_response, status_code = parse_json_payload()
+    if error_response:
+        return error_response, status_code
+
+    try:
+        challenge_id = int(data.get('challenge_id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid registration challenge'}), 400
+
+    email, error = validate_string_field(
+        data,
+        'email',
+        min_length=5,
+        max_length=100,
+        pattern=EMAIL_PATTERN,
+    )
+    if error:
+        return jsonify({'error': error}), 400
+
+    code, error = validate_string_field(data, 'code', min_length=OTP_CODE_LENGTH, max_length=OTP_CODE_LENGTH)
+    if error:
+        return jsonify({'error': error}), 400
+
+    challenge = get_registration_otp_challenge(challenge_id, email)
+    if not challenge or challenge.get('consumed_at'):
+        return jsonify({'error': 'Invalid verification code'}), 400
+
+    expires_at = challenge.get('expires_at')
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if not expires_at or expires_at < datetime.utcnow():
+        _audit('auth.register.otp_verify', outcome='failure', payload={'reason': 'expired'})
+        return jsonify({'error': 'Verification code expired. Please register again.'}), 400
+
+    if int(challenge.get('attempts') or 0) >= OTP_MAX_ATTEMPTS:
+        _audit('auth.register.otp_verify', outcome='blocked', payload={'reason': 'too_many_attempts'})
+        return jsonify({'error': 'Too many verification attempts. Please register again.'}), 400
+
+    expected_hash = str(challenge.get('code_hash') or '')
+    provided_hash = _hash_otp_code(code)
+    if not code.isdigit() or not hmac.compare_digest(expected_hash, provided_hash):
+        mark_registration_otp_attempt(challenge_id)
+        _audit('auth.register.otp_verify', outcome='failure')
+        return jsonify({'error': 'Invalid verification code'}), 400
+
+    try:
+        if not consume_registration_otp_challenge(challenge_id):
+            return jsonify({'error': 'Invalid verification code'}), 400
+        user_id = create_user_account(
+            challenge['username'],
+            challenge['email'],
+            challenge['password_hash'],
+            legal_consent=bool(challenge.get('legal_consent')),
+        )
         _audit('auth.register', actor_id=user_id, target_type='user', target_id=user_id)
         queue_email({
             'recipient_user_id': user_id,
-            'recipient_email': email,
-            'recipient_name': username,
+            'recipient_email': challenge['email'],
+            'recipient_name': challenge['username'],
             'subject': 'Welcome to Ano Tara!',
             'template_name': 'welcome',
             'category': 'messages',
-            'context': {'username': username},
+            'context': {'username': challenge['username']},
         })
         return jsonify({'message': 'Account created'}), 201
     except mysql.connector.IntegrityError:
@@ -317,6 +456,18 @@ def api_login():
     if error:
         return jsonify({'error': error}), 400
 
+    active_lock = get_login_attempt_lock(identifier)
+    if active_lock and active_lock.get('locked_until'):
+        locked_until = active_lock['locked_until']
+        if isinstance(locked_until, str):
+            locked_until = datetime.fromisoformat(locked_until)
+        retry_seconds = max(1, int((locked_until - datetime.utcnow()).total_seconds()))
+        _audit('auth.login', outcome='blocked', payload={'identifier': identifier[:100], 'reason': 'password_cooldown'})
+        return jsonify({
+            'error': f'Too many wrong password attempts. Please wait {retry_seconds} seconds before trying again.',
+            'retry_after_seconds': retry_seconds,
+        }), 429
+
     db = get_db()
     cursor = db.cursor(dictionary=True)
     cursor.execute('SELECT * FROM users WHERE username = %s OR email = %s', (identifier, identifier))
@@ -328,6 +479,7 @@ def api_login():
         return jsonify({'error': 'This account is suspended. Please contact an administrator.'}), 403
 
     if user and bcrypt.check_password_hash(user['password'], password):
+        clear_login_attempt_lock(identifier)
         if _is_admin_role(user.get('role')):
             _audit('auth.login.password_verified', actor_id=user.get('id'), payload={'mfa': 'totp'})
             return _build_totp_challenge_response(user)
@@ -353,6 +505,21 @@ def api_login():
             'expires_in_seconds': expires_minutes * 60,
             'message': 'Verification code sent to your email.',
         }), 200
+    failed_lock = record_failed_login_attempt(
+        identifier,
+        max_attempts=LOGIN_LOCK_MAX_ATTEMPTS,
+        cooldown_seconds=LOGIN_LOCK_SECONDS,
+    )
+    locked_until = failed_lock.get('locked_until') if failed_lock else None
+    if locked_until:
+        if isinstance(locked_until, str):
+            locked_until = datetime.fromisoformat(locked_until)
+        retry_seconds = max(1, int((locked_until - datetime.utcnow()).total_seconds()))
+        _audit('auth.login', outcome='blocked', payload={'identifier': identifier[:100], 'reason': 'password_cooldown_started'})
+        return jsonify({
+            'error': f'Too many wrong password attempts. Please wait {retry_seconds} seconds before trying again.',
+            'retry_after_seconds': retry_seconds,
+        }), 429
     _audit('auth.login', outcome='failure', payload={'identifier': identifier[:100]})
     return jsonify({'error': 'Invalid credentials'}), 401
 
@@ -369,17 +536,11 @@ def api_totp_generate():
     if error_response:
         return error_response, status_code
 
-    if bool(challenge.get('totp_enabled')) and challenge.get('totp_secret'):
-        return jsonify({'error': 'Authenticator is already enabled.'}), 400
-
     try:
-        secret = pyotp.random_base32()
-        account_name = challenge.get('email') or challenge.get('username') or f"user-{challenge['id']}"
-        provisioning_uri = pyotp.TOTP(secret).provisioning_uri(
-            name=account_name,
-            issuer_name='Ano-Tara!',
-        )
-        qr_code = _qr_code_data_url(provisioning_uri)
+        if bool(challenge.get('totp_enabled')) and challenge.get('totp_secret'):
+            setup_payload = _build_totp_setup_payload(challenge['totp_secret'], challenge)
+        else:
+            setup_payload = _build_totp_setup_payload(pyotp.random_base32(), challenge)
     except Exception as error:
         current_app.logger.exception('Could not generate TOTP QR code: %s', error)
         _audit('auth.totp.generate', actor_id=challenge['id'], outcome='failure')
@@ -389,11 +550,7 @@ def api_totp_generate():
         }), 500
 
     _audit('auth.totp.generate', actor_id=challenge['id'])
-    return jsonify({
-        'secret': secret,
-        'provisioning_uri': provisioning_uri,
-        'qr_code': qr_code,
-    }), 200
+    return jsonify(setup_payload), 200
 
 
 @auth_bp.route('/api/totp/enable', methods=['POST'])
