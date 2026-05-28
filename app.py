@@ -32,6 +32,8 @@ CORS(
     origins=_cors_origins,
     supports_credentials=True,
     allow_headers=['Content-Type', 'Authorization', 'X-CSRF-TOKEN'],
+    methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    expose_headers=['Content-Type'],
 )
 if app.config.get('DEBUG'):
     app.logger.info('CORS allowed origins: %s', _cors_origins)

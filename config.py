@@ -36,31 +36,39 @@ def _normalize_origin(url):
 
 
 def _cors_origins():
-    raw_origins = os.environ.get('CORS_ORIGINS', '').strip()
-    if raw_origins:
-        return sorted({
-            _normalize_origin(origin)
-            for origin in raw_origins.split(',')
-            if _normalize_origin(origin) and _normalize_origin(origin) != '*'
-        })
+    """Build the allowlist for cross-origin browser requests.
 
+    FRONTEND_URL is always included. CORS_ORIGINS adds more entries (comma-separated).
+    """
     frontend_url = _normalize_origin(
         os.environ.get('FRONTEND_URL', 'http://127.0.0.1:5173')
     )
     environment = os.environ.get('FLASK_ENV') or os.environ.get('APP_ENV') or 'development'
+    origins = set()
+
+    if frontend_url and frontend_url != '*':
+        origins.add(frontend_url)
+
+    raw_origins = os.environ.get('CORS_ORIGINS', '').strip()
+    if raw_origins:
+        origins.update(
+            _normalize_origin(origin)
+            for origin in raw_origins.split(',')
+            if _normalize_origin(origin) and _normalize_origin(origin) != '*'
+        )
+
     if environment.lower() in {'production', 'prod'}:
-        if not frontend_url or frontend_url == '*':
+        if not origins:
             raise RuntimeError(
                 'FRONTEND_URL must be set to your deployed SPA origin in production '
-                '(for example https://anotara.vercel.app).'
+                '(for example https://anotara-app.vercel.app).'
             )
-        return [frontend_url]
+        return sorted(origins)
 
-    origins = {
-        frontend_url,
+    origins.update({
         'http://localhost:5173',
         'http://127.0.0.1:5173',
-    }
+    })
     return sorted(origin for origin in origins if origin and origin != '*')
 
 
