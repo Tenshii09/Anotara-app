@@ -47,7 +47,7 @@ export async function apiRequest(path, options = {}) {
   async function sendRequest(authToken) {
     return fetch(`${baseUrl}${requestPath}`, {
       ...restOptions,
-      credentials: restOptions.credentials || "include",
+      credentials: restOptions.credentials ?? "omit",
       headers: {
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         ...headers,

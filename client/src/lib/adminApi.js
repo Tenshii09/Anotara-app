@@ -173,7 +173,7 @@ export function sendAdminNotification(token, payload) {
 
   return fetch(`${baseURL}/api/send-notification`, {
     method: "POST",
-    credentials: "include",
+    credentials: "omit",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
