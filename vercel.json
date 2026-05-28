@@ -1,6 +1,5 @@
 {
   "framework": "vite",
   "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "rootDirectory": "client"
+  "outputDirectory": "dist"
 }
