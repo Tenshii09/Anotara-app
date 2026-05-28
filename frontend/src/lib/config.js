@@ -1,6 +1,7 @@
 // Central place for frontend runtime configuration.
-// Vite exposes only variables prefixed with VITE_, so these values must live in
-// frontend/.env.local (preferred) or frontend/.env.
+// Vite exposes only variables prefixed with VITE_:
+//   dev:  frontend/.env.local or frontend/.env
+//   prod: frontend/.env.production (picked up by `npm run build`)
 const PLACEHOLDER_ENV_VALUE = "PASTE_YOUR_KEY_HERE";
 
 function readEnv(name) {

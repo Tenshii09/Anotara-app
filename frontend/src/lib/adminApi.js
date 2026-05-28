@@ -1,4 +1,5 @@
 import { apiRequest } from "./apiClient";
+import { API_BASE_URL } from "./config";
 
 export function getAdminOverview(token) {
   return apiRequest("/api/admin/overview", { token });
@@ -168,9 +169,7 @@ export function getAdminWeatherOps(token, filters = {}) {
 }
 
 export function sendAdminNotification(token, payload) {
-  const baseURL = String(
-    import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5000",
-  ).replace(/\/+$/, "");
+  const baseURL = String(API_BASE_URL || "").replace(/\/+$/, "");
 
   return fetch(`${baseURL}/api/send-notification`, {
     method: "POST",

@@ -24,13 +24,17 @@ from webapp.services.weather_monitor import run_weather_monitor
 
 app = Flask(__name__)
 app.config.from_object(Config)
-# Configure the app once, then register the shared extension instances.
+# Lock CORS to Config.CORS_ORIGINS (FRONTEND_URL / CORS_ORIGINS from .env via config.py).
+# supports_credentials is required for HttpOnly refresh cookies on /api/refresh.
+_cors_origins = app.config.get('CORS_ORIGINS', [])
 CORS(
     app,
-    origins=app.config.get('CORS_ORIGINS', []),
+    origins=_cors_origins,
     supports_credentials=True,
     allow_headers=['Content-Type', 'Authorization', 'X-CSRF-TOKEN'],
 )
+if app.config.get('DEBUG'):
+    app.logger.info('CORS allowed origins: %s', _cors_origins)
 bcrypt.init_app(app)
 jwt.init_app(app)
 limiter.init_app(app)

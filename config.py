@@ -30,13 +30,38 @@ def _required_secret(name):
     return secrets.token_urlsafe(48)
 
 
+def _normalize_origin(url):
+    """Strip trailing slashes so CORS origin matching stays consistent."""
+    return str(url or '').strip().rstrip('/')
+
+
 def _cors_origins():
     raw_origins = os.environ.get('CORS_ORIGINS', '').strip()
     if raw_origins:
-        return [origin.strip() for origin in raw_origins.split(',') if origin.strip()]
-    frontend_url = os.environ.get('FRONTEND_URL', 'http://127.0.0.1:5173').strip()
-    origins = {frontend_url, 'http://localhost:5173', 'http://127.0.0.1:5173'}
-    return sorted(origin for origin in origins if origin)
+        return sorted({
+            _normalize_origin(origin)
+            for origin in raw_origins.split(',')
+            if _normalize_origin(origin) and _normalize_origin(origin) != '*'
+        })
+
+    frontend_url = _normalize_origin(
+        os.environ.get('FRONTEND_URL', 'http://127.0.0.1:5173')
+    )
+    environment = os.environ.get('FLASK_ENV') or os.environ.get('APP_ENV') or 'development'
+    if environment.lower() in {'production', 'prod'}:
+        if not frontend_url or frontend_url == '*':
+            raise RuntimeError(
+                'FRONTEND_URL must be set to your deployed SPA origin in production '
+                '(for example https://anotara.vercel.app).'
+            )
+        return [frontend_url]
+
+    origins = {
+        frontend_url,
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+    }
+    return sorted(origin for origin in origins if origin and origin != '*')
 
 
 class Config:
