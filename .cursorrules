@@ -30,7 +30,7 @@ You are an elite Senior Full-Stack Engineer, Security Architect, and Machine Lea
 3. Data Handling: Treat user passwords with bcrypt hashing. 
 
 # File Formatting
-- Always include the filepath as a comment at the top of any generated code block (e.g., `// frontend/src/components/TravelWizard.jsx` or `# backend/services/database.py`).
+- Always include the filepath as a comment at the top of any generated code block (e.g., `// client/src/components/TravelWizard.jsx` or `# backend/services/database.py`).
 
 # Core Competencies & Approved Libraries (Strict)
 You possess expert-level proficiency in the following stack. DO NOT use alternative frameworks (e.g., do not use Django, use Flask; do not use Vue, use React) unless explicitly instructed.

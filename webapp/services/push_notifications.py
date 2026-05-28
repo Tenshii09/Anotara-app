@@ -278,7 +278,7 @@ def _fcm_rejection_reason(response_json):
         )
         return (
             f'{message}. The browser token was created by a different Firebase sender/project '
-            f'than backend project {configured_project}. Make frontend/.env Firebase values and '
+            f'than backend project {configured_project}. Make client/.env Firebase values and '
             f'the backend service-account JSON come from the same Firebase project, then re-register push.'
         )
     if error_code == 'THIRD_PARTY_AUTH_ERROR':
@@ -293,7 +293,7 @@ def _client_fcm_error_message(response_json):
     error_code = _fcm_error_code(response_json)
     if error_code == 'SENDER_ID_MISMATCH':
         return (
-            'Firebase project mismatch. Update frontend/.env to use the same Firebase project as '
+            'Firebase project mismatch. Update client/.env to use the same Firebase project as '
             'the backend service account, then restart Vite and re-register push notifications.'
         )
     if error_code == 'THIRD_PARTY_AUTH_ERROR':

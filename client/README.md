@@ -34,7 +34,7 @@ The backend also needs either `FIREBASE_SERVICE_ACCOUNT_JSON` or `FIREBASE_SERVI
 Setup steps:
 
 1. Create a Firebase project.
-2. Register the web app in Firebase and copy the config values into `frontend/.env`.
+2. Register the web app in Firebase and copy the config values into `client/.env`.
 3. Turn on Cloud Messaging and paste the public key into `VITE_FIREBASE_VAPID_KEY`.
 4. Add the backend service account JSON or file path to the root `.env`.
 5. Restart the Flask app and the Vite dev server.

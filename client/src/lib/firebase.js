@@ -33,8 +33,8 @@ export function getFirebaseRegistrationFailureReason() {
   if (!HAS_FIREBASE_CONFIG || !FIREBASE_VAPID_KEY) {
     const missingKeys = getMissingFirebaseConfigKeys();
     return missingKeys.length
-      ? `Missing or placeholder Firebase env vars in frontend/.env.local: ${missingKeys.join(", ")}`
-      : "Firebase Cloud Messaging is not configured in frontend/.env.local.";
+      ? `Missing or placeholder Firebase env vars in client/.env.local: ${missingKeys.join(", ")}`
+      : "Firebase Cloud Messaging is not configured in client/.env.local.";
   }
 
   if (lastPushRegistrationError) {
